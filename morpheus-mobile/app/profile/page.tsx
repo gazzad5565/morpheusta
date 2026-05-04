@@ -6,15 +6,23 @@ import { MC } from "@/lib/tokens";
 import { AppHeader, AppFooter } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
 import { getUser, signOut } from "@/lib/auth";
+import { getMyProfile, updateMyName, type Profile } from "@/lib/profiles-store";
 
 export default function ProfilePage() {
   const router = useRouter();
   const [email, setEmail] = useState<string>("");
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    getUser().then((u) => {
-      if (!cancelled) setEmail(u?.email || "");
+    Promise.all([getUser(), getMyProfile()]).then(([u, p]) => {
+      if (cancelled) return;
+      setEmail(u?.email || "");
+      setProfile(p);
+      setNameDraft(p?.name || "");
     });
     return () => {
       cancelled = true;
@@ -27,16 +35,37 @@ export default function ProfilePage() {
     window.location.href = "/login";
   };
 
-  // Take initials from the email's local part (chars before @) for the avatar
-  const initials = email
-    ? email
-        .split("@")[0]
-        .split(/[._-]/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((s) => s[0]?.toUpperCase())
-        .join("") || email[0].toUpperCase()
-    : "—";
+  const onSaveName = async () => {
+    setSaving(true);
+    const result = await updateMyName(nameDraft);
+    setSaving(false);
+    if (result.ok) {
+      setProfile((p) => (p ? { ...p, name: nameDraft.trim() || null } : p));
+      setEditingName(false);
+    } else {
+      alert(`Couldn't save: ${result.error}`);
+    }
+  };
+
+  const display =
+    profile?.name?.trim() || (email ? email.split("@")[0] : "—");
+
+  // Avatar initials prefer name (first letters of words), fall back to email
+  const initials = (() => {
+    if (profile?.name?.trim()) {
+      const words = profile.name.trim().split(/\s+/).filter(Boolean);
+      if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+      return words[0].slice(0, 2).toUpperCase();
+    }
+    if (!email) return "—";
+    return email
+      .split("@")[0]
+      .split(/[._-]/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((s) => s[0]?.toUpperCase())
+      .join("") || email[0].toUpperCase();
+  })();
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
@@ -73,20 +102,111 @@ export default function ProfilePage() {
             {initials}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontFamily: MC.fontDisplay,
-                fontSize: 17,
-                fontWeight: 700,
-                color: MC.ink,
-                letterSpacing: -0.3,
-              }}
-            >
-              {email || "Loading…"}
-            </div>
-            <div style={{ fontFamily: MC.font, fontSize: 12.5, color: MC.mute, marginTop: 2 }}>
-              Logged in
-            </div>
+            {editingName ? (
+              <>
+                <input
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  placeholder="Your name"
+                  autoFocus
+                  style={{
+                    width: "100%",
+                    fontFamily: MC.fontDisplay,
+                    fontSize: 17,
+                    fontWeight: 700,
+                    color: MC.ink,
+                    letterSpacing: -0.3,
+                    background: MC.bg,
+                    border: `1px solid ${MC.line}`,
+                    borderRadius: 8,
+                    padding: "6px 8px",
+                    outline: "none",
+                  }}
+                />
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <button
+                    type="button"
+                    onClick={onSaveName}
+                    disabled={saving}
+                    style={{
+                      padding: "5px 10px",
+                      borderRadius: 7,
+                      background: MC.brand,
+                      color: "#fff",
+                      border: "none",
+                      cursor: saving ? "not-allowed" : "pointer",
+                      fontFamily: MC.font,
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingName(false);
+                      setNameDraft(profile?.name || "");
+                    }}
+                    style={{
+                      padding: "5px 10px",
+                      borderRadius: 7,
+                      background: "transparent",
+                      color: MC.mute,
+                      border: `1px solid ${MC.line}`,
+                      cursor: "pointer",
+                      fontFamily: MC.font,
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div
+                  style={{
+                    fontFamily: MC.fontDisplay,
+                    fontSize: 17,
+                    fontWeight: 700,
+                    color: MC.ink,
+                    letterSpacing: -0.3,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {display}
+                  <button
+                    type="button"
+                    onClick={() => setEditingName(true)}
+                    aria-label="Edit name"
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: 4,
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Glyph name="info" size={13} color={MC.hint} />
+                  </button>
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 12.5,
+                    color: MC.mute,
+                    marginTop: 2,
+                  }}
+                >
+                  {email}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -4,75 +4,131 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
-import { SAMPLE, type Shift } from "@/lib/mock-data";
+import { type Shift } from "@/lib/mock-data";
 import { listRequestedShifts, removeRequestedShift } from "@/lib/shift-store";
+import {
+  listMyShiftsToday,
+  listUnassignedShiftsToday,
+  claimShift,
+} from "@/lib/shifts-store";
 import { AppHeader, AppFooter, CustomerTile, SectionLabel } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
 
+// A shift row from the DB carries internal id + repId alongside the display fields.
+type DbShift = Shift & { realId: string; repId: string | null };
+
 export default function ShiftsListPage() {
   const router = useRouter();
-  const [expandedId, setExpandedId] = useState<string | null>("gw");
-  // Read rep-requested shifts on mount (DB or localStorage fallback).
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Three lists, three sources:
+  // - mine:        shifts where rep_id = me, today (from shifts table)
+  // - unassigned:  shifts where rep_id IS NULL, today (claimable, from shifts table)
+  // - requested:   rep-requested shifts (from requested_shifts table)
+  const [mine, setMine] = useState<DbShift[]>([]);
+  const [unassigned, setUnassigned] = useState<DbShift[]>([]);
   const [requested, setRequested] = useState<Shift[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    listRequestedShifts().then((rows) => {
-      if (!cancelled) setRequested(rows);
+  const [loaded, setLoaded] = useState(false);
+  const [claiming, setClaiming] = useState<string | null>(null);
+
+  const reload = () => {
+    Promise.all([
+      listMyShiftsToday(),
+      listUnassignedShiftsToday(),
+      listRequestedShifts(),
+    ]).then(([m, u, r]) => {
+      setMine(m);
+      setUnassigned(u);
+      setRequested(r);
+      setLoaded(true);
     });
-    return () => {
-      cancelled = true;
-    };
+  };
+  useEffect(() => {
+    reload();
   }, []);
 
   const onCheckIn = () => router.push("/check-in");
+
+  const onClaim = async (shiftRealId: string) => {
+    setClaiming(shiftRealId);
+    const result = await claimShift(shiftRealId);
+    setClaiming(null);
+    if (result.ok) {
+      reload();
+    } else {
+      // eslint-disable-next-line no-console
+      console.warn("[shifts] claim failed:", result.error);
+      alert(`Couldn't claim that shift: ${result.error}`);
+    }
+  };
+
   const onRemoveRequested = (id: string) => {
-    // Optimistic UI: remove locally, then send to DB
     setRequested((rs) => rs.filter((r) => r.id !== id));
     removeRequestedShift(id);
   };
 
-  // Combined unscheduled = baseline + rep-requested. De-dup by id.
-  const baselineIds = new Set(SAMPLE.unscheduled.map((s) => s.id));
-  const todayIds = new Set(SAMPLE.shifts.map((s) => s.id));
-  const requestedNonDup = requested.filter(
-    (r) => !baselineIds.has(r.id) && !todayIds.has(r.id)
-  );
-  const allUnscheduled: Shift[] = [...SAMPLE.unscheduled, ...requestedNonDup];
+  // Combine unassigned (DB) + requested (separate table) for the Unscheduled section
+  const unassignedIds = new Set(unassigned.map((u) => u.id));
+  const requestedNonDup = requested.filter((r) => !unassignedIds.has(r.id));
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
       <AppHeader title="Today's Shifts" onBack={() => router.push("/")} withMenu />
 
-      <SectionLabel count={SAMPLE.shifts.length}>Scheduled</SectionLabel>
+      <SectionLabel count={mine.length}>Scheduled for me</SectionLabel>
 
       <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {SAMPLE.shifts.map((s) => (
-          <ShiftRow
-            key={s.id}
-            shift={s}
-            expanded={expandedId === s.id}
-            onToggle={() => setExpandedId(expandedId === s.id ? null : s.id)}
-            onCheckIn={onCheckIn}
-          />
-        ))}
+        {!loaded ? (
+          <SkeletonRow />
+        ) : mine.length === 0 ? (
+          <EmptyState text="No shifts assigned to you today." />
+        ) : (
+          mine.map((s) => (
+            <ShiftRow
+              key={s.realId}
+              shift={s}
+              expanded={expandedId === s.realId}
+              onToggle={() =>
+                setExpandedId(expandedId === s.realId ? null : s.realId)
+              }
+              onCheckIn={onCheckIn}
+            />
+          ))
+        )}
       </div>
 
-      <SectionLabel count={allUnscheduled.length}>Unscheduled</SectionLabel>
+      <SectionLabel count={unassigned.length + requestedNonDup.length}>
+        Unscheduled · available
+      </SectionLabel>
 
       <div style={{ padding: "0 16px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {allUnscheduled.map((s) => {
-          const isRequested = requestedNonDup.some((r) => r.id === s.id);
-          return (
-            <ShiftRow
-              key={s.id}
-              shift={s}
-              expanded={false}
-              unscheduled
-              requested={isRequested}
-              onRemove={isRequested ? () => onRemoveRequested(s.id) : undefined}
-            />
-          );
-        })}
+        {!loaded ? null : unassigned.length === 0 && requestedNonDup.length === 0 ? (
+          <EmptyState text="Nothing available right now." />
+        ) : (
+          <>
+            {unassigned.map((s) => (
+              <ShiftRow
+                key={s.realId}
+                shift={s}
+                expanded={false}
+                unscheduled
+                claimable
+                claiming={claiming === s.realId}
+                onClaim={() => onClaim(s.realId)}
+              />
+            ))}
+            {requestedNonDup.map((s) => (
+              <ShiftRow
+                key={s.id}
+                shift={s}
+                expanded={false}
+                unscheduled
+                requested
+                onRemove={() => onRemoveRequested(s.id)}
+              />
+            ))}
+          </>
+        )}
       </div>
 
       {/* Add shift CTA — quick path to /add-shift if rep wants to request more */}
@@ -96,7 +152,7 @@ export default function ShiftsListPage() {
           }}
         >
           <Glyph name="target" size={15} color={MC.brandDeep} strokeWidth={2.2} />
-          Add a shift
+          Request a customer
         </Link>
       </div>
 
@@ -105,22 +161,61 @@ export default function ShiftsListPage() {
   );
 }
 
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        padding: "20px 14px",
+        textAlign: "center",
+        fontFamily: MC.font,
+        fontSize: 13,
+        color: MC.mute,
+        background: MC.card,
+        border: `1px dashed ${MC.line}`,
+        borderRadius: MC.radiusCard,
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <div
+      style={{
+        height: 80,
+        background: MC.card,
+        border: `1px solid ${MC.line}`,
+        borderRadius: MC.radiusCard,
+        opacity: 0.5,
+      }}
+    />
+  );
+}
+
 function ShiftRow({
   shift,
   expanded,
   unscheduled,
   requested,
+  claimable,
+  claiming,
   onToggle,
   onCheckIn,
   onRemove,
+  onClaim,
 }: {
   shift: Shift;
   expanded: boolean;
   unscheduled?: boolean;
   requested?: boolean;
+  claimable?: boolean;
+  claiming?: boolean;
   onToggle?: () => void;
   onCheckIn?: () => void;
   onRemove?: () => void;
+  onClaim?: () => void;
 }) {
   return (
     <div
@@ -192,22 +287,47 @@ function ShiftRow({
             </span>
             {unscheduled ? (
               <>
-                <span>{requested ? "Requested · pending approval" : "Not scheduled today"}</span>
-                {requested && (
-                  <span
-                    style={{
-                      padding: "1px 7px",
-                      borderRadius: 999,
-                      background: MC.brandTint,
-                      color: MC.brandInk,
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      letterSpacing: 0.4,
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    NEW
-                  </span>
+                {claimable ? (
+                  <>
+                    <Glyph name="clock" size={13} color={MC.mute} strokeWidth={2} />
+                    <span>
+                      {shift.start}–{shift.end}
+                    </span>
+                    <span
+                      style={{
+                        padding: "1px 7px",
+                        borderRadius: 999,
+                        background: MC.brandTint,
+                        color: MC.brandInk,
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        letterSpacing: 0.4,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Available
+                    </span>
+                  </>
+                ) : requested ? (
+                  <>
+                    <span>Requested · pending approval</span>
+                    <span
+                      style={{
+                        padding: "1px 7px",
+                        borderRadius: 999,
+                        background: MC.brandTint,
+                        color: MC.brandInk,
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        letterSpacing: 0.4,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      NEW
+                    </span>
+                  </>
+                ) : (
+                  <span>Not scheduled today</span>
                 )}
               </>
             ) : (
@@ -216,14 +336,48 @@ function ShiftRow({
                 <span>
                   {shift.start}–{shift.end}
                 </span>
-                <span style={{ opacity: 0.4 }}>·</span>
-                <span>{shift.distance}</span>
+                {shift.distance && (
+                  <>
+                    <span style={{ opacity: 0.4 }}>·</span>
+                    <span>{shift.distance}</span>
+                  </>
+                )}
               </>
             )}
           </div>
         </div>
         {!unscheduled && (
-          <Glyph name={expanded ? "chev-u" : "chev-d"} size={20} color={MC.mute} strokeWidth={2} />
+          <Glyph
+            name={expanded ? "chev-u" : "chev-d"}
+            size={20}
+            color={MC.mute}
+            strokeWidth={2}
+          />
+        )}
+        {unscheduled && claimable && onClaim && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClaim();
+            }}
+            disabled={claiming}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 10,
+              background: claiming ? MC.line : MC.brand,
+              color: "#fff",
+              border: "none",
+              cursor: claiming ? "not-allowed" : "pointer",
+              fontFamily: MC.font,
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: -0.1,
+              boxShadow: claiming ? "none" : `0 2px 6px ${MC.brand}55`,
+            }}
+          >
+            {claiming ? "Claiming…" : "Claim"}
+          </button>
         )}
         {unscheduled && requested && onRemove && (
           <button
@@ -258,27 +412,7 @@ function ShiftRow({
             padding: "12px 14px 14px",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 10,
-              padding: "10px 12px",
-              borderRadius: 10,
-              background: MC.warnTint,
-              color: "#6d4808",
-              fontFamily: MC.font,
-              fontSize: 12,
-            }}
-          >
-            <Glyph name="warn" size={14} color="#b27606" />
-            <div>
-              <b>Check-in will require a reason.</b> You&apos;re {shift.distance} from site
-              and the shift started at {shift.start}.
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <div style={{ display: "flex", gap: 8 }}>
             <button type="button" style={secondaryBtn}>
               <Glyph name="pin" size={16} color={MC.ink2} />
               <span>Directions</span>
@@ -326,6 +460,6 @@ const secondaryBtn: React.CSSProperties = {
   fontFamily: MC.font,
   fontSize: 14,
   fontWeight: 500,
-  color: MC.ink2,
+  color: "#111418",
   padding: "0 12px",
 };

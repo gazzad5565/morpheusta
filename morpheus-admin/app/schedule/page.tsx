@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
@@ -27,7 +28,9 @@ export default function SchedulePage() {
       actions={
         <div style={{ display: "flex", gap: 8 }}>
           <Btn icon="upload" size="sm">Import</Btn>
-          <Btn icon="plus" kind="primary" size="sm">New shift</Btn>
+          <Link href="/schedule/new" style={{ textDecoration: "none" }}>
+            <Btn icon="plus" kind="primary" size="sm">New shift</Btn>
+          </Link>
         </div>
       }
     >

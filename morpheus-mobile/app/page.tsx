@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { MC } from "@/lib/tokens";
-import { SAMPLE } from "@/lib/mock-data";
+import { SAMPLE, type Shift } from "@/lib/mock-data";
 import { AppHeader, AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
 import { Glyph, formatTime } from "@/components/Glyph";
 import { getUser } from "@/lib/auth";
+import { listMyShiftsToday } from "@/lib/shifts-store";
+import { getMyProfile } from "@/lib/profiles-store";
 
 /**
  * Friendly display name from an email address. Falls back gracefully when
@@ -32,13 +34,15 @@ export default function DashboardPage() {
   const [directionsOpen, setDirectionsOpen] = useState(false);
   const [travellingSince, setTravellingSince] = useState<number | null>(null);
 
-  // Greeting derives from the logged-in user's email. Loaded after mount so
-  // there's a brief "Welcome back" placeholder while we fetch.
+  // Greeting prefers the profiles.name (set on signup), falls back to email.
   const [displayName, setDisplayName] = useState<string>("");
   useEffect(() => {
     let cancelled = false;
-    getUser().then((u) => {
-      if (!cancelled) setDisplayName(nameFromEmail(u?.email));
+    Promise.all([getMyProfile(), getUser()]).then(([profile, user]) => {
+      if (cancelled) return;
+      // Prefer profile.name, then derive from email
+      const fromProfile = profile?.name?.trim();
+      setDisplayName(fromProfile || nameFromEmail(user?.email));
     });
     return () => {
       cancelled = true;
@@ -222,7 +226,21 @@ function UpNextCard({
   travellingSince: number | null;
   setTravellingSince: (v: number | null) => void;
 }) {
-  const next = SAMPLE.shifts[0];
+  // Pull the rep's next assigned shift from the DB on mount. Falls back to
+  // mock if the user has no shifts yet (so the demo isn't blank).
+  const [next, setNext] = useState<Shift | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    listMyShiftsToday().then((rows) => {
+      if (cancelled) return;
+      setNext(rows[0] || null);
+      setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -235,6 +253,69 @@ function UpNextCard({
   const m = Math.floor(elapsed / 60);
   const s = elapsed % 60;
   const elapsedLabel = `${m}:${String(s).padStart(2, "0")}`;
+
+  // Empty state: no shift assigned today → nudge them to /shifts to claim one.
+  if (loaded && !next) {
+    return (
+      <div style={{ padding: "12px 16px 0" }}>
+        <Link href="/shifts" style={{ textDecoration: "none" }}>
+          <div
+            style={{
+              background: MC.card,
+              borderRadius: MC.radiusCard,
+              padding: 18,
+              border: `1px dashed ${MC.line}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+            }}
+          >
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                background: MC.bg,
+                border: `1px solid ${MC.line}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Glyph name="clock" size={20} color={MC.mute} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div
+                style={{
+                  fontFamily: MC.fontDisplay,
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: MC.ink,
+                  letterSpacing: -0.2,
+                }}
+              >
+                No shift assigned today
+              </div>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  color: MC.mute,
+                  marginTop: 2,
+                }}
+              >
+                Tap to view available shifts you can claim
+              </div>
+            </div>
+            <Glyph name="chev-r" size={18} color={MC.hint} />
+          </div>
+        </Link>
+      </div>
+    );
+  }
+
+  // Skeleton while loading
+  if (!loaded || !next) return null;
 
   return (
     <div style={{ padding: "12px 16px 0" }}>

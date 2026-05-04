@@ -12,6 +12,7 @@ type Mode = "login" | "signup";
 export default function LoginPage() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [pwd, setPwd] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,12 +30,16 @@ export default function LoginPage() {
       setError("Password must be at least 6 characters.");
       return;
     }
+    if (mode === "signup" && !name.trim()) {
+      setError("Please enter your name.");
+      return;
+    }
 
     setBusy(true);
     const result =
       mode === "login"
         ? await signIn(email.trim(), pwd)
-        : await signUp(email.trim(), pwd);
+        : await signUp(email.trim(), pwd, name.trim());
     setBusy(false);
 
     if (!result.ok) {
@@ -134,7 +139,19 @@ export default function LoginPage() {
       </div>
 
       <div style={{ marginTop: 28 }}>
-        <LightField label="Email" value={email} onChange={setEmail} type="email" autoFocus />
+        {mode === "signup" && (
+          <>
+            <LightField label="Your name" value={name} onChange={setName} autoFocus />
+            <div style={{ height: 16 }} />
+          </>
+        )}
+        <LightField
+          label="Email"
+          value={email}
+          onChange={setEmail}
+          type="email"
+          autoFocus={mode === "login"}
+        />
         <div style={{ height: 16 }} />
         <LightField label="Password" value={pwd} onChange={setPwd} pwd />
       </div>
