@@ -1,25 +1,121 @@
-import { notFound } from "next/navigation";
+"use client";
+
+import { use, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
-import { CustomerSwatch } from "@/components/ui/Avatars";
-import { StatusPill } from "@/components/ui/StatusPill";
 import { AC } from "@/lib/tokens";
-import { REPS, CUSTOMERS } from "@/lib/mock-data";
+import { supabase } from "@/lib/supabase";
+import { type Profile, displayName } from "@/lib/profiles-store";
+import { listShifts, type ShiftRow } from "@/lib/shifts-store";
 
-export default async function RepDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
-  const rep = REPS.find((r) => r.id === id);
-  if (!rep) notFound();
+function deriveInitials(name: string, email: string): string {
+  const source = name?.trim() || email.split("@")[0];
+  const words = source.split(/[\s._-]+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return source.slice(0, 2).toUpperCase();
+}
+
+function formatJoined(iso: string | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+}
+
+function formatTimeRange(start: string, end: string): string {
+  const fmt = (t: string) => {
+    if (!t) return "";
+    const [hh, mm] = t.split(":");
+    const h = parseInt(hh, 10);
+    const ampm = h >= 12 ? "PM" : "AM";
+    const h12 = ((h + 11) % 12) + 1;
+    return `${h12}:${mm} ${ampm}`;
+  };
+  return `${fmt(start)} – ${fmt(end)}`;
+}
+
+export default function RepDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const router = useRouter();
+  const { id } = use(params);
+
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [shifts, setShifts] = useState<ShiftRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
+      const { data: profileData, error: profileErr } = await supabase
+        .from("profiles")
+        .select("id, email, name, role, created_at")
+        .eq("id", id)
+        .maybeSingle();
+      if (cancelled) return;
+      if (profileErr || !profileData) {
+        setNotFound(true);
+        setLoading(false);
+        return;
+      }
+      setProfile(profileData as Profile);
+
+      // Fetch all shifts; filter to this rep client-side. Cheap at small scale.
+      const allShifts = await listShifts();
+      if (cancelled) return;
+      setShifts(allShifts.filter((s) => s.rep_id === id));
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (loading) {
+    return (
+      <AdminShell breadcrumbs={["Home", "Reps", "…"]}>
+        <div style={{ padding: 32, fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
+          Loading rep…
+        </div>
+      </AdminShell>
+    );
+  }
+
+  if (notFound || !profile) {
+    return (
+      <AdminShell breadcrumbs={["Home", "Reps", "Not found"]}>
+        <div style={{ padding: 32 }}>
+          <Card padding={24}>
+            <div style={{ fontFamily: AC.font, fontSize: 14, color: AC.ink, marginBottom: 8 }}>
+              No rep found with this ID.
+            </div>
+            <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute, marginBottom: 16 }}>
+              They may have been deleted, or the link is from an older version of the app.
+            </div>
+            <Btn onClick={() => router.push("/reps")}>Back to Reps</Btn>
+          </Card>
+        </div>
+      </AdminShell>
+    );
+  }
+
+  const name = displayName(profile);
+  const initials = deriveInitials(profile.name || "", profile.email);
+  const todayShifts = shifts.filter((s) => {
+    const today = new Date().toISOString().slice(0, 10);
+    return s.shift_date === today;
+  });
+  const completed = shifts.filter((s) => s.state === "complete").length;
+  const inProgress = shifts.filter((s) => s.state === "in-progress").length;
 
   return (
     <AdminShell
-      breadcrumbs={["Home", "Reps", rep.name]}
+      breadcrumbs={["Home", "Reps", name]}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
           <Btn icon="mail" size="sm">Message</Btn>
@@ -36,6 +132,7 @@ export default async function RepDetailPage({
           alignItems: "start",
         }}
       >
+        {/* Left: profile card */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card padding={20}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
@@ -55,9 +152,9 @@ export default async function RepDetailPage({
                   letterSpacing: 0.5,
                 }}
               >
-                {rep.initials}
+                {initials}
               </div>
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <div
                   style={{
                     fontFamily: AC.font,
@@ -67,13 +164,25 @@ export default async function RepDetailPage({
                     letterSpacing: -0.3,
                   }}
                 >
-                  {rep.name}
+                  {name}
                 </div>
                 <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute, marginTop: 2 }}>
-                  {rep.role || "Field Rep"} · {rep.region}
+                  {profile.role === "manager" ? "Manager" : "Field Rep"}
                 </div>
                 <div style={{ marginTop: 6 }}>
-                  <StatusPill status={rep.status} size="lg" />
+                  <span
+                    style={{
+                      padding: "3px 9px",
+                      borderRadius: 99,
+                      background: AC.okTint,
+                      color: "#0F5A38",
+                      fontFamily: AC.font,
+                      fontSize: 11,
+                      fontWeight: 700,
+                    }}
+                  >
+                    ● Active
+                  </span>
                 </div>
               </div>
             </div>
@@ -87,222 +196,150 @@ export default async function RepDetailPage({
                 borderTop: `1px solid ${AC.line}`,
               }}
             >
-              <DetailRow icon="mail" label="Email" value={rep.email} />
-              <DetailRow icon="phone" label="Phone" value={rep.phone} />
-              <DetailRow icon="building" label="Region" value={rep.region} />
-              <DetailRow icon="cal" label="Joined" value={rep.joined} />
-            </div>
-          </Card>
-
-          <Card padding={16}>
-            <SectionTitle>Assigned customers</SectionTitle>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {CUSTOMERS.slice(0, 4).map((c) => (
-                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <CustomerSwatch customer={c} size={28} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontFamily: AC.font,
-                        fontSize: 12.5,
-                        color: AC.ink,
-                        fontWeight: 600,
-                        letterSpacing: -0.1,
-                      }}
-                    >
-                      {c.name}
-                    </div>
-                    <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute }}>
-                      {c.code}
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 11,
-                      color: AC.mute,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {c.sites} sites
-                  </div>
-                </div>
-              ))}
+              <DetailRow icon="mail" label="Email" value={profile.email} />
+              <DetailRow icon="cal" label="Joined" value={formatJoined(profile.created_at)} />
+              <DetailRow
+                icon="info"
+                label="Role"
+                value={profile.role.charAt(0).toUpperCase() + profile.role.slice(1)}
+              />
             </div>
           </Card>
         </div>
 
+        {/* Right: shifts list */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card padding={0}>
-            <div style={{ display: "flex", borderBottom: `1px solid ${AC.line}` }}>
-              {["Overview", "Shift history", "Documents", "Time-off", "Activity log"].map(
-                (t, i) => (
-                  <button
-                    key={t}
-                    type="button"
-                    style={{
-                      padding: "12px 16px",
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      fontFamily: AC.font,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: i === 0 ? AC.ink : AC.mute,
-                      borderBottom:
-                        i === 0 ? `2px solid ${AC.brand}` : "2px solid transparent",
-                      marginBottom: -1,
-                      letterSpacing: -0.1,
-                    }}
-                  >
-                    {t}
-                  </button>
-                )
-              )}
-            </div>
-
             <div style={{ padding: 16 }}>
-              <SectionTitle>Performance · 90 days</SectionTitle>
+              <SectionTitle>Today’s shifts</SectionTitle>
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(4, 1fr)",
+                  gridTemplateColumns: "repeat(3, 1fr)",
                   gap: 12,
                   marginBottom: 18,
                 }}
               >
-                <MiniStat label="Shifts" value={`${rep.shifts}`} delta="+12" tone="ok" />
-                <MiniStat label="On-time" value={`${rep.completion}%`} delta="+3pt" tone="ok" />
-                <MiniStat label="Late check-ins" value={`${rep.late}`} delta="-2" tone="ok" />
-                <MiniStat label="Off-site flags" value={`${rep.offsite}`} delta="0" tone="neutral" />
+                <MiniStat label="Today" value={`${todayShifts.length}`} tone="ok" />
+                <MiniStat label="In progress" value={`${inProgress}`} tone="ok" />
+                <MiniStat label="Completed" value={`${completed}`} tone="neutral" />
               </div>
 
-              <SectionTitle>Recent shifts</SectionTitle>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 0,
-                  border: `1px solid ${AC.line}`,
-                  borderRadius: 10,
-                  overflow: "hidden",
-                }}
-              >
-                {RECENT_SHIFTS.map((r, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "120px 1fr 140px 120px 90px 80px",
-                      gap: 12,
-                      alignItems: "center",
-                      padding: "10px 14px",
-                      borderBottom:
-                        i < RECENT_SHIFTS.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-                      background: i === 0 ? AC.brandSoft : "#fff",
-                    }}
-                  >
+              {todayShifts.length === 0 ? (
+                <div
+                  style={{
+                    padding: 20,
+                    background: AC.bg,
+                    borderRadius: 10,
+                    fontFamily: AC.font,
+                    fontSize: 13,
+                    color: AC.mute,
+                    textAlign: "center",
+                  }}
+                >
+                  No shifts assigned to this rep today.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    border: `1px solid ${AC.line}`,
+                    borderRadius: 10,
+                    overflow: "hidden",
+                  }}
+                >
+                  {todayShifts.map((s, i) => (
                     <div
+                      key={s.id}
                       style={{
-                        fontFamily: AC.font,
-                        fontSize: 12.5,
-                        color: AC.ink,
-                        fontWeight: 600,
+                        display: "grid",
+                        gridTemplateColumns: "1fr 140px 110px",
+                        gap: 12,
+                        alignItems: "center",
+                        padding: "10px 14px",
+                        borderBottom:
+                          i < todayShifts.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                        background: "#fff",
                       }}
                     >
-                      {r.date}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div
-                        style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: 5,
-                          background: r.color,
-                          color: "#fff",
-                          fontFamily: AC.font,
-                          fontSize: 9,
-                          fontWeight: 700,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        {r.initials}
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        {s.customers && (
+                          <div
+                            style={{
+                              width: 22,
+                              height: 22,
+                              borderRadius: 5,
+                              background: s.customers.color,
+                              color: "#fff",
+                              fontFamily: AC.font,
+                              fontSize: 9,
+                              fontWeight: 700,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            {s.customers.initials}
+                          </div>
+                        )}
+                        <div
+                          style={{
+                            fontFamily: AC.font,
+                            fontSize: 12.5,
+                            color: AC.ink,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {s.customers?.name || s.customer_id}
+                        </div>
                       </div>
                       <div
                         style={{
                           fontFamily: AC.font,
-                          fontSize: 12.5,
+                          fontSize: 12,
                           color: AC.ink2,
-                          fontWeight: 500,
+                          fontWeight: 600,
                         }}
                       >
-                        {r.cust}
+                        {formatTimeRange(s.start_time, s.end_time)}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: AC.font,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color:
+                            s.state === "complete"
+                              ? AC.ok
+                              : s.state === "in-progress"
+                              ? AC.brandDeep
+                              : AC.mute,
+                          textTransform: "capitalize",
+                        }}
+                      >
+                        {s.state.replace("-", " ")}
                       </div>
                     </div>
-                    <div
-                      style={{
-                        fontFamily: AC.font,
-                        fontSize: 12,
-                        color: AC.ink2,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {r.time}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: AC.font,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: r.state === "In progress" ? AC.brandDeep : AC.ok,
-                      }}
-                    >
-                      {r.state}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: AC.fontMono,
-                        fontSize: 11.5,
-                        color: AC.ink2,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {r.tasks}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: AC.fontMono,
-                        fontSize: 11,
-                        color: r.ot.startsWith("+")
-                          ? AC.danger
-                          : r.ot.startsWith("−")
-                          ? AC.ok
-                          : AC.mute,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {r.ot}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </Card>
+
+          {/* All shifts (excluding today, capped) */}
+          {shifts.length > todayShifts.length && (
+            <Card padding={16}>
+              <SectionTitle>Other shifts (recent)</SectionTitle>
+              <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute }}>
+                {shifts.length - todayShifts.length} other shift
+                {shifts.length - todayShifts.length === 1 ? "" : "s"} on file.
+              </div>
+            </Card>
+          )}
         </div>
       </div>
     </AdminShell>
   );
 }
-
-const RECENT_SHIFTS = [
-  { date: "Today", cust: "GreenWave Innovations", initials: "GW", color: "#D9493D", time: "08:00–12:00", state: "In progress", tasks: "2/4", ot: "+0:00" },
-  { date: "Mon 6 May", cust: "GreenWave Innovations", initials: "GW", color: "#D9493D", time: "08:00–12:00", state: "Completed", tasks: "4/4", ot: "+0:08" },
-  { date: "Fri 3 May", cust: "NextGenTech", initials: "NG", color: "#E2A434", time: "13:00–17:30", state: "Completed", tasks: "5/5", ot: "−0:14" },
-  { date: "Thu 2 May", cust: "OptimaSolutions", initials: "OS", color: "#2E9C82", time: "08:00–12:30", state: "Completed", tasks: "4/4", ot: "+0:00" },
-  { date: "Wed 1 May", cust: "GreenWave Innovations", initials: "GW", color: "#D9493D", time: "08:00–12:00", state: "Completed", tasks: "3/4", ot: "+0:21" },
-];
 
 function DetailRow({ icon, label, value }: { icon: GlyphName; label: string; value: string }) {
   return (
@@ -331,7 +368,19 @@ function DetailRow({ icon, label, value }: { icon: GlyphName; label: string; val
       >
         {label}
       </div>
-      <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.ink, fontWeight: 500 }}>
+      <div
+        style={{
+          flex: 1,
+          fontFamily: AC.font,
+          fontSize: 12.5,
+          color: AC.ink,
+          fontWeight: 500,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
         {value}
       </div>
     </div>
@@ -341,15 +390,13 @@ function DetailRow({ icon, label, value }: { icon: GlyphName; label: string; val
 function MiniStat({
   label,
   value,
-  delta,
   tone,
 }: {
   label: string;
   value: string;
-  delta: string;
-  tone: "ok" | "bad" | "neutral";
+  tone: "ok" | "warn" | "neutral";
 }) {
-  const tc = { ok: AC.ok, bad: AC.danger, neutral: AC.mute }[tone];
+  const tc = { ok: AC.ok, warn: AC.warn, neutral: AC.mute }[tone];
   return (
     <div
       style={{
@@ -383,10 +430,8 @@ function MiniStat({
       >
         {value}
       </div>
-      <div
-        style={{ fontFamily: AC.font, fontSize: 11, color: tc, fontWeight: 600, marginTop: 2 }}
-      >
-        {delta}
+      <div style={{ fontFamily: AC.font, fontSize: 11, color: tc, fontWeight: 600, marginTop: 2 }}>
+        &nbsp;
       </div>
     </div>
   );
