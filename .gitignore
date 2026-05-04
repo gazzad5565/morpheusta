@@ -1,0 +1,38 @@
+# Top-level .gitignore for the Morpheus monorepo.
+# Each subfolder (morpheus-admin, morpheus-mobile) has its own .gitignore too;
+# this one catches anything that should be excluded across the board.
+
+# Dependencies
+node_modules/
+
+# Build outputs
+.next/
+out/
+build/
+dist/
+
+# Vercel deployment metadata (contains project link, not code)
+.vercel/
+
+# Env files — NEVER commit. Real secrets live here.
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.production.local
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Claude Code's local working directory (project memory, sessions)
+.claude/
