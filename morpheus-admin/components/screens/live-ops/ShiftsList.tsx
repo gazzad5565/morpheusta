@@ -1,33 +1,113 @@
+"use client";
+
+/**
+ * ShiftsList — Live Ops table showing today's shifts.
+ *
+ * Pulls from Supabase via:
+ *   - listShifts() → today's shifts (customer joined)
+ *   - listProfiles({ role: "rep" }) → reps so we can resolve rep_id → name
+ *
+ * Filtering is client-side via SegTabs (All / In progress / Travelling /
+ * On break / Issues / Unassigned). Sort is by start_time ascending.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { AC } from "@/lib/tokens";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
-import { RepAvatar, CustomerSwatch } from "@/components/ui/Avatars";
+import { RepAvatar } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
-import { TODAYS_SHIFTS, getRep, getCustomer } from "@/lib/mock-data";
-import type { Shift, Rep, Customer } from "@/lib/types";
-import type { CSSProperties } from "react";
-
-interface Row extends Shift {
-  rep: Rep | undefined;
-  customer: Customer | undefined;
-}
+import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 
 const STATE_MAP: Record<string, { label: string; bg: string; ink: string; dot: string }> = {
   "in-progress": { label: "In progress", bg: AC.okTint, ink: "#0F5A38", dot: AC.ok },
   travelling: { label: "Travelling", bg: AC.warnTint, ink: "#7A560A", dot: AC.warn },
   "on-break": { label: "On break", bg: "#E6E9F8", ink: "#241B5A", dot: "#5447BD" },
-  late: { label: "Late · 18m", bg: AC.dangerTint, ink: "#6E1430", dot: AC.danger },
+  late: { label: "Late", bg: AC.dangerTint, ink: "#6E1430", dot: AC.danger },
   unassigned: { label: "Unassigned", bg: AC.bg, ink: AC.mute, dot: AC.faint },
   scheduled: { label: "Scheduled", bg: AC.bg, ink: AC.mute, dot: AC.faint },
   complete: { label: "Complete", bg: AC.okTint, ink: "#0F5A38", dot: AC.ok },
 };
 
+function deriveInitials(p: Profile): string {
+  const source = p.name?.trim() || p.email.split("@")[0];
+  const words = source.split(/[\s._-]+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  return source.slice(0, 2).toUpperCase();
+}
+
+function formatTimeLabel(t: string): string {
+  if (!t) return "";
+  const [hh, mm] = t.split(":");
+  const h = parseInt(hh, 10);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${mm} ${ampm}`;
+}
+
+function formatCheckIn(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${m.toString().padStart(2, "0")} ${ampm}`;
+}
+
+interface RepLite {
+  id: string;
+  name: string;
+  initials: string;
+}
+
+const TABS = ["All", "In progress", "Travelling", "On break", "Issues", "Unassigned"] as const;
+
 export function ShiftsList() {
-  const rows: Row[] = TODAYS_SHIFTS.map((s) => ({
-    ...s,
-    rep: getRep(s.repId),
-    customer: getCustomer(s.customerId),
-  }));
+  const [rows, setRows] = useState<ShiftRow[]>([]);
+  const [reps, setReps] = useState<Record<string, RepLite>>({});
+  const [loading, setLoading] = useState(true);
+  const [active, setActive] = useState<string>("All");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [shiftRows, profileRows] = await Promise.all([
+        listShifts(),
+        listProfiles({ role: "rep" }),
+      ]);
+      if (cancelled) return;
+      const repMap: Record<string, RepLite> = {};
+      for (const p of profileRows) {
+        repMap[p.id] = {
+          id: p.id,
+          name: displayName(p),
+          initials: deriveInitials(p),
+        };
+      }
+      setReps(repMap);
+      setRows(shiftRows);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Effective state used both for display & filtering.
+  // If rep_id is null we treat it as "unassigned" regardless of stored state.
+  const effectiveState = (s: ShiftRow): string => (s.rep_id ? s.state : "unassigned");
+
+  const filtered = useMemo(() => {
+    if (active === "All") return rows;
+    if (active === "Unassigned") return rows.filter((s) => !s.rep_id);
+    if (active === "Issues")
+      return rows.filter((s) => effectiveState(s) === "late");
+    const key = active.toLowerCase().replace(" ", "-");
+    return rows.filter((s) => effectiveState(s) === key);
+  }, [rows, active]);
 
   return (
     <Card padding={0}>
@@ -62,13 +142,10 @@ export function ShiftsList() {
             fontWeight: 600,
           }}
         >
-          {rows.length}
+          {filtered.length}
         </span>
         <div style={{ flex: 1 }} />
-        <SegTabs
-          tabs={["All", "In progress", "Travelling", "On break", "Issues", "Unassigned"]}
-          active="All"
-        />
+        <SegTabs tabs={TABS} active={active} onChange={setActive} />
         <div style={{ width: 1, height: 18, background: AC.line }} />
         <button
           type="button"
@@ -91,12 +168,41 @@ export function ShiftsList() {
       </div>
 
       <div>
-        <ShiftRow header />
-        {rows.map((r) => (
-          <ShiftRow key={r.id} row={r} />
-        ))}
+        <ShiftRowView header />
+        {loading ? (
+          <EmptyRow text="Loading shifts…" />
+        ) : filtered.length === 0 ? (
+          <EmptyRow
+            text={
+              active === "All"
+                ? "No shifts scheduled today. Click 'New shift' to add one."
+                : `Nothing matches '${active}' right now.`
+            }
+          />
+        ) : (
+          filtered.map((s) => (
+            <ShiftRowView key={s.id} row={s} rep={s.rep_id ? reps[s.rep_id] : undefined} />
+          ))
+        )}
       </div>
     </Card>
+  );
+}
+
+function EmptyRow({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        padding: "28px 16px",
+        textAlign: "center",
+        fontFamily: AC.font,
+        fontSize: 12.5,
+        color: AC.mute,
+        background: "#fff",
+      }}
+    >
+      {text}
+    </div>
   );
 }
 
@@ -104,7 +210,7 @@ function shiftRowGrid(opts?: { header?: boolean }): CSSProperties {
   const header = opts?.header;
   return {
     display: "grid",
-    gridTemplateColumns: "4px 1.4fr 1.6fr 110px 130px 110px 110px 36px",
+    gridTemplateColumns: "4px 1.4fr 1.6fr 130px 130px 110px 110px 36px",
     gap: 14,
     alignItems: "center",
     padding: header ? "8px 16px" : "12px 16px",
@@ -119,13 +225,21 @@ function shiftRowGrid(opts?: { header?: boolean }): CSSProperties {
   };
 }
 
-function ShiftRow({ row, header }: { row?: Row; header?: boolean }) {
+function ShiftRowView({
+  row,
+  rep,
+  header,
+}: {
+  row?: ShiftRow;
+  rep?: RepLite;
+  header?: boolean;
+}) {
   if (header) {
     return (
       <div style={shiftRowGrid({ header: true })}>
         <div></div>
         <div>Rep</div>
-        <div>Customer · site</div>
+        <div>Customer</div>
         <div>Window</div>
         <div>State</div>
         <div>Tasks</div>
@@ -135,7 +249,10 @@ function ShiftRow({ row, header }: { row?: Row; header?: boolean }) {
     );
   }
   if (!row) return null;
-  const state = STATE_MAP[row.state] || STATE_MAP.scheduled;
+
+  const stateKey = row.rep_id ? row.state : "unassigned";
+  const state = STATE_MAP[stateKey] || STATE_MAP.scheduled;
+  const checkIn = formatCheckIn(row.check_in_at);
 
   return (
     <div style={shiftRowGrid()}>
@@ -150,9 +267,9 @@ function ShiftRow({ row, header }: { row?: Row; header?: boolean }) {
       />
 
       <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-        {row.rep ? (
+        {rep ? (
           <>
-            <RepAvatar rep={row.rep} size={28} />
+            <RepAvatar rep={{ initials: rep.initials }} size={28} />
             <div style={{ minWidth: 0 }}>
               <div
                 style={{
@@ -166,10 +283,10 @@ function ShiftRow({ row, header }: { row?: Row; header?: boolean }) {
                   textOverflow: "ellipsis",
                 }}
               >
-                {row.rep.name}
+                {rep.name}
               </div>
               <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, marginTop: 1 }}>
-                {row.rep.region}
+                Rep
               </div>
             </div>
           </>
@@ -197,14 +314,34 @@ function ShiftRow({ row, header }: { row?: Row; header?: boolean }) {
                 letterSpacing: -0.1,
               }}
             >
-              Assign rep
+              Unassigned
             </div>
           </div>
         )}
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-        {row.customer && <CustomerSwatch customer={row.customer} size={26} />}
+        {row.customers && (
+          <div
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 7,
+              background: row.customers.color,
+              color: "#fff",
+              fontFamily: AC.font,
+              fontSize: 10.5,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              letterSpacing: 0.2,
+              flexShrink: 0,
+            }}
+          >
+            {row.customers.initials}
+          </div>
+        )}
         <div style={{ minWidth: 0 }}>
           <div
             style={{
@@ -218,10 +355,10 @@ function ShiftRow({ row, header }: { row?: Row; header?: boolean }) {
               textOverflow: "ellipsis",
             }}
           >
-            {row.customer?.name}
+            {row.customers?.name || "—"}
           </div>
           <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, marginTop: 1 }}>
-            {row.customer?.code} · Site A
+            #{row.customers?.code ?? ""}
           </div>
         </div>
       </div>
@@ -235,9 +372,9 @@ function ShiftRow({ row, header }: { row?: Row; header?: boolean }) {
           letterSpacing: -0.1,
         }}
       >
-        {row.start}
+        {formatTimeLabel(row.start_time)}
         <span style={{ color: AC.faint, padding: "0 2px" }}>—</span>
-        {row.end}
+        {formatTimeLabel(row.end_time)}
       </div>
 
       <div>
@@ -260,36 +397,17 @@ function ShiftRow({ row, header }: { row?: Row; header?: boolean }) {
         </span>
       </div>
 
-      <TaskBar done={row.tasksDone} total={row.tasksTotal} />
+      <TaskBar done={row.tasks_done} total={row.tasks_total} />
 
       <div
         style={{
           fontFamily: AC.font,
           fontSize: 12,
-          color: row.late ? AC.danger : row.checkedIn ? AC.ink2 : AC.mute,
+          color: checkIn ? AC.ink2 : AC.mute,
           fontWeight: 600,
         }}
       >
-        {row.checkedIn || (row.state === "late" ? "No check-in" : "—")}
-        {row.offsite && (
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              marginLeft: 6,
-              padding: "1px 6px",
-              borderRadius: 99,
-              background: AC.dangerTint,
-              color: AC.danger,
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: 0.2,
-            }}
-          >
-            OFF-SITE
-          </span>
-        )}
+        {checkIn || "—"}
       </div>
 
       <button

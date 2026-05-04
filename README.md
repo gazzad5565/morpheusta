@@ -42,6 +42,8 @@ Both share a single Supabase project (URL: `https://otweltzwwhrvhtvaqsci.supabas
 │   │   ├── supabase.ts            ← Supabase client
 │   │   ├── auth.ts                ← signIn / signUp / signOut helpers
 │   │   ├── customers-store.ts     ← read + create customers in DB
+│   │   ├── shifts-store.ts        ← list + create + delete shifts in DB
+│   │   ├── profiles-store.ts      ← list reps/managers from profiles table
 │   │   ├── tokens.ts              ← AC design tokens
 │   │   └── mock-data.ts           ← fallback data when DB unconfigured
 │   └── public/                    ← PWA manifest, icons
@@ -51,7 +53,9 @@ Both share a single Supabase project (URL: `https://otweltzwwhrvhtvaqsci.supabas
     ├── lib/
     │   ├── supabase.ts            ← Supabase client
     │   ├── auth.ts                ← signIn / signUp / signOut
-    │   ├── shift-store.ts         ← rep-requested shifts in DB
+    │   ├── shift-store.ts         ← rep-requested shifts (separate table)
+    │   ├── shifts-store.ts        ← assigned/unassigned shifts + check-in
+    │   ├── profiles-store.ts      ← read/update own profile (greeting name)
     │   ├── customers-store.ts     ← read customers from DB (read-only)
     │   ├── tokens.ts              ← MC design tokens
     │   └── mock-data.ts           ← fallback static data
@@ -127,7 +131,9 @@ Neither app calls the other directly. Both read/write Supabase. When a manager c
 
 ### Each user signs up once, works in both
 
-Supabase Auth is shared. The same email/password works in admin and mobile. There's no "manager vs rep" role distinction yet — that's deferred to a future session (multi-tenant + roles).
+Supabase Auth is shared. The same email/password works in admin and mobile.
+
+A `profiles` row is auto-created on signup via a Postgres trigger (`handle_new_user()`) that fires on `auth.users` INSERT. The profile carries `name` (display name, optional) and `role` (`'rep'` | `'manager'`, default `'rep'`). The role field exists but **isn't yet enforced by RLS** — that's the Phase 4 tightening (see Deferred). Today, "manager-only" actions are gated by what UI they have access to, not the database.
 
 ### Routing
 
@@ -156,7 +162,7 @@ Logout calls `supabase.auth.signOut({ scope: "global" })` (invalidates the JWT s
 ### Current schema
 
 ```sql
--- customers (Phase 3, all authenticated users can read/write)
+-- customers (Phase 3a, all authenticated users can read/write)
 customers {
   id            text PRIMARY KEY    -- e.g. 'gw' or generated slug
   name          text                -- e.g. 'GreenWave Innovations'
@@ -168,7 +174,8 @@ customers {
   created_at    timestamptz
 }
 
--- requested_shifts (Phase 2, scoped per-user)
+-- requested_shifts (Phase 3b, scoped per-user)
+-- Rep-initiated requests for an unscheduled shift; admin approves later.
 requested_shifts {
   id                 text PRIMARY KEY  -- composite '{userId}-{customerId}'
   customer_id        text
@@ -180,6 +187,33 @@ requested_shifts {
   status             text DEFAULT 'pending'
   requested_at       timestamptz
 }
+
+-- shifts (Phase 3c, the real shifts table)
+-- Manager-scheduled shifts. rep_id is nullable: NULL = claimable by any rep.
+shifts {
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid()
+  customer_id   text → customers
+  rep_id        uuid → auth.users NULL    -- NULL = claimable
+  shift_date    date
+  start_time    time
+  end_time      time
+  distance_label text NULL                -- e.g. "2.4 mi"
+  state         text DEFAULT 'scheduled'  -- scheduled | in-progress | complete | late
+  check_in_at   timestamptz NULL          -- stamped on rep check-in
+  tasks_done    int DEFAULT 0
+  tasks_total   int DEFAULT 4
+  created_at    timestamptz
+}
+
+-- profiles (Phase 3d, auto-populated on signup)
+-- One row per auth.users row. Trigger handle_new_user() inserts on signup.
+profiles {
+  id          uuid PRIMARY KEY → auth.users
+  email       text
+  name        text NULL                   -- display name (greeting on dashboard)
+  role        text DEFAULT 'rep'          -- 'rep' | 'manager'
+  created_at  timestamptz
+}
 ```
 
 ### Row Level Security (RLS)
@@ -190,8 +224,10 @@ Every table has RLS on. The current policies:
 |---|---|---|---|---|
 | `customers` | any authenticated | any authenticated | any authenticated | any authenticated |
 | `requested_shifts` | `rep_id = auth.uid()` (own rows only) | `rep_id = auth.uid()` | (none — not allowed) | `rep_id = auth.uid()` |
+| `shifts` | any authenticated (admin needs to see all) | any authenticated | `rep_id = auth.uid()` OR `rep_id IS NULL` (rep updates own + claims unassigned) | any authenticated |
+| `profiles` | any authenticated | (trigger only) | `id = auth.uid()` (own row only) | (none) |
 
-> ⚠️ The customers policies are **temporary Phase 3** — they let any logged-in user create/update customers. In production, this would be tightened to "manager role only" once we add role-based access control. See "Deferred work" below.
+> ⚠️ Most policies are **temporary Phase 3** — they let any logged-in user perform most actions. In production, these would be tightened to "manager role only" for customers/shifts insert+delete once we add role-based access control. See "Deferred work" below.
 
 ### How to run new SQL
 
@@ -286,25 +322,34 @@ Or via CLI: `npx vercel rollback`.
 - **Auth:** real Supabase Auth, both apps, with AuthGate redirects
 - **Customers table** in Supabase, admin creates → mobile fetches the live list
 - **Rep-requested shifts table** in Supabase, scoped per-user via RLS
+- **Shifts table** in Supabase — admin schedules → rep sees on phone (the real loop)
+- **Optional rep assignment** when scheduling a shift (drop-down picker, NULL = leave for any rep to claim)
+- **Mobile claim flow** — unassigned shifts show a "Claim" button that sets `rep_id = auth.uid()` race-safely
+- **Mobile check-in writes to DB** — sets `state='in-progress'` + `check_in_at` timestamp
+- **Profiles table + auto-trigger** — `handle_new_user()` creates a profile row on signup; carries `role` ('rep' | 'manager') and display `name`
+- **Reps section in admin** — list view + per-rep detail page (today's shifts, lifetime stats)
+- **Live Ops board reads real data** — KPI strip + shifts table compute from Supabase
 - Side menu navigation on mobile (with both back-button + menu access on top-level pages)
 - Map shows route preview when "Directions" is tapped, animates when "Start travelling" is active
-- Personalised dashboard greeting using the logged-in user's email
+- Personalised dashboard greeting using the logged-in user's profile name (fallback to email)
 - "Take a break" works outside of an active shift
 
 ### ⏳ Deferred
 
 These are the next obvious chunks of work, roughly in order of impact:
 
-1. **Migrate `shifts` to the database** (the big one). Currently the 4 today's shifts on mobile come from `mock-data.ts`. Once these are in Supabase, an admin can schedule a shift → rep sees it on their phone. **This is the moment it becomes a real product.**
-2. **Manager vs rep roles.** Right now anyone authenticated can do anything. Add a `role` field on `auth.users` (or a `profiles` table) and tighten RLS so only managers can write to `customers` and approve shift requests.
-3. **Approve / decline rep-requested shifts in admin.** The `status` column exists; just need an admin page that lists pending requests with action buttons.
-4. **Real maps** (MapLibre or Mapbox) instead of the SVG faux maps.
-5. **Real-time updates** via Supabase Realtime (admin Live Ops board updates as reps check in).
-6. **Tasks + library** migrated to DB.
-7. **Email confirmation** turned back on for production.
-8. **Migrations system** (Supabase CLI) so schema changes are tracked in Git.
-9. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
-10. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence.
+1. **Phase 4: Tighten RLS by role.** Right now any authenticated user can write to `customers`/`shifts`. Use the `profiles.role` column to restrict INSERT/DELETE on those tables to `role = 'manager'`. SELECT can stay open. Mobile reps would only see DB-level errors if they try to misbehave through the API.
+2. **Mobile check-out flow UI.** `checkOutOfShift()` exists in `morpheus-mobile/lib/shifts-store.ts` but no button calls it yet. Wire it up on the active-shift screen.
+3. **Approve / decline rep-requested shifts in admin.** The `requested_shifts.status` column exists; needs an admin page listing pending requests with approve/decline buttons. On approve, create a row in `shifts` with `rep_id` pre-assigned.
+4. **Real-time updates** via Supabase Realtime — admin Live Ops board live-updates as reps check in (no manual refresh).
+5. **Real maps** (MapLibre or Mapbox) instead of SVG faux maps. Needs lat/lng on `customers` (and probably `shifts` if route-specific).
+6. **Live feed event log.** Currently `LiveFeedPanel` is mock data. Build a `shift_events` table that logs check-ins, claims, completions; render it in real-time order.
+7. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Needs the event log above + a daily aggregation query.
+8. **Tasks + library** migrated to DB (admin manages task templates per customer).
+9. **Email confirmation** turned back on for production.
+10. **Migrations system** (Supabase CLI) so schema changes are tracked in Git rather than ad-hoc SQL editor pastes.
+11. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
+12. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence.
 
 ---
 
@@ -382,9 +427,18 @@ morpheus-{mobile,admin}/components/AuthGate.tsx ← redirect-if-unauth wrapper
 morpheus-{mobile,admin}/lib/tokens.ts          ← design tokens (AC for admin, MC for mobile)
 morpheus-{mobile,admin}/lib/mock-data.ts       ← fallback static data when DB is offline
 morpheus-mobile/lib/shift-store.ts             ← requested_shifts CRUD
+morpheus-mobile/lib/shifts-store.ts            ← shifts list/claim/check-in/check-out
+morpheus-mobile/lib/profiles-store.ts          ← own profile read/update
 morpheus-mobile/components/MenuShell.tsx       ← side menu state provider
 morpheus-mobile/components/SideMenu.tsx        ← the slide-in menu
+morpheus-mobile/app/check-in/page.tsx          ← reads ?shift=, calls checkInToShift
 morpheus-admin/lib/customers-store.ts          ← customers CRUD
+morpheus-admin/lib/shifts-store.ts             ← admin-side shifts CRUD
+morpheus-admin/lib/profiles-store.ts           ← list reps for assignment dropdown
+morpheus-admin/app/schedule/new/page.tsx       ← create-shift form (with rep picker)
+morpheus-admin/app/reps/page.tsx               ← reps list (all profiles role='rep')
+morpheus-admin/app/reps/[id]/page.tsx          ← rep detail page
+morpheus-admin/components/screens/live-ops/    ← KpiStrip, ShiftsList (real data)
 morpheus-admin/components/shell/AdminShell.tsx ← desktop chrome (sidebar + topbar)
 ```
 

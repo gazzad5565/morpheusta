@@ -47,7 +47,8 @@ export default function ShiftsListPage() {
     reload();
   }, []);
 
-  const onCheckIn = () => router.push("/check-in");
+  const onCheckIn = (shiftId: string) =>
+    router.push(`/check-in?shift=${shiftId}`);
 
   const onClaim = async (shiftRealId: string) => {
     setClaiming(shiftRealId);
@@ -91,7 +92,7 @@ export default function ShiftsListPage() {
               onToggle={() =>
                 setExpandedId(expandedId === s.realId ? null : s.realId)
               }
-              onCheckIn={onCheckIn}
+              onCheckIn={() => onCheckIn(s.realId)}
             />
           ))
         )}

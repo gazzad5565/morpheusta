@@ -129,3 +129,59 @@ export async function claimShift(
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+/** Fetch a single shift by id, joined with its customer. */
+export async function getShiftById(
+  shiftId: string
+): Promise<(Shift & { realId: string; repId: string | null }) | null> {
+  if (!isSupabaseConfigured() || !supabase) return null;
+  const { data, error } = await supabase
+    .from("shifts")
+    .select("*, customers(id,name,initials,color,code)")
+    .eq("id", shiftId)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.warn("[shifts] getById:", error.message);
+    return null;
+  }
+  return rowToShift(data as ShiftRow);
+}
+
+/**
+ * Check in to a shift — sets state='in-progress' and stamps check_in_at.
+ * RLS allows update where rep_id = auth.uid() (the rep's own shift).
+ */
+export async function checkInToShift(
+  shiftId: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { error } = await supabase
+    .from("shifts")
+    .update({
+      state: "in-progress",
+      check_in_at: new Date().toISOString(),
+    })
+    .eq("id", shiftId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/**
+ * Check out of a shift — sets state='complete'. Also accepts a tasksDone
+ * value so the admin can see how many tasks the rep finished.
+ */
+export async function checkOutOfShift(
+  shiftId: string,
+  tasksDone?: number
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const update: Record<string, unknown> = { state: "complete" };
+  if (typeof tasksDone === "number") update.tasks_done = tasksDone;
+  const { error } = await supabase.from("shifts").update(update).eq("id", shiftId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

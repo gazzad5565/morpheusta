@@ -226,9 +226,9 @@ function UpNextCard({
   travellingSince: number | null;
   setTravellingSince: (v: number | null) => void;
 }) {
-  // Pull the rep's next assigned shift from the DB on mount. Falls back to
-  // mock if the user has no shifts yet (so the demo isn't blank).
-  const [next, setNext] = useState<Shift | null>(null);
+  // Pull the rep's next assigned shift from the DB on mount. realId is the
+  // shift's database UUID — passed to /check-in so the right row gets updated.
+  const [next, setNext] = useState<(Shift & { realId: string }) | null>(null);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -451,7 +451,7 @@ function UpNextCard({
                 </button>
               )}
             </div>
-            <Link href="/check-in" style={{ textDecoration: "none" }}>
+            <Link href={`/check-in?shift=${next.realId}`} style={{ textDecoration: "none" }}>
               <PrimaryButton icon="log">Check in to shift</PrimaryButton>
             </Link>
           </div>

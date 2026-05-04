@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { AppHeader, CustomerTile, ReasonChip, PrimaryButton } from "@/components/Chrome";
 import { Glyph, type GlyphName } from "@/components/Glyph";
+import { getShiftById, checkInToShift } from "@/lib/shifts-store";
+import type { Shift } from "@/lib/mock-data";
 
 const LOCATION_REASONS = [
   "Customer site closed",
@@ -23,17 +25,50 @@ const LATE_REASONS = [
   "Other",
 ];
 
-export default function CheckInPage() {
+export default function CheckInPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <CheckInPage />
+    </Suspense>
+  );
+}
+
+function CheckInPage() {
   const router = useRouter();
+  const params = useSearchParams();
+  const shiftId = params.get("shift");
+
+  const [shift, setShift] = useState<(Shift & { realId: string }) | null>(null);
+  const [shiftError, setShiftError] = useState<string | null>(null);
+
+  // Load the shift on mount so we display the real customer and have the
+  // right ID to update on proceed.
+  useEffect(() => {
+    if (!shiftId) {
+      setShiftError("No shift specified.");
+      return;
+    }
+    let cancelled = false;
+    getShiftById(shiftId).then((s) => {
+      if (cancelled) return;
+      if (!s) setShiftError("Shift not found.");
+      else setShift(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [shiftId]);
+
   const [openException, setOpenException] = useState<"location" | "late" | null>("location");
   const [locationReason, setLocationReasonRaw] = useState<string | null>(null);
   const [locationNote, setLocationNote] = useState("");
   const [lateReason, setLateReasonRaw] = useState<string | null>(null);
   const [lateNote, setLateNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const locResolved = !!locationReason;
   const lateResolved = !!lateReason;
-  const canProceed = locResolved && lateResolved;
+  const canProceed = locResolved && lateResolved && !!shift && !submitting;
 
   // When a reason is newly selected, auto-collapse this accordion and open
   // the next still-pending one. When deselected, re-open the current one so
@@ -55,15 +90,23 @@ export default function CheckInPage() {
     }
   };
 
-  const onProceed = () => {
-    if (!canProceed) return;
-    const params = new URLSearchParams({
+  const onProceed = async () => {
+    if (!canProceed || !shift) return;
+    setSubmitting(true);
+    // Write to DB: mark shift in-progress with check_in_at = now.
+    const result = await checkInToShift(shift.realId);
+    if (!result.ok) {
+      setSubmitting(false);
+      alert(`Couldn't check in: ${result.error}`);
+      return;
+    }
+    const sp = new URLSearchParams({
       locationReason: locationReason!,
       locationNote,
       lateReason: lateReason!,
       lateNote,
     });
-    router.push(`/check-in/success?${params.toString()}`);
+    router.push(`/check-in/success?${sp.toString()}`);
   };
 
   return (
@@ -82,7 +125,11 @@ export default function CheckInPage() {
             alignItems: "center",
           }}
         >
-          <CustomerTile initials="GW" color={MC.swatch.GW} size={46} />
+          <CustomerTile
+            initials={shift?.initials || "GW"}
+            color={shift?.color || MC.swatch.GW}
+            size={46}
+          />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
@@ -93,10 +140,12 @@ export default function CheckInPage() {
                 letterSpacing: -0.2,
               }}
             >
-              GreenWave Innovations
+              {shift?.name || "Loading…"}
             </div>
             <div style={{ fontFamily: MC.font, fontSize: 12.5, color: MC.mute, marginTop: 2 }}>
-              Scheduled 08:00 AM – 05:00 PM · Code #6
+              {shift
+                ? `Scheduled ${shift.start} – ${shift.end} · Code #${shift.code}`
+                : "Loading shift…"}
             </div>
           </div>
           <div

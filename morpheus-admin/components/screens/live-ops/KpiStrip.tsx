@@ -1,5 +1,25 @@
+"use client";
+
+/**
+ * KpiStrip — top-of-page KPI cards on Live Ops.
+ *
+ * All values are derived from real data:
+ *   - Reps active now    = distinct rep_id where state='in-progress' (today)
+ *   - Reps total         = profiles where role='rep'
+ *   - Shifts today       = total shifts for today
+ *   - Completed          = shifts where state='complete'
+ *   - On-time check-ins  = % of checked-in shifts where check_in_at <= start
+ *   - Open exceptions    = shifts where state='late' (Phase 4 will add off-site)
+ *   - Avg completion     = mean(tasks_done / tasks_total) across today's shifts
+ *
+ * Sparklines are intentionally placeholder shapes — real time-series data
+ * would need an event log table, deferred to a later phase.
+ */
+
+import { useEffect, useState } from "react";
 import { AC } from "@/lib/tokens";
-import { KPIS } from "@/lib/mock-data";
+import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listProfiles } from "@/lib/profiles-store";
 
 type Tone = "ok" | "warn" | "danger" | "info";
 
@@ -11,14 +31,131 @@ interface KpiItem {
   spark: number[];
 }
 
+interface KpiData {
+  repsActive: number;
+  repsTotal: number;
+  shiftsToday: number;
+  shiftsCompleted: number;
+  onTimePct: number;
+  exceptionsOpen: number;
+  exceptionsLate: number;
+  avgCompletion: number;
+}
+
+function computeKpis(shifts: ShiftRow[], totalReps: number): KpiData {
+  const todayShifts = shifts; // already filtered to today by listShifts()
+
+  const activeRepIds = new Set(
+    todayShifts.filter((s) => s.state === "in-progress" && s.rep_id).map((s) => s.rep_id)
+  );
+
+  const completed = todayShifts.filter((s) => s.state === "complete").length;
+
+  // On-time: of shifts with a check_in_at, what % checked in at or before
+  // their scheduled start_time.
+  const checkedIn = todayShifts.filter((s) => s.check_in_at);
+  const onTime = checkedIn.filter((s) => {
+    if (!s.check_in_at) return false;
+    // start_time is "HH:MM:SS" today; build a Date for today + that time.
+    const [hh, mm] = s.start_time.split(":").map((n) => parseInt(n, 10));
+    const startToday = new Date();
+    startToday.setHours(hh, mm, 0, 0);
+    return new Date(s.check_in_at).getTime() <= startToday.getTime();
+  }).length;
+  const onTimePct = checkedIn.length === 0 ? 0 : Math.round((onTime / checkedIn.length) * 100);
+
+  const late = todayShifts.filter((s) => s.state === "late").length;
+
+  // Avg completion = mean of tasks_done / tasks_total per shift (skip 0-task shifts)
+  const withTasks = todayShifts.filter((s) => s.tasks_total > 0);
+  const avgCompletion =
+    withTasks.length === 0
+      ? 0
+      : Math.round(
+          (withTasks.reduce((sum, s) => sum + s.tasks_done / s.tasks_total, 0) /
+            withTasks.length) *
+            100
+        );
+
+  return {
+    repsActive: activeRepIds.size,
+    repsTotal: totalReps,
+    shiftsToday: todayShifts.length,
+    shiftsCompleted: completed,
+    onTimePct,
+    exceptionsOpen: late,
+    exceptionsLate: late,
+    avgCompletion,
+  };
+}
+
+const PLACEHOLDER_KPIS: KpiData = {
+  repsActive: 0,
+  repsTotal: 0,
+  shiftsToday: 0,
+  shiftsCompleted: 0,
+  onTimePct: 0,
+  exceptionsOpen: 0,
+  exceptionsLate: 0,
+  avgCompletion: 0,
+};
+
 export function KpiStrip() {
-  const k = KPIS;
+  const [k, setK] = useState<KpiData>(PLACEHOLDER_KPIS);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [shifts, reps] = await Promise.all([
+        listShifts(),
+        listProfiles({ role: "rep" }),
+      ]);
+      if (cancelled) return;
+      setK(computeKpis(shifts, reps.length));
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const items: KpiItem[] = [
-    { label: "Reps active now", value: `${k.repsActive}`, sub: `of ${k.repsTotal} on shift`, tone: "ok", spark: [3, 5, 4, 6, 7, 8, 8, 8] },
-    { label: "Shifts today", value: `${k.shiftsToday}`, sub: `${k.shiftsCompleted} completed`, tone: "info", spark: [6, 8, 10, 11, 12, 12, 12, 12] },
-    { label: "On-time check-ins", value: `${k.onTimePct}%`, sub: "↑ 4 pts vs last Mon", tone: "ok", spark: [70, 72, 68, 75, 80, 79, 82, 83] },
-    { label: "Open exceptions", value: `${k.exceptionsOpen}`, sub: "2 late · 1 off-site", tone: "warn", spark: [1, 2, 2, 3, 3, 3, 3, 3] },
-    { label: "Avg shift completion", value: `${k.avgCompletion}%`, sub: "rolling 7-day", tone: "ok", spark: [88, 89, 91, 90, 92, 91, 92, 92] },
+    {
+      label: "Reps active now",
+      value: loading ? "…" : `${k.repsActive}`,
+      sub: `of ${k.repsTotal} on roster`,
+      tone: "ok",
+      spark: [3, 5, 4, 6, 7, 8, 8, 8],
+    },
+    {
+      label: "Shifts today",
+      value: loading ? "…" : `${k.shiftsToday}`,
+      sub: `${k.shiftsCompleted} completed`,
+      tone: "info",
+      spark: [6, 8, 10, 11, 12, 12, 12, 12],
+    },
+    {
+      label: "On-time check-ins",
+      value: loading ? "…" : `${k.onTimePct}%`,
+      sub: "of all checked-in shifts",
+      tone: k.onTimePct >= 80 ? "ok" : k.onTimePct >= 60 ? "warn" : "danger",
+      spark: [70, 72, 68, 75, 80, 79, 82, 83],
+    },
+    {
+      label: "Open exceptions",
+      value: loading ? "…" : `${k.exceptionsOpen}`,
+      sub: k.exceptionsOpen === 0 ? "all clear" : `${k.exceptionsLate} late`,
+      tone: k.exceptionsOpen === 0 ? "ok" : "warn",
+      spark: [1, 2, 2, 3, 3, 3, 3, 3],
+    },
+    {
+      label: "Avg shift completion",
+      value: loading ? "…" : `${k.avgCompletion}%`,
+      sub: "tasks done today",
+      tone: k.avgCompletion >= 80 ? "ok" : "warn",
+      spark: [88, 89, 91, 90, 92, 91, 92, 92],
+    },
   ];
 
   return (
@@ -107,10 +244,24 @@ function KpiCard({ label, value, sub, tone, spark }: KpiItem) {
             const x2 = (i + 1) * (60 / (spark.length - 1));
             const y2 = 22 - (next / max) * 18 - 2;
             return (
-              <line key={i} x1={x} y1={y} x2={x2} y2={y2} stroke={c} strokeWidth="1.5" strokeLinecap="round" />
+              <line
+                key={i}
+                x1={x}
+                y1={y}
+                x2={x2}
+                y2={y2}
+                stroke={c}
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
             );
           })}
-          <circle cx={60} cy={22 - (spark[spark.length - 1] / max) * 18 - 2} r="2.2" fill={c} />
+          <circle
+            cx={60}
+            cy={22 - (spark[spark.length - 1] / max) * 18 - 2}
+            r="2.2"
+            fill={c}
+          />
         </svg>
       </div>
     </div>
