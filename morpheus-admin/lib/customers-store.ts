@@ -21,6 +21,7 @@ interface DbRow {
   latitude: number | null;
   longitude: number | null;
   active: boolean | null;
+  geofence_radius_m: number | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -32,7 +33,7 @@ function rowToCustomer(row: DbRow): Customer {
     code: `#${String(row.code).padStart(4, "0")}`,
     region: (row.region as Customer["region"]) || "North",
     sites: 1,
-    geofence: 75,
+    geofence: row.geofence_radius_m ?? 100,
     shiftsThisWeek: 0,
     tier: "Standard",
     address: row.address ?? undefined,
@@ -116,9 +117,11 @@ export async function createCustomer(
 }
 
 export interface CustomerPatch {
+  name?: string;
   address?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  geofence_radius_m?: number;
 }
 
 export async function updateCustomer(

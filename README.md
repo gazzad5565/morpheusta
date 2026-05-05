@@ -353,6 +353,37 @@ rep_customer_assignments {
   PRIMARY KEY (rep_id, customer_id)
 }
 
+-- custom_fields (Phase 3j, admin-defined fields per entity)
+-- "applies_to" picks which entity the field attaches to. "field_type"
+-- picks the data type. "options" only used for select fields.
+custom_fields {
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid()
+  applies_to  text CHECK (applies_to IN ('customer','rep','shift','task','library_file'))
+  name        text NOT NULL
+  field_type  text CHECK (field_type IN ('text','longtext','number','date','boolean','select'))
+  options     text[] NULL          -- only for select
+  required    boolean DEFAULT false
+  sort_order  int DEFAULT 0
+  created_at  timestamptz
+}
+
+-- custom_field_values (Phase 3j, the actual per-entity data)
+-- Polymorphic — only one of the value_* columns populated per row,
+-- chosen based on the field's type. (field_id, entity_id) is the PK.
+custom_field_values {
+  field_id     uuid → custom_fields ON DELETE CASCADE
+  entity_id    text                      -- the customer/rep/shift/etc id, as text
+  value_text   text NULL
+  value_number numeric NULL
+  value_date   date NULL
+  value_bool   boolean NULL
+  updated_at   timestamptz
+  PRIMARY KEY (field_id, entity_id)
+}
+
+-- customers gained: geofence_radius_m (Phase 3k, default 100m).
+-- Editable on /customers/[id] Address tab.
+
 -- profiles (Phase 3d, auto-populated on signup)
 -- One row per auth.users row. Trigger handle_new_user() inserts on signup.
 profiles {
@@ -391,6 +422,8 @@ Every table has RLS on. The current policies:
 | `library_files` | any authenticated | any authenticated | any authenticated (used by `/library/[id]/edit` to change name / category / customer) | any authenticated |
 | Storage `library/*` | any authenticated | any authenticated | (n/a) | any authenticated |
 | `rep_customer_assignments` | any authenticated | any authenticated | (none — composite PK is immutable; delete + insert) | any authenticated |
+| `custom_fields` | any authenticated | any authenticated | any authenticated | any authenticated |
+| `custom_field_values` | any authenticated | any authenticated | any authenticated | any authenticated |
 
 > ⚠️ Most policies are **temporary Phase 3** — they let any logged-in user perform most actions. In production, these would be tightened to "manager role only" for customers/shifts insert+delete once we add role-based access control. See "Deferred work" below.
 
@@ -505,7 +538,10 @@ Or via CLI: `npx vercel rollback`.
 - **Library multi-customer** — `library_files.customer_id` is now a `customer_ids text[]` array. NULL = "shared with all"; populated = those specific customers. Admin upload + `/library/[id]/edit` use the same reusable `<CustomerScopePicker />` component as `/tasks/new` and `/schedule/new`. Each row shows up to 3 customer chips + a "+N" overflow.
 - **Reusable `CustomerScopePicker`** — single component (`components/ui/CustomerScopePicker.tsx`) used for any "All / Specific (one or many)" customer selection. Drives /tasks/new, /schedule/new, /library upload, /library/[id]/edit. Maintains UI consistency wherever customers are picked.
 - **Rep ↔ Customer assignments** — new `rep_customer_assignments` join table. Visible AND editable from BOTH directions: `/customers/[id]` has an "Assigned reps" multi-select editor; `/reps/[id]` has an "Assigned customers" multi-select editor. Both write to the same join via `setRepsForCustomer` / `setCustomersForRep` (idempotent diff — only the delta is touched).
-- **Customer detail page on real data** — `/customers/[id]` is now a real page: header card with status/address; assigned reps multi-select; tasks list (real `customer_tasks`) with edit/delete inline + "Add task" → `/tasks/new?customer=X`; library files list (real `library_files` filtered to this customer or universal) with click-to-open via signed URL; today's shifts at this customer with rep links + state. Right column shows quick stats (reps assigned, tasks, files, shifts today, address-set indicator). The geofence/sites mock UI is gone — those fields aren't yet schema-backed.
+- **Customer detail page on real data, tabbed** — `/customers/[id]` is now a tabbed page: **Overview** (counts at-a-glance), **Address & geofence** (real MapLibre map with the customer's pin + a live-updating geofence circle whose radius is editable via slider), **Reps** (assigned-reps multi-select, persists via `rep_customer_assignments`), **Tasks** (real `customer_tasks` with inline edit/delete + "Add task"), **Library** (files attached to this customer or universal), **Today's shifts** (real shift rows + rep links), **Custom fields** (the dynamic `<CustomFieldsCard />`). Header card stays visible across tabs.
+- **Customers list page on real data** — `/customers` has working filters (All / Active / Inactive / On the map) with real counts, a search box (name / code / address), and three working views: **Grid** (cards with real status + address indicator), **Table** (dense rows for many customers), **Map** (MapLibre with every customer pin, click-through to detail page). Mock filter chips and the Import button are gone — the Add customer CTA stays.
+- **Custom fields system** — admin defines per-entity custom fields under `/settings`. Each field has a name, type (Short text / Long text / Number / Date / Yes-No / Dropdown), required flag, and order. Define once, fill on every entity's detail page via the `<CustomFieldsCard />`. Backed by `custom_fields` (definitions) + `custom_field_values` (polymorphic values: only one of `value_text` / `value_number` / `value_date` / `value_bool` is populated per row). Required fields are flagged at save time. Customer detail page already renders the card; reps/shifts/tasks/library_files render points are deferred.
+- **Customer geofence radius is real** — `customers.geofence_radius_m` is a real column (default 100m). The customer detail Address tab has a slider + quick-pick buttons (50/75/100/150/250m), persisted to the DB.
 - **Mobile shifts list shows state** — `/shifts` "Scheduled for me" sorts in-progress → scheduled → complete (so finished shifts sink to the bottom), with a green "Complete" badge on done shifts (dimmed, struck-through times) and a brand "In progress" badge with a "Resume shift" button on the active one.
 - **Mobile dashboard is fully real-data** — date is today's actual date, "last sync" is real now, shift count + progress bar reflect today's DB shifts (green segment for complete, brand for in-progress, grey for scheduled), Library shortcut shows real file count, "Up next" picks the in-progress shift first (with "Resume shift") then the next scheduled (with "Check in"), and the route-preview card is a real MapLibre map plotting today's customer pins + the rep's GPS dot.
 - **Library** — admin uploads files at `/library` (with optional customer association) into Supabase Storage bucket `library` + metadata in `library_files`. Mobile `/library` lists everything reps can see; tap any file to open it via a short-lived signed URL.
@@ -636,7 +672,15 @@ morpheus-admin/lib/library-store.ts            ← library_files + Supabase Stor
 morpheus-admin/app/library/page.tsx            ← upload (CustomerScopePicker for multi-customer) + list + filter (sidebar by customer AND by category) + edit/delete inline
 morpheus-admin/app/library/[id]/edit/page.tsx  ← edit name/category/multi-customer association on a single file
 morpheus-admin/lib/assignments-store.ts        ← rep ↔ customer many-to-many helpers (listCustomersForRep, listRepsForCustomer, set… both directions, idempotent diff)
-morpheus-admin/components/ui/CustomerScopePicker.tsx ← reusable "All / Specific (one or many)" picker — used by tasks/new, schedule/new, library upload, library edit
+morpheus-admin/lib/custom-fields-store.ts      ← custom_fields + custom_field_values CRUD; polymorphic value handling
+morpheus-admin/app/settings/page.tsx           ← list all custom fields grouped by entity + delete inline
+morpheus-admin/app/settings/fields/new/page.tsx ← create a custom field
+morpheus-admin/app/settings/fields/[id]/edit/page.tsx ← edit / delete an existing field
+morpheus-admin/components/ui/CustomFieldForm.tsx     ← shared create/edit form
+morpheus-admin/components/ui/CustomFieldsCard.tsx    ← drop into any entity detail page; renders + saves field values
+morpheus-admin/components/ui/CustomerScopePicker.tsx ← reusable "All / Specific (one or many)" picker
+morpheus-admin/components/CustomersMap.tsx     ← MapLibre map view for /customers (every customer pin)
+morpheus-admin/components/CustomerAddressMap.tsx ← MapLibre map for the /customers/[id] Address tab (pin + live geofence circle)
 morpheus-mobile/lib/library-store.ts           ← read-only library list + signed-URL fetcher
 morpheus-mobile/lib/shifts-store.ts            ← also exports getTasksForCustomer for /active
 morpheus-admin/app/api/geocode/route.ts        ← Nominatim geocode proxy (address → lat/lng)

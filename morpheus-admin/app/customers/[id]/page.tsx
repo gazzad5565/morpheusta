@@ -1,20 +1,20 @@
 "use client";
 
 /**
- * Customer detail — real data.
+ * Customer detail — real data, tabbed.
  *
- * Shows:
- *   - Header card with name, code, address, status, active toggle, edit/delete
- *   - Assigned reps editor (multi-select, edits rep_customer_assignments)
- *   - Tasks for this customer (real customer_tasks rows; "+ Add task")
- *   - Library files for this customer (real library_files rows; "+ Upload" → /library)
- *   - Recent shifts (last 30 days, real shifts rows)
- *
- * The geofence/sites mock UI from the previous version is gone — those
- * fields aren't yet schema-backed.
+ * Tabs:
+ *   - Overview: header + at-a-glance counts
+ *   - Address: MapLibre map + address text + geofence radius slider
+ *   - Reps: assigned reps multi-select
+ *   - Tasks: customer's task templates
+ *   - Library: files attached to this customer
+ *   - Shifts: today's shifts at this customer
+ *   - Custom fields: dynamic admin-defined fields
  */
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
@@ -27,6 +27,7 @@ import {
   getCustomer,
   setCustomerActive,
   deleteCustomer,
+  updateCustomer,
 } from "@/lib/customers-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import {
@@ -41,7 +42,26 @@ import {
   type LibraryFile,
 } from "@/lib/library-store";
 import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
+
+// MapLibre needs `window`; load on client only.
+const AddressMap = dynamic(
+  () => import("@/components/CustomerAddressMap").then((m) => m.CustomerAddressMap),
+  { ssr: false }
+);
+
+type TabKey = "overview" | "address" | "reps" | "tasks" | "library" | "shifts" | "custom";
+
+const TABS: { key: TabKey; label: string; glyph: GlyphName }[] = [
+  { key: "overview", label: "Overview", glyph: "info" },
+  { key: "address", label: "Address & geofence", glyph: "pin" },
+  { key: "reps", label: "Reps", glyph: "reps" },
+  { key: "tasks", label: "Tasks", glyph: "tasks" },
+  { key: "library", label: "Library", glyph: "lib" },
+  { key: "shifts", label: "Today's shifts", glyph: "cal" },
+  { key: "custom", label: "Custom fields", glyph: "settings" },
+];
 
 function formatTimeRange(start: string, end: string): string {
   const fmt = (t: string) => {
@@ -67,6 +87,8 @@ export default function CustomerDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
 
+  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+
   const [c, setC] = useState<Customer | null>(null);
   const [allReps, setAllReps] = useState<Profile[]>([]);
   const [assignedRepIds, setAssignedRepIds] = useState<string[]>([]);
@@ -80,30 +102,34 @@ export default function CustomerDetailPage() {
   const [savingAssignments, setSavingAssignments] = useState(false);
   const [taskBusyId, setTaskBusyId] = useState<string | null>(null);
 
-  // Load everything for this customer in parallel.
-  const reload = async (alsoLoadCustomer = true) => {
-    const [customerRow, reps, repIds, taskRows, fileRows, shiftRows] = await Promise.all([
-      alsoLoadCustomer ? getCustomer(id) : Promise.resolve(c),
-      listProfiles({ role: "rep" }),
-      listRepsForCustomer(id),
-      listTasksForCustomer(id),
-      listLibraryFilesForCustomer(id),
-      // Shifts table doesn't have a "for customer" helper; fetch a wide
-      // window of recent shifts and filter client-side. Cheap at small scale.
-      listShifts({ limit: 200 }),
-    ]);
-    if (alsoLoadCustomer) setC(customerRow);
-    setAllReps(reps);
-    setAssignedRepIds(repIds);
-    setTasks(taskRows);
-    setFiles(fileRows);
-    setShifts(shiftRows.filter((s) => s.customer_id === id));
-    setLoading(false);
-  };
+  // Geofence radius local state for the slider on the Address tab.
+  const [geofenceRadius, setGeofenceRadius] = useState<number>(100);
+  const [savingGeofence, setSavingGeofence] = useState(false);
 
   useEffect(() => {
-    reload(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    (async () => {
+      const [customerRow, reps, repIds, taskRows, fileRows, shiftRows] = await Promise.all([
+        getCustomer(id),
+        listProfiles({ role: "rep" }),
+        listRepsForCustomer(id),
+        listTasksForCustomer(id),
+        listLibraryFilesForCustomer(id),
+        listShifts({ limit: 200 }),
+      ]);
+      if (cancelled) return;
+      setC(customerRow);
+      setAllReps(reps);
+      setAssignedRepIds(repIds);
+      setTasks(taskRows);
+      setFiles(fileRows);
+      setShifts(shiftRows.filter((s) => s.customer_id === id));
+      if (customerRow) setGeofenceRadius(customerRow.geofence ?? 100);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (loading) {
@@ -118,7 +144,7 @@ export default function CustomerDetailPage() {
     return (
       <AdminShell breadcrumbs={["Home", "Customers", "Not found"]}>
         <div style={{ padding: 20, color: AC.danger, fontFamily: AC.font }}>
-          Customer not found. It may have been deleted, or you may need to log in.
+          Customer not found.
         </div>
       </AdminShell>
     );
@@ -141,10 +167,7 @@ export default function CustomerDetailPage() {
 
   async function onDelete() {
     if (busy) return;
-    const ok = window.confirm(
-      `Permanently delete "${c!.name}"? This can't be undone.`
-    );
-    if (!ok) return;
+    if (!window.confirm(`Permanently delete "${c!.name}"? This can't be undone.`)) return;
     setActionError(null);
     setBusy(true);
     const result = await deleteCustomer(id);
@@ -166,6 +189,18 @@ export default function CustomerDetailPage() {
       return;
     }
     setAssignedRepIds(newIds);
+  }
+
+  async function onSaveGeofence() {
+    if (savingGeofence || !c) return;
+    setSavingGeofence(true);
+    const r = await updateCustomer(id, { geofence_radius_m: geofenceRadius });
+    setSavingGeofence(false);
+    if (!r.ok) {
+      setActionError(r.error || "Failed to update geofence.");
+      return;
+    }
+    setC({ ...c, geofence: geofenceRadius });
   }
 
   async function onDeleteTask(t: TaskRow) {
@@ -212,557 +247,953 @@ export default function CustomerDetailPage() {
         </div>
       }
     >
-      <div
-        style={{
-          padding: 20,
-          display: "grid",
-          gridTemplateColumns: "1fr 360px",
-          gap: 16,
-          alignItems: "start",
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {actionError && (
-            <div
-              style={{
-                padding: "10px 12px",
-                background: AC.dangerTint,
-                color: "#9c1a3c",
-                borderRadius: 10,
-                fontFamily: AC.font,
-                fontSize: 13,
-                fontWeight: 500,
-              }}
-            >
-              {actionError}
-            </div>
-          )}
+      <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+        {actionError && (
+          <div
+            style={{
+              padding: "10px 12px",
+              background: AC.dangerTint,
+              color: "#9c1a3c",
+              borderRadius: 10,
+              fontFamily: AC.font,
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
+            {actionError}
+          </div>
+        )}
 
-          {/* Header card */}
-          <Card padding={20}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-              <CustomerSwatch customer={c} size={56} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 19,
-                    fontWeight: 700,
-                    color: AC.ink,
-                    letterSpacing: -0.4,
-                  }}
-                >
-                  {c.name}
-                </div>
-                <div
-                  style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute, marginTop: 2 }}
-                >
-                  Account #{c.code} · {c.region || "—"}
-                </div>
-                {c.address && (
-                  <div
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 12.5,
-                      color: AC.ink2,
-                      fontWeight: 500,
-                      marginTop: 6,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <AGlyph name="pin" size={12} color={AC.mute} />
-                    {c.address}
-                    {c.latitude != null && c.longitude != null && (
-                      <span
-                        style={{
-                          fontFamily: AC.fontMono,
-                          fontSize: 11,
-                          color: AC.mute,
-                          marginLeft: 6,
-                        }}
-                      >
-                        {c.latitude.toFixed(4)}, {c.longitude.toFixed(4)}
-                      </span>
-                    )}
-                  </div>
-                )}
-                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                  <span
-                    style={{
-                      padding: "3px 9px",
-                      borderRadius: 99,
-                      background: isActive ? AC.okTint : AC.bg,
-                      color: isActive ? "#0F5A38" : AC.mute,
-                      fontFamily: AC.font,
-                      fontSize: 11,
-                      fontWeight: 700,
-                    }}
-                  >
-                    ● {isActive ? "Active" : "Inactive"}
-                  </span>
-                  <span
-                    style={{
-                      padding: "3px 9px",
-                      borderRadius: 99,
-                      background: AC.bg,
-                      color: AC.ink2,
-                      fontFamily: AC.font,
-                      fontSize: 11,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {assignedRepIds.length} rep{assignedRepIds.length === 1 ? "" : "s"} assigned
-                  </span>
-                  <span
-                    style={{
-                      padding: "3px 9px",
-                      borderRadius: 99,
-                      background: AC.bg,
-                      color: AC.ink2,
-                      fontFamily: AC.font,
-                      fontSize: 11,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {tasks.length} task{tasks.length === 1 ? "" : "s"} defined
-                  </span>
-                </div>
+        {/* Header card — visible on every tab */}
+        <Card padding={20}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+            <CustomerSwatch customer={c} size={56} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 19,
+                  fontWeight: 700,
+                  color: AC.ink,
+                  letterSpacing: -0.4,
+                }}
+              >
+                {c.name}
+              </div>
+              <div
+                style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute, marginTop: 2 }}
+              >
+                Account #{c.code} · {c.region || "—"}
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <Pill
+                  label={isActive ? "● Active" : "● Inactive"}
+                  bg={isActive ? AC.okTint : AC.bg}
+                  fg={isActive ? "#0F5A38" : AC.mute}
+                />
+                <Pill
+                  label={`${assignedRepIds.length} rep${assignedRepIds.length === 1 ? "" : "s"}`}
+                  bg={AC.bg}
+                  fg={AC.ink2}
+                />
+                <Pill
+                  label={`${tasks.length} task${tasks.length === 1 ? "" : "s"}`}
+                  bg={AC.bg}
+                  fg={AC.ink2}
+                />
+                <Pill
+                  label={`${files.length} file${files.length === 1 ? "" : "s"}`}
+                  bg={AC.bg}
+                  fg={AC.ink2}
+                />
               </div>
             </div>
-          </Card>
+          </div>
+        </Card>
 
-          {/* Assigned reps editor */}
-          <Card padding={0}>
-            <div
-              style={{
-                padding: "14px 16px",
-                borderBottom: `1px solid ${AC.line}`,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
-              <SectionTitle>Assigned reps</SectionTitle>
-              <span
+        {/* Tab bar */}
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            borderBottom: `1px solid ${AC.line}`,
+            overflowX: "auto",
+          }}
+        >
+          {TABS.map((t) => {
+            const active = activeTab === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setActiveTab(t.key)}
                 style={{
-                  padding: "2px 7px",
-                  borderRadius: 99,
-                  background: AC.bg,
-                  color: AC.mute,
+                  padding: "10px 14px",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: active
+                    ? `2px solid ${AC.ink}`
+                    : "2px solid transparent",
+                  marginBottom: -1,
+                  cursor: "pointer",
                   fontFamily: AC.font,
-                  fontSize: 11,
-                  fontWeight: 600,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: active ? AC.ink : AC.mute,
+                  letterSpacing: -0.1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  whiteSpace: "nowrap",
                 }}
               >
-                {assignedRepIds.length}
-              </span>
-              <div style={{ flex: 1 }} />
-              {savingAssignments && (
-                <span style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute }}>
-                  Saving…
-                </span>
-              )}
-            </div>
-            <div style={{ padding: 16 }}>
-              {allReps.length === 0 ? (
-                <div
-                  style={{
-                    padding: 18,
-                    background: AC.bg,
-                    borderRadius: 10,
-                    fontFamily: AC.font,
-                    fontSize: 13,
-                    color: AC.mute,
-                    textAlign: "center",
-                  }}
-                >
-                  No reps yet. Reps appear here once they sign up via the mobile app.
-                </div>
-              ) : (
-                <RepMultiSelect
-                  reps={allReps}
-                  selectedIds={assignedRepIds}
-                  onChange={onSaveAssignments}
-                />
-              )}
-            </div>
-          </Card>
-
-          {/* Tasks for this customer */}
-          <Card padding={0}>
-            <div
-              style={{
-                padding: "14px 16px",
-                borderBottom: `1px solid ${AC.line}`,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
-              <SectionTitle>Tasks</SectionTitle>
-              <span
-                style={{
-                  padding: "2px 7px",
-                  borderRadius: 99,
-                  background: AC.bg,
-                  color: AC.mute,
-                  fontFamily: AC.font,
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              >
-                {tasks.length}
-              </span>
-              <div style={{ flex: 1 }} />
-              <Link
-                href={`/tasks/new?customer=${id}`}
-                style={{ textDecoration: "none" }}
-              >
-                <Btn size="sm" icon="plus">
-                  Add task
-                </Btn>
-              </Link>
-            </div>
-            <div>
-              {tasks.length === 0 ? (
-                <Empty
-                  text="No tasks defined for this customer."
-                  sub="Tasks tell the rep what to do during a shift here."
-                />
-              ) : (
-                tasks.map((t, i) => (
-                  <div
-                    key={t.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 100px 90px 60px",
-                      gap: 14,
-                      alignItems: "center",
-                      padding: "12px 16px",
-                      borderBottom:
-                        i < tasks.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-                      background: "#fff",
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          fontFamily: AC.font,
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: AC.ink,
-                        }}
-                      >
-                        {t.name}
-                      </div>
-                      {t.description && (
-                        <div
-                          style={{
-                            fontFamily: AC.font,
-                            fontSize: 11.5,
-                            color: AC.mute,
-                            marginTop: 2,
-                          }}
-                        >
-                          {t.description}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <span
-                        style={{
-                          padding: "2px 8px",
-                          borderRadius: 99,
-                          fontFamily: AC.font,
-                          fontSize: 10.5,
-                          fontWeight: 700,
-                          letterSpacing: 0.3,
-                          textTransform: "uppercase",
-                          background: t.compulsory ? AC.dangerTint : AC.brandSoft,
-                          color: t.compulsory ? AC.danger : AC.brandDeep,
-                        }}
-                      >
-                        {t.compulsory ? "Compulsory" : "Optional"}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: AC.fontMono,
-                        fontSize: 12,
-                        color: AC.ink2,
-                        fontWeight: 600,
-                      }}
-                    >
-                      ~{t.duration_min}m
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
-                      <Link
-                        href={`/tasks/${t.id}/edit`}
-                        title="Edit task"
-                        style={iconBtn}
-                      >
-                        <AGlyph name="edit" size={14} color={AC.mute} />
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteTask(t)}
-                        disabled={taskBusyId === t.id}
-                        title="Delete task"
-                        style={{
-                          ...iconBtn,
-                          cursor: taskBusyId === t.id ? "not-allowed" : "pointer",
-                          opacity: taskBusyId === t.id ? 0.4 : 1,
-                        }}
-                      >
-                        <AGlyph name="x" size={14} color={AC.mute} />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-
-          {/* Library files for this customer */}
-          <Card padding={0}>
-            <div
-              style={{
-                padding: "14px 16px",
-                borderBottom: `1px solid ${AC.line}`,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
-              <SectionTitle>Library</SectionTitle>
-              <span
-                style={{
-                  padding: "2px 7px",
-                  borderRadius: 99,
-                  background: AC.bg,
-                  color: AC.mute,
-                  fontFamily: AC.font,
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              >
-                {files.length}
-              </span>
-              <div style={{ flex: 1 }} />
-              <Link href="/library" style={{ textDecoration: "none" }}>
-                <Btn size="sm">Manage all</Btn>
-              </Link>
-            </div>
-            <div>
-              {files.length === 0 ? (
-                <Empty
-                  text="No files for this customer."
-                  sub="Upload from the Library page and pick this customer (or 'Shared with all') to attach."
-                />
-              ) : (
-                files.map((f, i) => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => onOpenFile(f)}
-                    style={{
-                      width: "100%",
-                      display: "grid",
-                      gridTemplateColumns: "1fr 110px 80px 80px",
-                      gap: 14,
-                      alignItems: "center",
-                      padding: "12px 16px",
-                      borderBottom:
-                        i < files.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-                      background: "#fff",
-                      border: "none",
-                      cursor: "pointer",
-                      textAlign: "left",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontFamily: AC.font,
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: AC.ink,
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {f.name}
-                    </div>
-                    <span
-                      style={{
-                        padding: "2px 8px",
-                        borderRadius: 99,
-                        fontFamily: AC.font,
-                        fontSize: 10.5,
-                        fontWeight: 700,
-                        background: f.customerIds === null ? AC.brandSoft : AC.bg,
-                        color: f.customerIds === null ? AC.brandInk : AC.ink2,
-                        border: f.customerIds === null ? "none" : `1px solid ${AC.line}`,
-                        justifySelf: "start",
-                      }}
-                    >
-                      {f.customerIds === null ? "All customers" : f.category || "—"}
-                    </span>
-                    <div
-                      style={{
-                        fontFamily: AC.fontMono,
-                        fontSize: 11.5,
-                        color: AC.mute,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {formatFileSize(f.sizeBytes)}
-                    </div>
-                    <div
-                      style={{ display: "flex", justifyContent: "flex-end", color: AC.mute }}
-                    >
-                      <AGlyph name="chev-r" size={14} color={AC.mute} />
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          </Card>
-
-          {/* Recent shifts */}
-          <Card padding={0}>
-            <div
-              style={{
-                padding: "14px 16px",
-                borderBottom: `1px solid ${AC.line}`,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
-              <SectionTitle>Today's shifts here</SectionTitle>
-              <span
-                style={{
-                  padding: "2px 7px",
-                  borderRadius: 99,
-                  background: AC.bg,
-                  color: AC.mute,
-                  fontFamily: AC.font,
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              >
-                {shifts.length}
-              </span>
-            </div>
-            <div>
-              {shifts.length === 0 ? (
-                <Empty text="No shifts scheduled at this customer today." />
-              ) : (
-                shifts.map((s, i) => (
-                  <div
-                    key={s.id}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "140px 1fr 110px",
-                      gap: 14,
-                      alignItems: "center",
-                      padding: "10px 16px",
-                      borderBottom:
-                        i < shifts.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-                      background: "#fff",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontFamily: AC.font,
-                        fontSize: 12,
-                        color: AC.ink2,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {formatTimeRange(s.start_time, s.end_time)}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: AC.font,
-                        fontSize: 12.5,
-                        color: AC.ink,
-                        fontWeight: 500,
-                      }}
-                    >
-                      {s.rep_id ? (
-                        <Link
-                          href={`/reps/${s.rep_id}`}
-                          style={{ color: AC.brandDeep, textDecoration: "none" }}
-                        >
-                          rep ↗
-                        </Link>
-                      ) : (
-                        <span style={{ color: AC.mute }}>Unassigned · claimable</span>
-                      )}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: AC.font,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color:
-                          s.state === "complete"
-                            ? AC.ok
-                            : s.state === "in-progress"
-                            ? AC.brandDeep
-                            : AC.mute,
-                        textTransform: "capitalize",
-                        textAlign: "right",
-                      }}
-                    >
-                      {s.state.replace("-", " ")}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
+                <AGlyph name={t.glyph} size={13} color={active ? AC.ink : AC.mute} />
+                {t.label}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Right column — quick stats */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Card padding={16}>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 11,
-                fontWeight: 600,
-                color: AC.mute,
-                letterSpacing: 0.4,
-                textTransform: "uppercase",
-                marginBottom: 8,
-              }}
-            >
-              At a glance
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <Kv label="Reps assigned" value={`${assignedRepIds.length}`} />
-              <Kv label="Tasks defined" value={`${tasks.length}`} />
-              <Kv label="Library files" value={`${files.length}`} />
-              <Kv label="Shifts today" value={`${shifts.length}`} />
-              <Kv
-                label="Address"
-                value={c.address ? "Set" : "Not set"}
-                tone={c.address ? "ok" : "warn"}
-              />
-            </div>
-          </Card>
-        </div>
+        {/* Tab content */}
+        {activeTab === "overview" && (
+          <OverviewTab
+            customer={c}
+            stats={{
+              repsAssigned: assignedRepIds.length,
+              tasks: tasks.length,
+              files: files.length,
+              shiftsToday: shifts.length,
+            }}
+          />
+        )}
+
+        {activeTab === "address" && (
+          <AddressTab
+            customer={c}
+            geofenceRadius={geofenceRadius}
+            setGeofenceRadius={setGeofenceRadius}
+            saving={savingGeofence}
+            onSave={onSaveGeofence}
+            onEdit={() => router.push(`/customers/${id}/edit`)}
+          />
+        )}
+
+        {activeTab === "reps" && (
+          <RepsTab
+            allReps={allReps}
+            assignedRepIds={assignedRepIds}
+            saving={savingAssignments}
+            onSave={onSaveAssignments}
+          />
+        )}
+
+        {activeTab === "tasks" && (
+          <TasksTab
+            customerId={id}
+            tasks={tasks}
+            taskBusyId={taskBusyId}
+            onDeleteTask={onDeleteTask}
+          />
+        )}
+
+        {activeTab === "library" && (
+          <LibraryTab files={files} onOpen={onOpenFile} />
+        )}
+
+        {activeTab === "shifts" && (
+          <ShiftsTab shifts={shifts} customerId={id} />
+        )}
+
+        {activeTab === "custom" && (
+          <CustomFieldsCard entity="customer" entityId={id} />
+        )}
       </div>
     </AdminShell>
   );
 }
 
-// ─── Sub-components ─────────────────────────────────────────────────────
+// ─── Tab components ─────────────────────────────────────────────────────
+
+function OverviewTab({
+  customer,
+  stats,
+}: {
+  customer: Customer;
+  stats: {
+    repsAssigned: number;
+    tasks: number;
+    files: number;
+    shiftsToday: number;
+  };
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, alignItems: "start" }}>
+      <Card padding={20}>
+        <SectionTitle>Quick summary</SectionTitle>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: 12,
+            marginTop: 12,
+          }}
+        >
+          <Stat label="Reps assigned" value={stats.repsAssigned} />
+          <Stat label="Tasks defined" value={stats.tasks} />
+          <Stat label="Library files" value={stats.files} />
+          <Stat label="Shifts today" value={stats.shiftsToday} />
+        </div>
+        <div
+          style={{
+            marginTop: 16,
+            padding: "12px 14px",
+            background: AC.brandSoft,
+            borderRadius: 10,
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            color: AC.brandInk,
+            lineHeight: 1.5,
+          }}
+        >
+          Use the tabs above to manage this customer's address &amp; geofence, assigned reps,
+          tasks, library files, today's shifts, and any custom fields you've defined in
+          Settings.
+        </div>
+      </Card>
+      <Card padding={16}>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 600,
+            color: AC.mute,
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+            marginBottom: 8,
+          }}
+        >
+          Address
+        </div>
+        {customer.address ? (
+          <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.ink, lineHeight: 1.5 }}>
+            <AGlyph name="pin" size={12} color={AC.mute} /> {customer.address}
+            {customer.latitude != null && customer.longitude != null && (
+              <div
+                style={{
+                  fontFamily: AC.fontMono,
+                  fontSize: 11,
+                  color: AC.mute,
+                  marginTop: 4,
+                }}
+              >
+                {customer.latitude.toFixed(4)}, {customer.longitude.toFixed(4)}
+              </div>
+            )}
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 11,
+                color: AC.mute,
+                marginTop: 4,
+              }}
+            >
+              Geofence: {customer.geofence}m
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.mute }}>
+            No address set yet. Open the Address tab to add one.
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function AddressTab({
+  customer,
+  geofenceRadius,
+  setGeofenceRadius,
+  saving,
+  onSave,
+  onEdit,
+}: {
+  customer: Customer;
+  geofenceRadius: number;
+  setGeofenceRadius: (v: number) => void;
+  saving: boolean;
+  onSave: () => void;
+  onEdit: () => void;
+}) {
+  const hasCoords = customer.latitude != null && customer.longitude != null;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, alignItems: "start" }}>
+      <Card padding={0}>
+        {hasCoords ? (
+          <AddressMap
+            lat={customer.latitude!}
+            lng={customer.longitude!}
+            radiusM={geofenceRadius}
+            color={customer.color}
+            initials={customer.initials}
+          />
+        ) : (
+          <div
+            style={{
+              height: 360,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "column",
+              fontFamily: AC.font,
+              color: AC.mute,
+              fontSize: 13,
+              gap: 10,
+              background: "#F1F4F7",
+            }}
+          >
+            <AGlyph name="pin" size={28} color={AC.faint} />
+            <div>No address set yet.</div>
+            <Btn icon="edit" size="sm" onClick={onEdit}>
+              Set address
+            </Btn>
+          </div>
+        )}
+      </Card>
+
+      <Card padding={16}>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 600,
+            color: AC.mute,
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+            marginBottom: 8,
+          }}
+        >
+          Address
+        </div>
+        {customer.address ? (
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 13,
+              color: AC.ink,
+              lineHeight: 1.5,
+              marginBottom: 12,
+            }}
+          >
+            {customer.address}
+            {hasCoords && (
+              <div
+                style={{
+                  fontFamily: AC.fontMono,
+                  fontSize: 11,
+                  color: AC.mute,
+                  marginTop: 4,
+                }}
+              >
+                {customer.latitude!.toFixed(5)}, {customer.longitude!.toFixed(5)}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12.5,
+              color: AC.mute,
+              marginBottom: 12,
+            }}
+          >
+            None yet.
+          </div>
+        )}
+        <Btn size="sm" icon="edit" onClick={onEdit}>
+          Change address
+        </Btn>
+
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 600,
+            color: AC.mute,
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+            marginTop: 22,
+            marginBottom: 8,
+          }}
+        >
+          Geofence radius
+        </div>
+        <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.mute, marginBottom: 10, lineHeight: 1.5 }}>
+          The check-in distance allowance for reps. Smaller = stricter on-site check-in.
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <input
+            type="range"
+            min={25}
+            max={500}
+            step={5}
+            value={geofenceRadius}
+            onChange={(e) => setGeofenceRadius(parseInt(e.target.value, 10))}
+            style={{ flex: 1, accentColor: AC.brand }}
+          />
+          <div
+            style={{
+              fontFamily: AC.fontMono,
+              fontSize: 13,
+              color: AC.ink,
+              fontWeight: 700,
+              minWidth: 56,
+              textAlign: "right",
+            }}
+          >
+            {geofenceRadius}m
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
+          {[50, 75, 100, 150, 250].map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setGeofenceRadius(v)}
+              style={{
+                flex: 1,
+                padding: "5px 0",
+                borderRadius: 6,
+                background: v === geofenceRadius ? AC.ink : "#fff",
+                color: v === geofenceRadius ? "#fff" : AC.ink2,
+                border: `1px solid ${v === geofenceRadius ? AC.ink : AC.line}`,
+                fontFamily: AC.font,
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              {v}m
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+          <Btn
+            kind="primary"
+            size="sm"
+            onClick={onSave}
+            disabled={saving || customer.geofence === geofenceRadius}
+          >
+            {saving ? "Saving…" : "Save geofence"}
+          </Btn>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function RepsTab({
+  allReps,
+  assignedRepIds,
+  saving,
+  onSave,
+}: {
+  allReps: Profile[];
+  assignedRepIds: string[];
+  saving: boolean;
+  onSave: (next: string[]) => void;
+}) {
+  return (
+    <Card padding={0}>
+      <div
+        style={{
+          padding: "14px 16px",
+          borderBottom: `1px solid ${AC.line}`,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <SectionTitle>Assigned reps</SectionTitle>
+        <span
+          style={{
+            padding: "2px 7px",
+            borderRadius: 99,
+            background: AC.bg,
+            color: AC.mute,
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {assignedRepIds.length}
+        </span>
+        <div style={{ flex: 1 }} />
+        {saving && (
+          <span style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute }}>Saving…</span>
+        )}
+      </div>
+      <div style={{ padding: 16 }}>
+        {allReps.length === 0 ? (
+          <div
+            style={{
+              padding: 18,
+              background: AC.bg,
+              borderRadius: 10,
+              fontFamily: AC.font,
+              fontSize: 13,
+              color: AC.mute,
+              textAlign: "center",
+            }}
+          >
+            No reps yet. Reps appear here once they sign up via the mobile app.
+          </div>
+        ) : (
+          <RepMultiSelect reps={allReps} selectedIds={assignedRepIds} onChange={onSave} />
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function TasksTab({
+  customerId,
+  tasks,
+  taskBusyId,
+  onDeleteTask,
+}: {
+  customerId: string;
+  tasks: TaskRow[];
+  taskBusyId: string | null;
+  onDeleteTask: (t: TaskRow) => void;
+}) {
+  return (
+    <Card padding={0}>
+      <div
+        style={{
+          padding: "14px 16px",
+          borderBottom: `1px solid ${AC.line}`,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <SectionTitle>Tasks at this customer</SectionTitle>
+        <span
+          style={{
+            padding: "2px 7px",
+            borderRadius: 99,
+            background: AC.bg,
+            color: AC.mute,
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {tasks.length}
+        </span>
+        <div style={{ flex: 1 }} />
+        <Link
+          href={`/tasks/new?customer=${customerId}`}
+          style={{ textDecoration: "none" }}
+        >
+          <Btn size="sm" icon="plus">
+            Add task
+          </Btn>
+        </Link>
+      </div>
+      <div>
+        {tasks.length === 0 ? (
+          <Empty
+            text="No tasks defined yet."
+            sub="Tasks tell the rep what to do during a shift here."
+          />
+        ) : (
+          tasks.map((t, i) => (
+            <div
+              key={t.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 100px 90px 60px",
+                gap: 14,
+                alignItems: "center",
+                padding: "12px 16px",
+                borderBottom: i < tasks.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                background: "#fff",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: AC.ink,
+                  }}
+                >
+                  {t.name}
+                </div>
+                {t.description && (
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 11.5,
+                      color: AC.mute,
+                      marginTop: 2,
+                    }}
+                  >
+                    {t.description}
+                  </div>
+                )}
+              </div>
+              <div>
+                <span
+                  style={{
+                    padding: "2px 8px",
+                    borderRadius: 99,
+                    fontFamily: AC.font,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                    background: t.compulsory ? AC.dangerTint : AC.brandSoft,
+                    color: t.compulsory ? AC.danger : AC.brandDeep,
+                  }}
+                >
+                  {t.compulsory ? "Compulsory" : "Optional"}
+                </span>
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.fontMono,
+                  fontSize: 12,
+                  color: AC.ink2,
+                  fontWeight: 600,
+                }}
+              >
+                ~{t.duration_min}m
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
+                <Link href={`/tasks/${t.id}/edit`} title="Edit task" style={iconBtn}>
+                  <AGlyph name="edit" size={14} color={AC.mute} />
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => onDeleteTask(t)}
+                  disabled={taskBusyId === t.id}
+                  title="Delete task"
+                  style={{
+                    ...iconBtn,
+                    cursor: taskBusyId === t.id ? "not-allowed" : "pointer",
+                    opacity: taskBusyId === t.id ? 0.4 : 1,
+                  }}
+                >
+                  <AGlyph name="x" size={14} color={AC.mute} />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function LibraryTab({
+  files,
+  onOpen,
+}: {
+  files: LibraryFile[];
+  onOpen: (f: LibraryFile) => void;
+}) {
+  return (
+    <Card padding={0}>
+      <div
+        style={{
+          padding: "14px 16px",
+          borderBottom: `1px solid ${AC.line}`,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <SectionTitle>Library files for this customer</SectionTitle>
+        <span
+          style={{
+            padding: "2px 7px",
+            borderRadius: 99,
+            background: AC.bg,
+            color: AC.mute,
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {files.length}
+        </span>
+        <div style={{ flex: 1 }} />
+        <Link href="/library" style={{ textDecoration: "none" }}>
+          <Btn size="sm">Manage all</Btn>
+        </Link>
+      </div>
+      <div>
+        {files.length === 0 ? (
+          <Empty
+            text="No files for this customer."
+            sub="Upload from the Library page and pick this customer (or 'Shared with all') to attach."
+          />
+        ) : (
+          files.map((f, i) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => onOpen(f)}
+              style={{
+                width: "100%",
+                display: "grid",
+                gridTemplateColumns: "1fr 110px 80px 80px",
+                gap: 14,
+                alignItems: "center",
+                padding: "12px 16px",
+                borderBottom: i < files.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                background: "#fff",
+                border: "none",
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: AC.ink,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {f.name}
+              </div>
+              <span
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: 99,
+                  fontFamily: AC.font,
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  background: f.customerIds === null ? AC.brandSoft : AC.bg,
+                  color: f.customerIds === null ? AC.brandInk : AC.ink2,
+                  border: f.customerIds === null ? "none" : `1px solid ${AC.line}`,
+                  justifySelf: "start",
+                }}
+              >
+                {f.customerIds === null ? "All customers" : f.category || "—"}
+              </span>
+              <div
+                style={{
+                  fontFamily: AC.fontMono,
+                  fontSize: 11.5,
+                  color: AC.mute,
+                  fontWeight: 600,
+                }}
+              >
+                {formatFileSize(f.sizeBytes)}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", color: AC.mute }}>
+                <AGlyph name="chev-r" size={14} color={AC.mute} />
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function ShiftsTab({ shifts, customerId }: { shifts: ShiftRow[]; customerId: string }) {
+  return (
+    <Card padding={0}>
+      <div
+        style={{
+          padding: "14px 16px",
+          borderBottom: `1px solid ${AC.line}`,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <SectionTitle>Shifts at this customer (today)</SectionTitle>
+        <span
+          style={{
+            padding: "2px 7px",
+            borderRadius: 99,
+            background: AC.bg,
+            color: AC.mute,
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {shifts.length}
+        </span>
+        <div style={{ flex: 1 }} />
+        <Link
+          href={`/schedule/new?customer=${customerId}`}
+          style={{ textDecoration: "none" }}
+        >
+          <Btn size="sm" icon="plus">
+            Schedule
+          </Btn>
+        </Link>
+      </div>
+      <div>
+        {shifts.length === 0 ? (
+          <Empty text="No shifts scheduled at this customer today." />
+        ) : (
+          shifts.map((s, i) => (
+            <div
+              key={s.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "140px 1fr 110px",
+                gap: 14,
+                alignItems: "center",
+                padding: "10px 16px",
+                borderBottom: i < shifts.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                background: "#fff",
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 12,
+                  color: AC.ink2,
+                  fontWeight: 600,
+                }}
+              >
+                {formatTimeRange(s.start_time, s.end_time)}
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  color: AC.ink,
+                  fontWeight: 500,
+                }}
+              >
+                {s.rep_id ? (
+                  <Link
+                    href={`/reps/${s.rep_id}`}
+                    style={{ color: AC.brandDeep, textDecoration: "none" }}
+                  >
+                    Rep ↗
+                  </Link>
+                ) : (
+                  <span style={{ color: AC.mute }}>Unassigned · claimable</span>
+                )}
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color:
+                    s.state === "complete"
+                      ? AC.ok
+                      : s.state === "in-progress"
+                      ? AC.brandDeep
+                      : AC.mute,
+                  textTransform: "capitalize",
+                  textAlign: "right",
+                }}
+              >
+                {s.state.replace("-", " ")}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────
+
+function Pill({ label, bg, fg }: { label: string; bg: string; fg: string }) {
+  return (
+    <span
+      style={{
+        padding: "3px 9px",
+        borderRadius: 99,
+        background: bg,
+        color: fg,
+        fontFamily: AC.font,
+        fontSize: 11,
+        fontWeight: 700,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div
+      style={{
+        padding: "12px 14px",
+        borderRadius: 10,
+        background: AC.bg,
+        border: `1px solid ${AC.line}`,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          color: AC.mute,
+          fontWeight: 600,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 22,
+          fontWeight: 700,
+          color: AC.ink,
+          letterSpacing: -0.6,
+          marginTop: 4,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function Empty({ text, sub }: { text: string; sub?: string }) {
+  return (
+    <div
+      style={{
+        padding: 28,
+        fontFamily: AC.font,
+        fontSize: 13,
+        color: AC.mute,
+        textAlign: "center",
+        background: "#fff",
+      }}
+    >
+      <div style={{ color: AC.ink2, fontWeight: 600 }}>{text}</div>
+      {sub && <div style={{ fontSize: 11.5, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+}
 
 function RepMultiSelect({
   reps,
@@ -786,7 +1217,7 @@ function RepMultiSelect({
         border: `1px solid ${AC.line}`,
         borderRadius: 10,
         background: "#fff",
-        maxHeight: 280,
+        maxHeight: 320,
         overflowY: "auto",
       }}
     >
@@ -800,9 +1231,7 @@ function RepMultiSelect({
           background: AC.bg,
         }}
       >
-        <span
-          style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, fontWeight: 600 }}
-        >
+        <span style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, fontWeight: 600 }}>
           {selectedIds.length} of {reps.length} selected
         </span>
         <div style={{ flex: 1 }} />
@@ -887,63 +1316,6 @@ function RepMultiSelect({
           </label>
         );
       })}
-    </div>
-  );
-}
-
-function Empty({ text, sub }: { text: string; sub?: string }) {
-  return (
-    <div
-      style={{
-        padding: 28,
-        fontFamily: AC.font,
-        fontSize: 13,
-        color: AC.mute,
-        textAlign: "center",
-        background: "#fff",
-      }}
-    >
-      <div style={{ color: AC.ink2, fontWeight: 600 }}>{text}</div>
-      {sub && (
-        <div style={{ fontSize: 11.5, marginTop: 4 }}>{sub}</div>
-      )}
-    </div>
-  );
-}
-
-function Kv({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "ok" | "warn";
-}) {
-  const c = tone === "ok" ? AC.ok : tone === "warn" ? AC.warn : AC.ink;
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "baseline",
-        gap: 8,
-        padding: "6px 0",
-      }}
-    >
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 11.5,
-          color: AC.mute,
-          fontWeight: 500,
-          flex: 1,
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontFamily: AC.font, fontSize: 13.5, fontWeight: 700, color: c }}>
-        {value}
-      </div>
     </div>
   );
 }

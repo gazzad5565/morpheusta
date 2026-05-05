@@ -1,334 +1,374 @@
+"use client";
+
+/**
+ * Settings — focused on what's actually wired today: Custom fields.
+ *
+ * Lists every custom field grouped by entity (Customers / Reps /
+ * Shifts / Tasks / Library files). Each row has Edit + Delete inline.
+ * "+ New field" goes to /settings/fields/new.
+ *
+ * Other settings categories (Org / Roles / Notifications / etc) are
+ * deferred — they were stub UIs in the previous version. We'll add
+ * them as the underlying systems land.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
-import { Card } from "@/components/ui/Card";
+import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
+import {
+  listCustomFields,
+  deleteCustomField,
+  FIELD_ENTITIES,
+  FIELD_ENTITY_LABEL,
+  FIELD_TYPE_LABEL,
+  type CustomField,
+  type FieldEntity,
+} from "@/lib/custom-fields-store";
 
-const SETTINGS_NAV: { name: string; glyph: GlyphName; active?: boolean }[] = [
-  { name: "Organisation", glyph: "building" },
-  { name: "Roles & permissions", glyph: "reps" },
-  { name: "Exception rules", glyph: "warn", active: true },
-  { name: "Geofence defaults", glyph: "pin" },
-  { name: "Working hours", glyph: "clock" },
-  { name: "Notifications", glyph: "send" },
-  { name: "Integrations", glyph: "lib" },
-  { name: "Billing", glyph: "audit" },
-  { name: "Data & privacy", glyph: "eye" },
-];
+const ENTITY_GLYPH: Record<FieldEntity, GlyphName> = {
+  customer: "customer",
+  rep: "reps",
+  shift: "cal",
+  task: "tasks",
+  library_file: "lib",
+};
 
 export default function SettingsPage() {
+  const [fields, setFields] = useState<CustomField[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const reload = () => {
+    listCustomFields().then((rows) => {
+      setFields(rows);
+      setLoaded(true);
+    });
+  };
+  useEffect(() => {
+    reload();
+  }, []);
+
+  const grouped = useMemo(() => {
+    const map = new Map<FieldEntity, CustomField[]>();
+    for (const e of FIELD_ENTITIES) map.set(e, []);
+    for (const f of fields) map.get(f.applies_to)?.push(f);
+    return map;
+  }, [fields]);
+
+  const onDelete = async (f: CustomField) => {
+    if (
+      !confirm(
+        `Delete the "${f.name}" field?\n\nThis also removes any values stored against this field on every ${FIELD_ENTITY_LABEL[f.applies_to].toLowerCase()}.`
+      )
+    ) {
+      return;
+    }
+    setBusyId(f.id);
+    const r = await deleteCustomField(f.id);
+    setBusyId(null);
+    if (!r.ok) {
+      alert(`Couldn't delete: ${r.error}`);
+      return;
+    }
+    setFields((arr) => arr.filter((x) => x.id !== f.id));
+  };
+
   return (
-    <AdminShell breadcrumbs={["Home", "Settings", "Exception rules"]}>
-      <div
-        style={{
-          padding: 20,
-          display: "grid",
-          gridTemplateColumns: "220px 1fr",
-          gap: 16,
-          alignItems: "start",
-        }}
-      >
-        <Card padding={6}>
-          {SETTINGS_NAV.map((s) => (
-            <button
-              key={s.name}
-              type="button"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 9,
-                padding: "9px 10px",
-                borderRadius: 7,
-                background: s.active ? AC.brandSoft : "transparent",
-                border: "none",
-                cursor: "pointer",
-                width: "100%",
-                textAlign: "left",
-                marginBottom: 1,
-              }}
-            >
-              <AGlyph name={s.glyph} size={14} color={s.active ? AC.brandDeep : AC.mute} />
-              <div
-                style={{
-                  flex: 1,
-                  fontFamily: AC.font,
-                  fontSize: 12.5,
-                  color: s.active ? AC.brandInk : AC.ink2,
-                  fontWeight: s.active ? 700 : 500,
-                  letterSpacing: -0.1,
-                }}
-              >
-                {s.name}
-              </div>
-            </button>
-          ))}
+    <AdminShell
+      breadcrumbs={["Home", "Settings"]}
+      actions={
+        <Link href="/settings/fields/new" style={{ textDecoration: "none" }}>
+          <Btn icon="plus" kind="primary" size="sm">
+            New field
+          </Btn>
+        </Link>
+      }
+    >
+      <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+        <Card padding={16}>
+          <SectionTitle>Custom fields</SectionTitle>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12.5,
+              color: AC.mute,
+              marginTop: 4,
+              lineHeight: 1.5,
+            }}
+          >
+            Add your own fields to any entity (customers, reps, shifts, tasks,
+            or library files). Pick a type, mark <b style={{ color: AC.ink }}>required</b> if
+            it must be filled in, and the field appears as an extra section
+            on that entity's detail page where you can capture and edit values.
+          </div>
         </Card>
 
-        <Card padding={0}>
-          <div style={{ padding: "16px 20px", borderBottom: `1px solid ${AC.line}` }}>
+        {!loaded ? (
+          <Card padding={28}>
             <div
               style={{
                 fontFamily: AC.font,
-                fontSize: 17,
-                fontWeight: 700,
-                color: AC.ink,
-                letterSpacing: -0.3,
+                fontSize: 13,
+                color: AC.mute,
+                textAlign: "center",
               }}
             >
-              Exception rules
+              Loading fields…
             </div>
-            <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.mute, marginTop: 4 }}>
-              Define when the system flags a shift for review. Rules apply globally; per-customer
-              overrides are configured on the customer&apos;s site.
+          </Card>
+        ) : fields.length === 0 ? (
+          <Card padding={36}>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 14,
+                color: AC.ink2,
+                textAlign: "center",
+                fontWeight: 600,
+              }}
+            >
+              No custom fields yet
             </div>
-          </div>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 12.5,
+                color: AC.mute,
+                textAlign: "center",
+                marginTop: 6,
+              }}
+            >
+              Click <b style={{ color: AC.ink2 }}>New field</b> to define one.
+            </div>
+          </Card>
+        ) : (
+          FIELD_ENTITIES.map((entity) => {
+            const list = grouped.get(entity) || [];
+            if (list.length === 0) return null;
+            return (
+              <Card key={entity} padding={0}>
+                <div
+                  style={{
+                    padding: "12px 16px",
+                    borderBottom: `1px solid ${AC.line}`,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 7,
+                      background: AC.brandSoft,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <AGlyph
+                      name={ENTITY_GLYPH[entity]}
+                      size={15}
+                      color={AC.brandDeep}
+                    />
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: AC.ink,
+                      letterSpacing: -0.1,
+                    }}
+                  >
+                    {FIELD_ENTITY_LABEL[entity]}
+                  </div>
+                  <span
+                    style={{
+                      padding: "2px 7px",
+                      borderRadius: 99,
+                      background: AC.bg,
+                      color: AC.mute,
+                      fontFamily: AC.font,
+                      fontSize: 11,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {list.length}
+                  </span>
+                </div>
 
-          <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
-            <RuleRow
-              title="Late check-in"
-              desc="Flag a rep if they haven't checked in by this many minutes after shift start."
-              control={<NumberControl value={15} unit="min" />}
-              level="High"
-            />
-            <RuleRow
-              title="Late return from break"
-              desc="Flag a rep if they don't end their break within this window."
-              control={<NumberControl value={10} unit="min" />}
-              level="Medium"
-            />
-            <RuleRow
-              title="Off-site check-in"
-              desc="Flag if a rep checks in outside the customer's geofence."
-              control={<SwitchControl label="Always flag" on />}
-              level="High"
-            />
-            <RuleRow
-              title="Early check-out"
-              desc="Flag if a rep checks out more than this many minutes before shift end."
-              control={<NumberControl value={20} unit="min" />}
-              level="Low"
-            />
-            <RuleRow
-              title="Missed required tasks"
-              desc="Flag if any required task is unchecked at check-out."
-              control={<SwitchControl label="Auto-flag" on />}
-              level="High"
-            />
-            <RuleRow
-              title="No-show"
-              desc="Auto-cancel shift and notify manager if no check-in occurs."
-              control={<NumberControl value={45} unit="min" />}
-              level="High"
-            />
-            <RuleRow
-              title="Rep-requested shifts"
-              desc="Let reps add unscheduled customers to their day from the mobile app. Requests appear in the rep's Unscheduled list and notify the assigned manager."
-              control={<SwitchControl label="Allow requests" on />}
-              level="Low"
-            />
-          </div>
-
-          <div
-            style={{
-              padding: "14px 20px",
-              borderTop: `1px solid ${AC.line}`,
-              background: AC.bg,
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              borderBottomLeftRadius: AC.radiusCard,
-              borderBottomRightRadius: AC.radiusCard,
-            }}
-          >
-            <AGlyph name="info" size={14} color={AC.mute} />
-            <div style={{ flex: 1, fontFamily: AC.font, fontSize: 12, color: AC.mute }}>
-              Changes are versioned in the audit log. Active rules apply to new shifts only.
-            </div>
-            <Btn size="sm">Discard</Btn>
-            <Btn size="sm" kind="primary">Save changes</Btn>
-          </div>
-        </Card>
+                {list.map((f, i) => (
+                  <div
+                    key={f.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "2fr 130px 100px 100px 90px",
+                      gap: 14,
+                      alignItems: "center",
+                      padding: "12px 16px",
+                      borderBottom:
+                        i < list.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                      background: "#fff",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontFamily: AC.font,
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: AC.ink,
+                        }}
+                      >
+                        {f.name}
+                      </div>
+                      {f.field_type === "select" && f.options && f.options.length > 0 && (
+                        <div
+                          style={{
+                            fontFamily: AC.font,
+                            fontSize: 11.5,
+                            color: AC.mute,
+                            marginTop: 3,
+                            display: "flex",
+                            gap: 4,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          {f.options.slice(0, 5).map((o) => (
+                            <span
+                              key={o}
+                              style={{
+                                padding: "1px 6px",
+                                borderRadius: 99,
+                                background: AC.bg,
+                                border: `1px solid ${AC.line}`,
+                                fontSize: 10.5,
+                                fontWeight: 600,
+                                color: AC.ink2,
+                              }}
+                            >
+                              {o}
+                            </span>
+                          ))}
+                          {f.options.length > 5 && (
+                            <span
+                              style={{
+                                color: AC.mute,
+                                fontSize: 10.5,
+                                fontWeight: 600,
+                                padding: "1px 4px",
+                              }}
+                            >
+                              +{f.options.length - 5}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <span
+                        style={{
+                          padding: "2px 8px",
+                          borderRadius: 99,
+                          fontFamily: AC.font,
+                          fontSize: 10.5,
+                          fontWeight: 700,
+                          letterSpacing: 0.3,
+                          background: AC.bg,
+                          border: `1px solid ${AC.line}`,
+                          color: AC.ink2,
+                        }}
+                      >
+                        {FIELD_TYPE_LABEL[f.field_type]}
+                      </span>
+                    </div>
+                    <div>
+                      {f.required ? (
+                        <span
+                          style={{
+                            padding: "2px 8px",
+                            borderRadius: 99,
+                            fontFamily: AC.font,
+                            fontSize: 10.5,
+                            fontWeight: 700,
+                            background: AC.dangerTint,
+                            color: AC.danger,
+                            letterSpacing: 0.3,
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Required
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontFamily: AC.font,
+                            fontSize: 11.5,
+                            color: AC.mute,
+                          }}
+                        >
+                          Optional
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: AC.fontMono,
+                        fontSize: 11.5,
+                        color: AC.mute,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Order {f.sort_order}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
+                      <Link
+                        href={`/settings/fields/${f.id}/edit`}
+                        title="Edit field"
+                        style={iconBtn}
+                      >
+                        <AGlyph name="edit" size={14} color={AC.mute} />
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(f)}
+                        disabled={busyId === f.id}
+                        title="Delete field"
+                        style={{
+                          ...iconBtn,
+                          cursor: busyId === f.id ? "not-allowed" : "pointer",
+                          opacity: busyId === f.id ? 0.4 : 1,
+                        }}
+                      >
+                        <AGlyph name="x" size={14} color={AC.mute} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </Card>
+            );
+          })
+        )}
       </div>
     </AdminShell>
   );
 }
 
-function RuleRow({
-  title,
-  desc,
-  control,
-  level,
-}: {
-  title: string;
-  desc: string;
-  control: React.ReactNode;
-  level: "High" | "Medium" | "Low";
-}) {
-  const lc = { High: AC.danger, Medium: AC.warn, Low: AC.mute }[level];
-  const lbg = { High: AC.dangerTint, Medium: AC.warnTint, Low: AC.bg }[level];
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "1fr 220px",
-        gap: 20,
-        padding: 16,
-        border: `1px solid ${AC.line}`,
-        borderRadius: 10,
-        alignItems: "center",
-      }}
-    >
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 14,
-              fontWeight: 700,
-              color: AC.ink,
-              letterSpacing: -0.2,
-            }}
-          >
-            {title}
-          </div>
-          <span
-            style={{
-              padding: "2px 7px",
-              borderRadius: 99,
-              background: lbg,
-              color: lc,
-              fontFamily: AC.font,
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: 0.3,
-              textTransform: "uppercase",
-            }}
-          >
-            {level}
-          </span>
-        </div>
-        <div
-          style={{
-            fontFamily: AC.font,
-            fontSize: 12,
-            color: AC.mute,
-            marginTop: 4,
-            lineHeight: 1.5,
-          }}
-        >
-          {desc}
-        </div>
-      </div>
-      <div>{control}</div>
-    </div>
-  );
-}
-
-function NumberControl({ value, unit }: { value: number; unit: string }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <button
-        type="button"
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 7,
-          background: "#fff",
-          border: `1px solid ${AC.line}`,
-          cursor: "pointer",
-          fontFamily: AC.font,
-          fontSize: 14,
-          fontWeight: 700,
-          color: AC.ink2,
-        }}
-      >
-        −
-      </button>
-      <div
-        style={{
-          flex: 1,
-          padding: "7px 10px",
-          borderRadius: 7,
-          background: "#fff",
-          border: `1px solid ${AC.line}`,
-          textAlign: "center",
-          fontFamily: AC.font,
-          fontSize: 14,
-          fontWeight: 700,
-          color: AC.ink,
-          letterSpacing: -0.2,
-        }}
-      >
-        {value}{" "}
-        <span style={{ color: AC.mute, fontWeight: 500, fontSize: 11.5 }}>{unit}</span>
-      </div>
-      <button
-        type="button"
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: 7,
-          background: "#fff",
-          border: `1px solid ${AC.line}`,
-          cursor: "pointer",
-          fontFamily: AC.font,
-          fontSize: 14,
-          fontWeight: 700,
-          color: AC.ink2,
-        }}
-      >
-        +
-      </button>
-    </div>
-  );
-}
-
-function SwitchControl({ label, on }: { label: string; on?: boolean }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "8px 12px",
-        borderRadius: 7,
-        background: on ? AC.brandSoft : AC.bg,
-        border: `1px solid ${on ? AC.brand : AC.line}`,
-      }}
-    >
-      <div
-        style={{
-          flex: 1,
-          fontFamily: AC.font,
-          fontSize: 12.5,
-          color: on ? AC.brandInk : AC.ink2,
-          fontWeight: 700,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          width: 32,
-          height: 18,
-          borderRadius: 99,
-          background: on ? AC.brand : AC.bgDeep,
-          position: "relative",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            top: 2,
-            left: on ? 16 : 2,
-            width: 14,
-            height: 14,
-            borderRadius: 99,
-            background: "#fff",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
-          }}
-        />
-      </div>
-    </div>
-  );
-}
+const iconBtn: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  borderRadius: 6,
+  background: "transparent",
+  border: "none",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  textDecoration: "none",
+  cursor: "pointer",
+};
