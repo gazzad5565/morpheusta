@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
-import { SAMPLE, ACTIVE_SAMPLE_TASKS } from "@/lib/mock-data";
+import { SAMPLE, ACTIVE_SAMPLE_TASKS, type Shift } from "@/lib/mock-data";
 import {
   AppHeader,
   AppFooter,
@@ -14,6 +14,7 @@ import {
 } from "@/components/Chrome";
 import { Glyph, type GlyphName } from "@/components/Glyph";
 import { clearRepLocation } from "@/lib/location-tracker";
+import { getMyActiveShift, checkOutOfShift } from "@/lib/shifts-store";
 
 const OFFSITE_REASONS = [
   "Wrong location pinned",
@@ -40,7 +41,23 @@ export default function CheckOutPageWrapper() {
 function CheckOutPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const shift = SAMPLE.shifts[0];
+
+  // Fetch the rep's currently in-progress shift so we know which row to
+  // mark complete. Falls back to the mock customer for display while the
+  // fetch is in flight.
+  const [shift, setShift] = useState<
+    (Shift & { realId: string; repId: string | null }) | null
+  >(null);
+  useEffect(() => {
+    let cancelled = false;
+    getMyActiveShift().then((s) => {
+      if (!cancelled) setShift(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const displayShift = shift ?? SAMPLE.shifts[0];
 
   // Read completed task IDs from URL (set by /active page on Check Out tap).
   const completedIds = (params.get("completed") || "")
@@ -64,10 +81,25 @@ function CheckOutPage() {
   const earlyResolved = !!earlyReason;
   const canProceed = compulsoryDone && offsiteResolved && earlyResolved;
 
+  const [submitting, setSubmitting] = useState(false);
+
   const onProceed = async () => {
-    // Drop our pin from the admin map. Awaited so the realtime broadcast
-    // fires before the user navigates away.
+    if (submitting) return;
+    setSubmitting(true);
+    // 1. Mark the shift complete in the DB (so admin Live Ops shows
+    //    "Complete" instead of stale "In progress").
+    if (shift) {
+      const result = await checkOutOfShift(shift.realId, completedIds.length);
+      if (!result.ok) {
+        setSubmitting(false);
+        alert(`Couldn't check out: ${result.error}`);
+        return;
+      }
+    }
+    // 2. Drop our pin from the admin map. Awaited so the realtime broadcast
+    //    fires before the user navigates away.
     await clearRepLocation();
+
     const params = new URLSearchParams({
       offsiteReason: offsiteReason!,
       offsiteNote,
@@ -93,7 +125,7 @@ function CheckOutPage() {
             gap: 12,
           }}
         >
-          <CustomerTile initials={shift.initials} color={shift.color} size={44} />
+          <CustomerTile initials={displayShift.initials} color={displayShift.color} size={44} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
@@ -116,7 +148,7 @@ function CheckOutPage() {
                 letterSpacing: -0.3,
               }}
             >
-              {shift.name}
+              {displayShift.name}
             </div>
           </div>
         </div>
@@ -204,7 +236,7 @@ function CheckOutPage() {
       )}
 
       <div style={{ padding: "12px 16px 0" }}>
-        <FauxMap pinColor={shift.color} />
+        <FauxMap pinColor={displayShift.color} />
         <div
           style={{
             marginTop: 8,
@@ -214,7 +246,7 @@ function CheckOutPage() {
             padding: "0 4px",
           }}
         >
-          You&apos;re checking out <b style={{ color: MC.ink }}>3 km</b> away from {shift.name}&apos;s
+          You&apos;re checking out <b style={{ color: MC.ink }}>3 km</b> away from {displayShift.name}&apos;s
           location.
         </div>
       </div>

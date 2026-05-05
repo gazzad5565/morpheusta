@@ -89,6 +89,40 @@ export async function listMyShiftsToday(): Promise<
   return (data as ShiftRow[]).map(rowToShift);
 }
 
+/**
+ * The rep's currently active (in-progress) shift, if any.
+ *
+ * Used by the active-shift screen and the check-out screen so they can
+ * read/update the right row without threading a shift id through the URL.
+ * If there's more than one in-progress shift (shouldn't happen normally),
+ * returns the most recently checked-in one.
+ */
+export async function getMyActiveShift(): Promise<
+  (Shift & { realId: string; repId: string | null }) | null
+> {
+  if (!isSupabaseConfigured() || !supabase) return null;
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) return null;
+
+  const { data, error } = await supabase
+    .from("shifts")
+    .select("*, customers(id,name,initials,color,code)")
+    .eq("rep_id", userId)
+    .eq("state", "in-progress")
+    .order("check_in_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] getMyActiveShift:", error.message);
+    return null;
+  }
+  if (!data) return null;
+  return rowToShift(data as ShiftRow);
+}
+
 /** Unassigned shifts today — anyone authenticated can see + claim. */
 export async function listUnassignedShiftsToday(): Promise<
   Array<Shift & { realId: string; repId: string | null }>

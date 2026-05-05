@@ -427,6 +427,7 @@ Or via CLI: `npx vercel rollback`.
 - **Optional rep assignment** when scheduling a shift (drop-down picker, NULL = leave for any rep to claim)
 - **Mobile claim flow** — unassigned shifts show a "Claim" button that sets `rep_id = auth.uid()` race-safely
 - **Mobile check-in writes to DB** — sets `state='in-progress'` + `check_in_at` timestamp
+- **Mobile check-out writes to DB** — "Confirm check-out" calls `checkOutOfShift()` (state→`complete`, stores tasks_done) and `clearRepLocation()` (drops the green dot from the admin map via Realtime)
 - **Profiles table + auto-trigger** — `handle_new_user()` creates a profile row on signup; carries `role` ('rep' | 'manager') and display `name`
 - **Reps section in admin** — list view + per-rep detail page (today's shifts, lifetime stats)
 - **Live Ops board reads real data** — KPI strip + shifts table compute from Supabase
@@ -445,17 +446,16 @@ Or via CLI: `npx vercel rollback`.
 These are the next obvious chunks of work, roughly in order of impact:
 
 1. **Phase 4: Tighten RLS by role.** Right now any authenticated user can write to `customers`/`shifts`. Use the `profiles.role` column to restrict INSERT/DELETE on those tables to `role = 'manager'`. SELECT can stay open. Mobile reps would only see DB-level errors if they try to misbehave through the API.
-2. **Mobile check-out flow UI.** `checkOutOfShift()` exists in `morpheus-mobile/lib/shifts-store.ts` but no button calls it yet. Wire it up on the active-shift screen.
-3. **Approve / decline rep-requested shifts in admin.** The `requested_shifts.status` column exists; needs an admin page listing pending requests with approve/decline buttons. On approve, create a row in `shifts` with `rep_id` pre-assigned.
-4. **Background location tracking on mobile.** Today GPS only updates while the active-shift screen is in the foreground (browser limitation). For background tracking we'd need a Capacitor wrap or a service worker with `periodicSync` (limited support).
-5. **Real-time updates on the Live Ops board** as reps check in (no manual refresh) — `rep_locations` is already on `supabase_realtime`; extend the same pattern to `shifts` for state changes (in-progress, complete).
-6. **Live feed event log.** Currently `LiveFeedPanel` is mock data. Build a `shift_events` table that logs check-ins, claims, completions; render it in real-time order.
-7. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Needs the event log above + a daily aggregation query.
-8. **Tasks + library** migrated to DB (admin manages task templates per customer).
-9. **Email confirmation** turned back on for production.
-10. **Promote `db/migrations/` to the Supabase CLI** so migrations apply automatically per environment instead of being pasted into the SQL Editor by hand.
-11. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
-12. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence — also unlocks proper background location.
+2. **Approve / decline rep-requested shifts in admin.** The `requested_shifts.status` column exists; needs an admin page listing pending requests with approve/decline buttons. On approve, create a row in `shifts` with `rep_id` pre-assigned.
+3. **Background location tracking on mobile.** Today GPS only updates while the active-shift screen is in the foreground (browser limitation). For background tracking we'd need a Capacitor wrap or a service worker with `periodicSync` (limited support).
+4. **Real-time updates on the Live Ops board** as reps check in (no manual refresh) — `rep_locations` is already on `supabase_realtime`; extend the same pattern to `shifts` for state changes (in-progress, complete).
+5. **Live feed event log.** Currently `LiveFeedPanel` is mock data. Build a `shift_events` table that logs check-ins, claims, completions; render it in real-time order.
+6. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Needs the event log above + a daily aggregation query.
+7. **Tasks + library** migrated to DB (admin manages task templates per customer).
+8. **Email confirmation** turned back on for production.
+9. **Promote `db/migrations/` to the Supabase CLI** so migrations apply automatically per environment instead of being pasted into the SQL Editor by hand.
+10. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
+11. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence — also unlocks proper background location.
 
 ---
 
