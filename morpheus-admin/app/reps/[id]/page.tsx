@@ -10,6 +10,12 @@ import { AC } from "@/lib/tokens";
 import { supabase } from "@/lib/supabase";
 import { type Profile, displayName } from "@/lib/profiles-store";
 import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listCustomers } from "@/lib/customers-store";
+import {
+  listCustomersForRep,
+  setCustomersForRep,
+} from "@/lib/assignments-store";
+import type { Customer } from "@/lib/types";
 
 function deriveInitials(name: string, email: string): string {
   const source = name?.trim() || email.split("@")[0];
@@ -42,6 +48,10 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
+  const [allCustomers, setAllCustomers] = useState<Customer[]>([]);
+  const [assignedCustomerIds, setAssignedCustomerIds] = useState<string[]>([]);
+  const [savingAssignments, setSavingAssignments] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -69,6 +79,15 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
       const allShifts = await listShifts();
       if (cancelled) return;
       setShifts(allShifts.filter((s) => s.rep_id === id));
+
+      // Customer roster + this rep's existing assignments.
+      const [customers, assigned] = await Promise.all([
+        listCustomers(),
+        listCustomersForRep(id),
+      ]);
+      if (cancelled) return;
+      setAllCustomers(customers);
+      setAssignedCustomerIds(assigned);
       setLoading(false);
     })();
     return () => {
@@ -325,6 +344,88 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
             </div>
           </Card>
 
+          {/* Assigned customers editor */}
+          <Card padding={0}>
+            <div
+              style={{
+                padding: "14px 16px",
+                borderBottom: `1px solid ${AC.line}`,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <SectionTitle>Assigned customers</SectionTitle>
+              <span
+                style={{
+                  padding: "2px 7px",
+                  borderRadius: 99,
+                  background: AC.bg,
+                  color: AC.mute,
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              >
+                {assignedCustomerIds.length}
+              </span>
+              <div style={{ flex: 1 }} />
+              {savingAssignments && (
+                <span style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute }}>
+                  Saving…
+                </span>
+              )}
+            </div>
+            <div style={{ padding: 16 }}>
+              {assignError && (
+                <div
+                  style={{
+                    marginBottom: 10,
+                    padding: "8px 10px",
+                    background: AC.dangerTint,
+                    color: "#9c1a3c",
+                    borderRadius: 8,
+                    fontFamily: AC.font,
+                    fontSize: 12,
+                  }}
+                >
+                  {assignError}
+                </div>
+              )}
+              {allCustomers.length === 0 ? (
+                <div
+                  style={{
+                    padding: 18,
+                    background: AC.bg,
+                    borderRadius: 10,
+                    fontFamily: AC.font,
+                    fontSize: 13,
+                    color: AC.mute,
+                    textAlign: "center",
+                  }}
+                >
+                  No customers yet. Add one first via the Customers page.
+                </div>
+              ) : (
+                <CustomerMultiSelect
+                  customers={allCustomers}
+                  selectedIds={assignedCustomerIds}
+                  onChange={async (next) => {
+                    setSavingAssignments(true);
+                    setAssignError(null);
+                    const r = await setCustomersForRep(id, next);
+                    setSavingAssignments(false);
+                    if (!r.ok) {
+                      setAssignError(r.error || "Failed to update assignments.");
+                      return;
+                    }
+                    setAssignedCustomerIds(next);
+                  }}
+                />
+              )}
+            </div>
+          </Card>
+
           {/* All shifts (excluding today, capped) */}
           {shifts.length > todayShifts.length && (
             <Card padding={16}>
@@ -433,6 +534,134 @@ function MiniStat({
       <div style={{ fontFamily: AC.font, fontSize: 11, color: tc, fontWeight: 600, marginTop: 2 }}>
         &nbsp;
       </div>
+    </div>
+  );
+}
+
+function CustomerMultiSelect({
+  customers,
+  selectedIds,
+  onChange,
+}: {
+  customers: Customer[];
+  selectedIds: string[];
+  onChange: (next: string[]) => void | Promise<void>;
+}) {
+  const set = new Set(selectedIds);
+  const toggle = (cid: string) => {
+    const next = new Set(set);
+    if (next.has(cid)) next.delete(cid);
+    else next.add(cid);
+    onChange(Array.from(next));
+  };
+  const linkBtn: React.CSSProperties = {
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    fontFamily: AC.font,
+    fontSize: 11,
+    color: AC.brandDeep,
+    fontWeight: 600,
+    padding: "2px 4px",
+  };
+  return (
+    <div
+      style={{
+        border: `1px solid ${AC.line}`,
+        borderRadius: 10,
+        background: "#fff",
+        maxHeight: 320,
+        overflowY: "auto",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 12px",
+          borderBottom: `1px solid ${AC.lineDim}`,
+          background: AC.bg,
+        }}
+      >
+        <span
+          style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, fontWeight: 600 }}
+        >
+          {selectedIds.length} of {customers.length} selected
+        </span>
+        <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={() => onChange(customers.map((c) => c.id))}
+          style={linkBtn}
+        >
+          Select all
+        </button>
+        <span style={{ color: AC.faint }}>·</span>
+        <button type="button" onClick={() => onChange([])} style={linkBtn}>
+          Clear
+        </button>
+      </div>
+      {customers.map((c) => {
+        const checked = set.has(c.id);
+        return (
+          <label
+            key={c.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "9px 12px",
+              borderBottom: `1px solid ${AC.lineDim}`,
+              cursor: "pointer",
+              background: checked ? AC.brandSoft : "#fff",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => toggle(c.id)}
+              style={{ width: 16, height: 16, accentColor: AC.brand }}
+            />
+            <div
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 5,
+                background: c.color,
+                color: "#fff",
+                fontFamily: AC.font,
+                fontSize: 9,
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              {c.initials}
+            </div>
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontFamily: AC.font,
+                fontSize: 13,
+                color: AC.ink,
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {c.name}
+            </div>
+            <span style={{ fontFamily: AC.font, fontSize: 11.5, color: AC.mute }}>
+              #{c.code}
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 }

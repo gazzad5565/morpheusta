@@ -274,13 +274,78 @@ function FileRow({
         <div style={{ fontFamily: MC.font, fontSize: 12, color: MC.mute, marginTop: 2 }}>
           {file.category || DEFAULT_CATEGORY} · {shortDate(file.uploadedAt)} ·{" "}
           {formatFileSize(file.sizeBytes)}
-          {file.customerName && (
-            <>
-              {" · "}
-              <span style={{ color: file.customerColor || MC.ink2, fontWeight: 600 }}>
-                {file.customerName}
-              </span>
-            </>
+        </div>
+        <div style={{ marginTop: 6 }}>
+          {file.customerIds === null ? (
+            <span
+              style={{
+                padding: "2px 7px",
+                borderRadius: 99,
+                background: MC.brandTint,
+                color: MC.brandInk,
+                fontFamily: MC.font,
+                fontSize: 10.5,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+              }}
+            >
+              All customers
+            </span>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {file.customers.slice(0, 3).map((c) => (
+                <span
+                  key={c.id}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "1px 6px 1px 2px",
+                    borderRadius: 99,
+                    background: MC.bg,
+                    border: `1px solid ${MC.line}`,
+                    fontFamily: MC.font,
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: MC.ink2,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 4,
+                      background: c.color,
+                      color: "#fff",
+                      fontSize: 8,
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {c.initials}
+                  </span>
+                  {c.name}
+                </span>
+              ))}
+              {file.customers.length > 3 && (
+                <span
+                  style={{
+                    padding: "2px 6px",
+                    borderRadius: 99,
+                    background: MC.bg,
+                    color: MC.mute,
+                    fontFamily: MC.font,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                  }}
+                >
+                  +{file.customers.length - 3}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>

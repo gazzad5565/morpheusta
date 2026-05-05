@@ -1,8 +1,11 @@
 /**
- * Library store (mobile) — read-only.
+ * Library store (mobile) — read-only, multi-customer aware.
  *
- * Reps fetch the file list and tap to open. Downloads use short-lived
- * signed URLs from Supabase Storage so the bucket can stay private.
+ * Reps see files where customer_ids is null/empty (universal) OR where
+ * one of the customers they're assigned to appears in the array. (For
+ * Phase 3 we just show every file the rep is allowed to read; mobile
+ * doesn't yet filter by their assigned customers — admin RLS doesn't
+ * enforce that yet either.)
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
@@ -20,6 +23,13 @@ export const LIBRARY_CATEGORIES = [
 ] as const;
 export const DEFAULT_CATEGORY = "Documents";
 
+export interface LibraryFileCustomer {
+  id: string;
+  name: string;
+  initials: string;
+  color: string;
+}
+
 export interface LibraryFile {
   id: string;
   name: string;
@@ -27,10 +37,10 @@ export interface LibraryFile {
   sizeBytes: number | null;
   mimeType: string | null;
   category: string | null;
-  customerId: string | null;
-  customerName: string | null;
-  customerInitials: string | null;
-  customerColor: string | null;
+  /** null = "shared with all"; otherwise the specific customer ids. */
+  customerIds: string[] | null;
+  /** Joined customer info for the ids above (when those customers exist). */
+  customers: LibraryFileCustomer[];
   uploadedAt: string;
 }
 
@@ -41,42 +51,65 @@ interface FileRow {
   size_bytes: number | null;
   mime_type: string | null;
   category: string | null;
-  customer_id: string | null;
+  customer_ids: string[] | null;
   uploaded_at: string;
-  customers: {
-    id: string;
-    name: string;
-    initials: string;
-    color: string;
-  } | null;
 }
 
-export async function listLibraryFiles(): Promise<LibraryFile[]> {
-  if (!isSupabaseConfigured() || !supabase) return [];
-  const { data, error } = await supabase
-    .from("library_files")
-    .select(
-      "id, name, storage_path, size_bytes, mime_type, category, customer_id, uploaded_at, customers(id,name,initials,color)"
-    )
-    .order("uploaded_at", { ascending: false });
-  if (error) {
-    // eslint-disable-next-line no-console
-    console.warn("[library] list:", error.message);
-    return [];
+const SELECT_COLS =
+  "id, name, storage_path, size_bytes, mime_type, category, customer_ids, uploaded_at";
+
+async function fetchCustomerLookup(
+  rows: FileRow[]
+): Promise<Map<string, LibraryFileCustomer>> {
+  const map = new Map<string, LibraryFileCustomer>();
+  if (!isSupabaseConfigured() || !supabase) return map;
+  const ids = new Set<string>();
+  for (const r of rows) for (const id of r.customer_ids || []) ids.add(id);
+  if (ids.size === 0) return map;
+  const { data } = await supabase
+    .from("customers")
+    .select("id,name,initials,color")
+    .in("id", Array.from(ids));
+  for (const c of (data as LibraryFileCustomer[]) || []) {
+    map.set(c.id, c);
   }
-  return ((data as unknown as FileRow[]) || []).map((r) => ({
+  return map;
+}
+
+function rowToFile(
+  r: FileRow,
+  lookup: Map<string, LibraryFileCustomer>
+): LibraryFile {
+  const ids = r.customer_ids || [];
+  return {
     id: r.id,
     name: r.name,
     storagePath: r.storage_path,
     sizeBytes: r.size_bytes,
     mimeType: r.mime_type,
     category: r.category,
-    customerId: r.customer_id,
-    customerName: r.customers?.name ?? null,
-    customerInitials: r.customers?.initials ?? null,
-    customerColor: r.customers?.color ?? null,
+    customerIds: r.customer_ids && r.customer_ids.length > 0 ? r.customer_ids : null,
+    customers: ids
+      .map((id) => lookup.get(id))
+      .filter((c): c is LibraryFileCustomer => !!c),
     uploadedAt: r.uploaded_at,
-  }));
+  };
+}
+
+export async function listLibraryFiles(): Promise<LibraryFile[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const { data, error } = await supabase
+    .from("library_files")
+    .select(SELECT_COLS)
+    .order("uploaded_at", { ascending: false });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[library] list:", error.message);
+    return [];
+  }
+  const rows = (data as FileRow[]) || [];
+  const lookup = await fetchCustomerLookup(rows);
+  return rows.map((r) => rowToFile(r, lookup));
 }
 
 export async function getLibraryDownloadUrl(

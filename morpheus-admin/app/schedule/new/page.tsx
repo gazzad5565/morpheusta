@@ -1,11 +1,21 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+/**
+ * /schedule/new — schedule one or many shifts.
+ *
+ * Customer scope: All / Specific (one or many).
+ * Recurrence: None / Weekly (pick weekdays + an "until" date).
+ *
+ * On submit, the cartesian product of (selected customers × generated
+ * dates) becomes N shift rows. If the page was opened from /requests
+ * we lock to a single customer + single date (the request semantics).
+ */
+
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
-import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
@@ -13,10 +23,23 @@ import { listCustomers } from "@/lib/customers-store";
 import { createShift } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { deleteRequest } from "@/lib/requests-store";
+import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
 import type { Customer } from "@/lib/types";
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysISO(iso: string, days: number): string {
+  const d = new Date(iso);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+// Mon=0..Sun=6 (matching WEEKDAYS index above).
+function jsDayToIndex(jsDay: number): number {
+  return (jsDay + 6) % 7;
 }
 
 export default function NewShiftPageWrapper() {
@@ -30,26 +53,31 @@ export default function NewShiftPageWrapper() {
 function NewShiftPage() {
   const router = useRouter();
   const params = useSearchParams();
-  // When the page is opened from /requests via "Approve & schedule", these
-  // params pre-fill the form and trigger a request deletion on save.
   const fromRep = params.get("rep") || "";
   const fromCustomer = params.get("customer") || "";
   const fromRequest = params.get("request") || "";
   const fromDate = params.get("date") || "";
+
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [reps, setReps] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [customerId, setCustomerId] = useState<string>("");
-  const [repId, setRepId] = useState<string>(""); // "" = unassigned (claimable)
-  // If the user came in from /schedule with a specific cell, pre-fill that date.
+  // Customer scope: null = all, [...] = specific (one or many).
+  const [customerScope, setCustomerScope] = useState<CustomerScope>(null);
+  const [repId, setRepId] = useState<string>("");
   const [shiftDate, setShiftDate] = useState<string>(fromDate || todayISO());
   const [startTime, setStartTime] = useState<string>("08:00");
   const [endTime, setEndTime] = useState<string>("17:00");
   const [distance, setDistance] = useState<string>("");
   const [tasksTotal, setTasksTotal] = useState<string>("4");
 
+  // Recurrence
+  const [repeatMode, setRepeatMode] = useState<"none" | "weekly">("none");
+  const [weekdays, setWeekdays] = useState<Set<number>>(new Set());
+  const [untilDate, setUntilDate] = useState<string>(addDaysISO(shiftDate, 28));
+
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -58,12 +86,10 @@ function NewShiftPage() {
       ([cs, rs]) => {
         if (cancelled) return;
         setCustomers(cs);
-        // Pre-fill from a rep request when present, otherwise default to first.
-        const initialCustomer =
-          fromCustomer && cs.some((c) => c.id === fromCustomer)
-            ? fromCustomer
-            : cs[0]?.id || "";
-        setCustomerId(initialCustomer);
+        // Pre-fill from a rep request when present.
+        if (fromCustomer && cs.some((c) => c.id === fromCustomer)) {
+          setCustomerScope([fromCustomer]);
+        }
         setReps(rs);
         if (fromRep && rs.some((r) => r.id === fromRep)) {
           setRepId(fromRep);
@@ -76,45 +102,126 @@ function NewShiftPage() {
     };
   }, [fromCustomer, fromRep]);
 
-  const selectedCustomer = customers.find((c) => c.id === customerId);
-  const selectedRep = reps.find((r) => r.id === repId);
+  // Default the "until" forward when shiftDate moves past it.
+  useEffect(() => {
+    if (untilDate < shiftDate) setUntilDate(addDaysISO(shiftDate, 28));
+  }, [shiftDate, untilDate]);
+
+  // Default: tick the day-of-week of the start date when toggling on weekly.
+  useEffect(() => {
+    if (repeatMode === "weekly" && weekdays.size === 0) {
+      const dow = jsDayToIndex(new Date(shiftDate).getDay());
+      setWeekdays(new Set([dow]));
+    }
+  }, [repeatMode, shiftDate, weekdays.size]);
+
+  // Compute the dates the recurrence will generate.
+  const generatedDates = useMemo(() => {
+    if (repeatMode === "none") return [shiftDate];
+    if (!untilDate || untilDate < shiftDate) return [shiftDate];
+    if (weekdays.size === 0) return [];
+    const out: string[] = [];
+    const start = new Date(shiftDate);
+    const end = new Date(untilDate);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      if (weekdays.has(jsDayToIndex(d.getDay()))) {
+        out.push(d.toISOString().slice(0, 10));
+      }
+    }
+    return out;
+  }, [repeatMode, shiftDate, untilDate, weekdays]);
+
+  // Resolve the actual customer ids being targeted.
+  const targetedCustomerIds = useMemo(() => {
+    if (customerScope === null) return customers.map((c) => c.id);
+    return customerScope;
+  }, [customerScope, customers]);
+
+  const totalShifts = generatedDates.length * targetedCustomerIds.length;
+
+  const toggleWeekday = (i: number) => {
+    setWeekdays((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
 
   const onSubmit = async () => {
     if (busy) return;
     setError(null);
-    if (!customerId) return setError("Pick a customer.");
-    if (!shiftDate) return setError("Pick a date.");
+
+    if (customerScope !== null && customerScope.length === 0) {
+      return setError("Pick at least one customer, or switch to 'All customers'.");
+    }
+    if (targetedCustomerIds.length === 0) {
+      return setError("No customers to schedule against.");
+    }
+    if (!shiftDate) return setError("Pick a start date.");
     if (!startTime || !endTime) return setError("Set start and end times.");
     if (startTime >= endTime) return setError("End time must be after start time.");
+    if (repeatMode === "weekly") {
+      if (weekdays.size === 0) return setError("Pick at least one weekday for the recurrence.");
+      if (!untilDate) return setError("Pick an 'until' date for the recurrence.");
+      if (untilDate < shiftDate) return setError("'Until' date must be on or after the start date.");
+    }
+    if (generatedDates.length === 0) {
+      return setError("No dates generated by the current recurrence settings.");
+    }
     const tasksNum = parseInt(tasksTotal, 10);
     if (Number.isNaN(tasksNum) || tasksNum < 0) return setError("Tasks must be a number.");
 
-    setBusy(true);
-    const result = await createShift({
-      customer_id: customerId,
-      shift_date: shiftDate,
-      start_time: startTime,
-      end_time: endTime,
-      distance_label: distance.trim(),
-      tasks_total: tasksNum,
-      rep_id: repId || null, // empty string → null (claimable)
-    });
-    if (!result.ok) {
-      setBusy(false);
-      setError(result.error || "Failed to create shift.");
-      return;
+    // From-request flow forces single (single customer × single date).
+    if (fromRequest && (targetedCustomerIds.length !== 1 || generatedDates.length !== 1)) {
+      return setError(
+        "Request approvals must be a single shift. Switch off recurrence and pick one customer."
+      );
     }
-    // If we got here from a rep request, clean up that pending row so the
-    // Requests inbox reflects that this is now scheduled.
-    if (fromRequest) {
+
+    setBusy(true);
+    setProgress({ done: 0, total: totalShifts });
+    const errs: string[] = [];
+    let done = 0;
+
+    // Insert sequentially so we can show progress and collect errors.
+    for (const date of generatedDates) {
+      for (const cid of targetedCustomerIds) {
+        const r = await createShift({
+          customer_id: cid,
+          shift_date: date,
+          start_time: startTime,
+          end_time: endTime,
+          distance_label: distance.trim(),
+          tasks_total: tasksNum,
+          rep_id: repId || null,
+        });
+        done += 1;
+        setProgress({ done, total: totalShifts });
+        if (!r.ok) {
+          errs.push(`${date} · ${cid}: ${r.error || "failed"}`);
+        }
+      }
+    }
+
+    if (fromRequest && errs.length === 0) {
       const del = await deleteRequest(fromRequest);
       if (!del.ok) {
-        // Don't block the navigation — the shift is created. Just log.
         // eslint-disable-next-line no-console
         console.warn("[schedule/new] couldn't delete request:", del.error);
       }
     }
+
     setBusy(false);
+    setProgress(null);
+    if (errs.length > 0) {
+      setError(
+        `Created ${done - errs.length} of ${done} shifts. Errors:\n` +
+          errs.slice(0, 5).join("\n") +
+          (errs.length > 5 ? `\n…and ${errs.length - 5} more` : "")
+      );
+      return;
+    }
     router.push(fromRequest ? "/requests" : "/schedule");
   };
 
@@ -141,57 +248,22 @@ function NewShiftPage() {
               lineHeight: 1.5,
             }}
           >
-            Creates an unassigned shift. Reps see it under{" "}
-            <b style={{ color: AC.ink }}>Unscheduled · Available</b> on their phone, and can{" "}
-            <b style={{ color: AC.ink }}>Claim</b> it to take it on. Phase 4 will let you
-            assign directly to a specific rep.
+            Pick the customer scope, the rep (or leave unassigned for any rep to claim), the
+            date and times. Use <b style={{ color: AC.ink }}>Repeat weekly</b> to spray the
+            same shift across a date range.
           </div>
 
-          <Field label="Customer" required>
-            {loading ? (
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 13,
-                  color: AC.mute,
-                  padding: 12,
-                }}
-              >
-                Loading customers…
-              </div>
-            ) : customers.length === 0 ? (
-              <div
-                style={{
-                  padding: 12,
-                  fontFamily: AC.font,
-                  fontSize: 13,
-                  color: AC.mute,
-                  background: AC.bg,
-                  borderRadius: 8,
-                }}
-              >
-                No customers in the database yet. Add one first via the{" "}
-                <a
-                  href="/customers/new"
-                  style={{ color: AC.brandDeep, fontWeight: 600 }}
-                >
-                  Customers page
-                </a>
-                .
-              </div>
-            ) : (
-              <select
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                style={inputStyle}
-              >
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} · {c.code} · {c.region}
-                  </option>
-                ))}
-              </select>
-            )}
+          <Field label="Customers" required>
+            <CustomerScopePicker
+              customers={customers}
+              loading={loading}
+              value={customerScope}
+              onChange={setCustomerScope}
+              allLabel="All customers"
+              allSubLabel={`Will create one shift per customer (${customers.length})`}
+              specificLabel="Specific customers"
+              specificSubLabel="Pick one or many"
+            />
           </Field>
 
           <Field
@@ -220,14 +292,13 @@ function NewShiftPage() {
                   marginTop: 6,
                 }}
               >
-                No reps signed up yet. Have a rep sign up via the mobile app first, or leave
-                this blank to allow any rep to claim the shift.
+                No reps signed up yet.
               </div>
             )}
           </Field>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-            <Field label="Date" required>
+            <Field label="Start date" required>
               <input
                 type="date"
                 value={shiftDate}
@@ -252,6 +323,99 @@ function NewShiftPage() {
               />
             </Field>
           </div>
+
+          {/* Recurrence */}
+          <Field label="Repeat">
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <RepeatOption
+                active={repeatMode === "none"}
+                onClick={() => setRepeatMode("none")}
+                title="One-off"
+                sub="Just this date"
+              />
+              <RepeatOption
+                active={repeatMode === "weekly"}
+                onClick={() => setRepeatMode("weekly")}
+                title="Weekly"
+                sub="Pick weekdays + 'until' date"
+              />
+            </div>
+            {repeatMode === "weekly" && (
+              <div
+                style={{
+                  border: `1px solid ${AC.line}`,
+                  borderRadius: 10,
+                  padding: 12,
+                  background: "#fff",
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 11,
+                    color: AC.mute,
+                    fontWeight: 700,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                    marginBottom: 8,
+                  }}
+                >
+                  On these days
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                  {WEEKDAYS.map((label, i) => {
+                    const on = weekdays.has(i);
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => toggleWeekday(i)}
+                        style={{
+                          padding: "7px 14px",
+                          borderRadius: 99,
+                          background: on ? AC.brand : "#fff",
+                          color: on ? "#fff" : AC.ink2,
+                          border: `1px solid ${on ? AC.brand : AC.line}`,
+                          fontFamily: AC.font,
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          letterSpacing: -0.1,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <Field label="Until (inclusive)" required>
+                  <input
+                    type="date"
+                    value={untilDate}
+                    min={shiftDate}
+                    onChange={(e) => setUntilDate(e.target.value)}
+                    style={inputStyle}
+                  />
+                </Field>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 11.5,
+                    color: AC.mute,
+                    marginTop: 4,
+                  }}
+                >
+                  Will generate {generatedDates.length} date{generatedDates.length === 1 ? "" : "s"}
+                  {generatedDates.length > 0 && (
+                    <>
+                      : <b style={{ color: AC.ink2 }}>{generatedDates[0]}</b> →{" "}
+                      <b style={{ color: AC.ink2 }}>{generatedDates[generatedDates.length - 1]}</b>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </Field>
 
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
             <Field label="Distance label" hint="Display only — what the rep sees on their card.">
@@ -280,6 +444,7 @@ function NewShiftPage() {
                 borderRadius: 10,
                 fontSize: 13,
                 fontWeight: 500,
+                whiteSpace: "pre-line",
                 display: "flex",
                 gap: 8,
                 alignItems: "flex-start",
@@ -291,20 +456,38 @@ function NewShiftPage() {
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Btn onClick={() => router.push("/schedule")}>Cancel</Btn>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+            {progress && (
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11.5,
+                  color: AC.mute,
+                  marginRight: 8,
+                }}
+              >
+                Creating {progress.done} / {progress.total}…
+              </div>
+            )}
+            <Btn onClick={() => router.push("/schedule")} disabled={busy}>
+              Cancel
+            </Btn>
             <Btn
               kind="primary"
               icon="check"
               onClick={onSubmit}
-              disabled={busy || customers.length === 0}
+              disabled={busy || customers.length === 0 || totalShifts === 0}
             >
-              {busy ? "Saving…" : "Create shift"}
+              {busy
+                ? "Saving…"
+                : totalShifts === 1
+                ? "Create shift"
+                : `Create ${totalShifts} shifts`}
             </Btn>
           </div>
         </Card>
 
-        {/* Preview */}
+        {/* Preview / summary */}
         <Card padding={0}>
           <div style={{ padding: "12px 16px", borderBottom: `1px solid ${AC.line}` }}>
             <div
@@ -317,86 +500,134 @@ function NewShiftPage() {
                 textTransform: "uppercase",
               }}
             >
-              Preview
+              Summary
             </div>
           </div>
-          {selectedCustomer ? (
-            <>
-              <div
-                style={{
-                  height: 64,
-                  background: `${selectedCustomer.color}18`,
-                  position: "relative",
-                }}
-              >
-                <div style={{ position: "absolute", left: 16, bottom: -16 }}>
-                  <CustomerSwatch customer={selectedCustomer} size={44} />
-                </div>
-              </div>
-              <div style={{ padding: "24px 16px 14px" }}>
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: AC.ink,
-                    letterSpacing: -0.2,
-                  }}
-                >
-                  {selectedCustomer.name}
-                </div>
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 11.5,
-                    color: AC.mute,
-                    marginTop: 2,
-                  }}
-                >
-                  {shiftDate} · {startTime}–{endTime}
-                  {distance && ` · ${distance}`}
-                </div>
-                <div
-                  style={{
-                    marginTop: 12,
-                    padding: "6px 9px",
-                    borderRadius: 6,
-                    background: selectedRep ? AC.brandSoft : AC.bg,
-                    fontFamily: AC.font,
-                    fontSize: 11,
-                    color: selectedRep ? AC.brandInk : AC.mute,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  <AGlyph
-                    name={selectedRep ? "reps" : "info"}
-                    size={12}
-                    color={selectedRep ? AC.brandDeep : AC.mute}
-                  />
-                  {selectedRep
-                    ? `Assigned to ${displayName(selectedRep)}`
-                    : "Unassigned — reps can claim it"}
-                </div>
-              </div>
-            </>
-          ) : (
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <SummaryRow
+              label="Customers"
+              value={
+                customerScope === null
+                  ? `All (${customers.length})`
+                  : customerScope.length === 0
+                  ? "—"
+                  : `${customerScope.length} selected`
+              }
+            />
+            <SummaryRow
+              label="Rep"
+              value={repId ? displayName(reps.find((r) => r.id === repId)!) : "Unassigned (claimable)"}
+            />
+            <SummaryRow
+              label="Dates"
+              value={
+                repeatMode === "none"
+                  ? shiftDate
+                  : `${generatedDates.length} dates · ${shiftDate} → ${untilDate}`
+              }
+            />
+            <SummaryRow label="Window" value={`${startTime} – ${endTime}`} />
+            <div style={{ height: 1, background: AC.line, margin: "4px 0" }} />
             <div
               style={{
-                padding: 20,
+                padding: 12,
+                background: AC.brandSoft,
+                borderRadius: 10,
                 fontFamily: AC.font,
                 fontSize: 13,
-                color: AC.mute,
+                fontWeight: 700,
+                color: AC.brandInk,
                 textAlign: "center",
               }}
             >
-              Pick a customer to preview
+              {totalShifts} shift{totalShifts === 1 ? "" : "s"} will be created
             </div>
-          )}
+          </div>
         </Card>
       </div>
     </AdminShell>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          color: AC.mute,
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          width: 80,
+          flexShrink: 0,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          flex: 1,
+          fontFamily: AC.font,
+          fontSize: 13,
+          color: AC.ink,
+          fontWeight: 500,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function RepeatOption({
+  active,
+  onClick,
+  title,
+  sub,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  sub: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1,
+        padding: "10px 12px",
+        borderRadius: 10,
+        background: active ? AC.brandSoft : "#fff",
+        border: `1px solid ${active ? AC.brand : AC.line}`,
+        cursor: "pointer",
+        textAlign: "left",
+      }}
+    >
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 13,
+          fontWeight: 600,
+          color: active ? AC.brandInk : AC.ink,
+          letterSpacing: -0.1,
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          color: active ? AC.brandDeep : AC.mute,
+          marginTop: 2,
+        }}
+      >
+        {sub}
+      </div>
+    </button>
   );
 }
 
@@ -429,14 +660,7 @@ function Field({
       </div>
       {children}
       {hint && (
-        <div
-          style={{
-            fontFamily: AC.font,
-            fontSize: 11,
-            color: AC.mute,
-            marginTop: 4,
-          }}
-        >
+        <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, marginTop: 4 }}>
           {hint}
         </div>
       )}

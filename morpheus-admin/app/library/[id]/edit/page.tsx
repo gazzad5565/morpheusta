@@ -25,6 +25,7 @@ import {
   DEFAULT_CATEGORY,
   type LibraryFile,
 } from "@/lib/library-store";
+import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
 import type { Customer } from "@/lib/types";
 
 export default function EditLibraryFilePage({
@@ -42,7 +43,7 @@ export default function EditLibraryFilePage({
 
   const [name, setName] = useState("");
   const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
-  const [customerId, setCustomerId] = useState<string>("");
+  const [scope, setScope] = useState<CustomerScope>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +61,7 @@ export default function EditLibraryFilePage({
       setFile(f);
       setName(f.name);
       setCategory(f.category || DEFAULT_CATEGORY);
-      setCustomerId(f.customerId ?? "");
+      setScope(f.customerIds);
       setLoading(false);
     });
     return () => {
@@ -72,12 +73,15 @@ export default function EditLibraryFilePage({
     if (busy) return;
     setError(null);
     if (!name.trim()) return setError("Give the file a name.");
+    if (scope !== null && scope.length === 0) {
+      return setError("Pick at least one customer, or switch to 'Shared with all'.");
+    }
 
     setBusy(true);
     const r = await updateLibraryFile(id, {
       name: name.trim(),
       category,
-      customerId: customerId === "" ? null : customerId,
+      customerIds: scope,
     });
     setBusy(false);
     if (!r.ok) {
@@ -163,19 +167,16 @@ export default function EditLibraryFilePage({
             </select>
           </Field>
 
-          <Field label="Customer" hint="Leave on 'Shared with all' for a universal file.">
-            <select
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              style={inputStyle}
-            >
-              <option value="">Shared with all</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+          <Field label="Customers" hint="Pick all (universal), one, or many.">
+            <CustomerScopePicker
+              customers={customers}
+              value={scope}
+              onChange={setScope}
+              allLabel="Shared with all"
+              allSubLabel="Every customer can see it"
+              specificLabel="Specific customers"
+              specificSubLabel="Pick one or many"
+            />
           </Field>
 
           {error && (

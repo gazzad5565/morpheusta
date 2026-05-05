@@ -328,20 +328,29 @@ customer_tasks {
   created_at   timestamptz
 }
 
--- library_files (Phase 3h, shared file storage metadata)
+-- library_files (Phase 3h, shared file storage metadata, multi-customer)
 -- Pairs with the "library" Supabase Storage bucket — the file binary lives
--- in storage, this table holds the friendly name, size, customer link,
--- and a free-form category (UI sticks to a fixed list of values).
+-- in storage, this table holds the friendly name, size, customer associations
+-- (an array — NULL/empty = "shared with all"), and a free-form category.
 library_files {
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid()
-  name         text NOT NULL
-  storage_path text NOT NULL UNIQUE  -- key inside the "library" bucket
-  size_bytes   bigint NULL
-  mime_type    text NULL
-  category     text NULL              -- e.g. 'Documents','Photos','Training'
-  customer_id  text NULL → customers (NULL = "shared with all")
-  uploaded_by  uuid → auth.users
-  uploaded_at  timestamptz
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid()
+  name          text NOT NULL
+  storage_path  text NOT NULL UNIQUE   -- key inside the "library" bucket
+  size_bytes    bigint NULL
+  mime_type     text NULL
+  category      text NULL              -- 'Documents','Photos','Training', etc
+  customer_ids  text[] NULL            -- NULL or [] = shared with all
+  uploaded_by   uuid → auth.users
+  uploaded_at   timestamptz
+}
+
+-- rep_customer_assignments (Phase 3i, many-to-many rep ↔ customer)
+-- Editable from both /reps/[id] and /customers/[id] via the same join table.
+rep_customer_assignments {
+  rep_id      uuid → auth.users
+  customer_id text → customers
+  assigned_at timestamptz
+  PRIMARY KEY (rep_id, customer_id)
 }
 
 -- profiles (Phase 3d, auto-populated on signup)
@@ -381,6 +390,7 @@ Every table has RLS on. The current policies:
 | `customer_tasks` | any authenticated | any authenticated | any authenticated | any authenticated |
 | `library_files` | any authenticated | any authenticated | any authenticated (used by `/library/[id]/edit` to change name / category / customer) | any authenticated |
 | Storage `library/*` | any authenticated | any authenticated | (n/a) | any authenticated |
+| `rep_customer_assignments` | any authenticated | any authenticated | (none — composite PK is immutable; delete + insert) | any authenticated |
 
 > ⚠️ Most policies are **temporary Phase 3** — they let any logged-in user perform most actions. In production, these would be tightened to "manager role only" for customers/shifts insert+delete once we add role-based access control. See "Deferred work" below.
 
@@ -491,6 +501,11 @@ Or via CLI: `npx vercel rollback`.
 - **Library categories + edit** — every uploaded file carries a category (`Documents` / `Photos` / `Training` / `Forms` / `Reference` / `Other`). Admin picks a category at upload time and can change it (or the customer association, or the display name) via `/library/[id]/edit`. Mobile `/library` shows category-filter chips above the file list.
 - **Clickable admin breadcrumbs** — every breadcrumb segment except the current page now links back via a label-to-href map in `TopBar.tsx`. Pages can opt a segment out of linking by passing `{ label: "Some Name" }` (no href) — used for things like the rep's name on `/reps/[id]`.
 - **Admin /schedule week planner** — full real-data 7-day grid: rows are reps (plus an "Unassigned" row at the top for claimable shifts), columns are Mon-Sun. Each cell shows that rep's shifts on that day with state-coloured accents (in-progress = brand, complete = green dimmed/struck-through, late = red, scheduled = customer color). Empty cells get a + button that opens `/schedule/new?rep=X&date=YYYY-MM-DD` pre-filled. Customer filter narrows visible shifts. Week navigation (← / Today / →) refetches via `listShiftsInRange`. Today's column is highlighted.
+- **Multi-customer + recurring shifts on `/schedule/new`** — customer scope picker (All / Specific one-or-many) × recurrence picker (One-off / Weekly with day-of-week chips + an "until" date) creates the cartesian product as N shift rows. Live preview shows the count before save. Sequential creation with progress ("Creating 3 of 12…"); per-row errors are surfaced in a summary so partial successes are visible.
+- **Library multi-customer** — `library_files.customer_id` is now a `customer_ids text[]` array. NULL = "shared with all"; populated = those specific customers. Admin upload + `/library/[id]/edit` use the same reusable `<CustomerScopePicker />` component as `/tasks/new` and `/schedule/new`. Each row shows up to 3 customer chips + a "+N" overflow.
+- **Reusable `CustomerScopePicker`** — single component (`components/ui/CustomerScopePicker.tsx`) used for any "All / Specific (one or many)" customer selection. Drives /tasks/new, /schedule/new, /library upload, /library/[id]/edit. Maintains UI consistency wherever customers are picked.
+- **Rep ↔ Customer assignments** — new `rep_customer_assignments` join table. Visible AND editable from BOTH directions: `/customers/[id]` has an "Assigned reps" multi-select editor; `/reps/[id]` has an "Assigned customers" multi-select editor. Both write to the same join via `setRepsForCustomer` / `setCustomersForRep` (idempotent diff — only the delta is touched).
+- **Customer detail page on real data** — `/customers/[id]` is now a real page: header card with status/address; assigned reps multi-select; tasks list (real `customer_tasks`) with edit/delete inline + "Add task" → `/tasks/new?customer=X`; library files list (real `library_files` filtered to this customer or universal) with click-to-open via signed URL; today's shifts at this customer with rep links + state. Right column shows quick stats (reps assigned, tasks, files, shifts today, address-set indicator). The geofence/sites mock UI is gone — those fields aren't yet schema-backed.
 - **Mobile shifts list shows state** — `/shifts` "Scheduled for me" sorts in-progress → scheduled → complete (so finished shifts sink to the bottom), with a green "Complete" badge on done shifts (dimmed, struck-through times) and a brand "In progress" badge with a "Resume shift" button on the active one.
 - **Mobile dashboard is fully real-data** — date is today's actual date, "last sync" is real now, shift count + progress bar reflect today's DB shifts (green segment for complete, brand for in-progress, grey for scheduled), Library shortcut shows real file count, "Up next" picks the in-progress shift first (with "Resume shift") then the next scheduled (with "Check in"), and the route-preview card is a real MapLibre map plotting today's customer pins + the rep's GPS dot.
 - **Library** — admin uploads files at `/library` (with optional customer association) into Supabase Storage bucket `library` + metadata in `library_files`. Mobile `/library` lists everything reps can see; tap any file to open it via a short-lived signed URL.
@@ -617,9 +632,11 @@ morpheus-admin/lib/tasks-store.ts              ← customer_tasks CRUD (list, ge
 morpheus-admin/app/tasks/page.tsx              ← list + filter (incl. Universal) + edit/delete inline; "New task" → /tasks/new
 morpheus-admin/app/tasks/new/page.tsx          ← create-task form: All / Specific (single or multi) scope picker
 morpheus-admin/app/tasks/[id]/edit/page.tsx    ← edit one row (rename, change scope to a single customer or universal, etc)
-morpheus-admin/lib/library-store.ts            ← library_files + Supabase Storage CRUD (list, get, upload, update, delete, signed URL); LIBRARY_CATEGORIES list
-morpheus-admin/app/library/page.tsx            ← upload (with category + customer) + list + filter (sidebar by customer AND by category) + edit/delete inline
-morpheus-admin/app/library/[id]/edit/page.tsx  ← edit name/category/customer association on a single file
+morpheus-admin/lib/library-store.ts            ← library_files + Supabase Storage CRUD (list, get, list-for-customer, upload, update, delete, signed URL); LIBRARY_CATEGORIES list
+morpheus-admin/app/library/page.tsx            ← upload (CustomerScopePicker for multi-customer) + list + filter (sidebar by customer AND by category) + edit/delete inline
+morpheus-admin/app/library/[id]/edit/page.tsx  ← edit name/category/multi-customer association on a single file
+morpheus-admin/lib/assignments-store.ts        ← rep ↔ customer many-to-many helpers (listCustomersForRep, listRepsForCustomer, set… both directions, idempotent diff)
+morpheus-admin/components/ui/CustomerScopePicker.tsx ← reusable "All / Specific (one or many)" picker — used by tasks/new, schedule/new, library upload, library edit
 morpheus-mobile/lib/library-store.ts           ← read-only library list + signed-URL fetcher
 morpheus-mobile/lib/shifts-store.ts            ← also exports getTasksForCustomer for /active
 morpheus-admin/app/api/geocode/route.ts        ← Nominatim geocode proxy (address → lat/lng)

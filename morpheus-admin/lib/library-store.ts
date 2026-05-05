@@ -1,21 +1,21 @@
 /**
- * Library store (admin) — upload + list + delete shared files.
+ * Library store (admin) — upload + list + edit + delete shared files.
  *
- * Files live in Supabase Storage bucket "library" (private). Friendly
- * metadata (name, size, customer association, uploader) lives in
- * public.library_files.
+ * Multi-customer model: each file row carries a `customer_ids text[]`.
+ *   - NULL or empty array → "shared with all" (universal).
+ *   - Populated array → applies only to those customers.
  *
- * Downloads use short-lived signed URLs so we don't have to make the
- * bucket public.
+ * Customer info isn't FK-joined (PostgREST can't do array-element FKs
+ * cleanly); we fetch matching customers in a second query and merge in
+ * JS, mirroring the rep-locations / requests-store pattern.
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import type { Customer } from "./types";
 
 const BUCKET = "library";
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
 
-/** Predefined categories. Free-form is allowed at the DB level, but the
- * UI sticks to this list for consistency. */
 export const LIBRARY_CATEGORIES = [
   "Documents",
   "Photos",
@@ -34,10 +34,10 @@ export interface LibraryFile {
   sizeBytes: number | null;
   mimeType: string | null;
   category: string | null;
-  customerId: string | null;
-  customerName: string | null;
-  customerInitials: string | null;
-  customerColor: string | null;
+  /** null/empty = "shared with all"; otherwise the specific customers the file targets. */
+  customerIds: string[] | null;
+  /** Joined customer summary array, populated when those customers exist. */
+  customers: Pick<Customer, "id" | "name" | "initials" | "color">[];
   uploadedBy: string | null;
   uploadedAt: string;
 }
@@ -49,18 +49,19 @@ interface FileRow {
   size_bytes: number | null;
   mime_type: string | null;
   category: string | null;
-  customer_id: string | null;
+  customer_ids: string[] | null;
   uploaded_by: string | null;
   uploaded_at: string;
-  customers: {
-    id: string;
-    name: string;
-    initials: string;
-    color: string;
-  } | null;
 }
 
-function rowToFile(r: FileRow): LibraryFile {
+const SELECT_COLS =
+  "id, name, storage_path, size_bytes, mime_type, category, customer_ids, uploaded_by, uploaded_at";
+
+function rowToFile(
+  r: FileRow,
+  customerLookup: Map<string, Pick<Customer, "id" | "name" | "initials" | "color">>
+): LibraryFile {
+  const ids = r.customer_ids || [];
   return {
     id: r.id,
     name: r.name,
@@ -68,17 +69,32 @@ function rowToFile(r: FileRow): LibraryFile {
     sizeBytes: r.size_bytes,
     mimeType: r.mime_type,
     category: r.category,
-    customerId: r.customer_id,
-    customerName: r.customers?.name ?? null,
-    customerInitials: r.customers?.initials ?? null,
-    customerColor: r.customers?.color ?? null,
+    customerIds: r.customer_ids && r.customer_ids.length > 0 ? r.customer_ids : null,
+    customers: ids
+      .map((id) => customerLookup.get(id))
+      .filter((c): c is Pick<Customer, "id" | "name" | "initials" | "color"> => !!c),
     uploadedBy: r.uploaded_by,
     uploadedAt: r.uploaded_at,
   };
 }
 
-const SELECT_COLS =
-  "id, name, storage_path, size_bytes, mime_type, category, customer_id, uploaded_by, uploaded_at, customers(id,name,initials,color)";
+async function fetchCustomerLookup(
+  rows: FileRow[]
+): Promise<Map<string, Pick<Customer, "id" | "name" | "initials" | "color">>> {
+  const map = new Map<string, Pick<Customer, "id" | "name" | "initials" | "color">>();
+  if (!isSupabaseConfigured() || !supabase) return map;
+  const ids = new Set<string>();
+  for (const r of rows) for (const id of r.customer_ids || []) ids.add(id);
+  if (ids.size === 0) return map;
+  const { data } = await supabase
+    .from("customers")
+    .select("id,name,initials,color")
+    .in("id", Array.from(ids));
+  for (const c of (data as Pick<Customer, "id" | "name" | "initials" | "color">[]) || []) {
+    map.set(c.id, c);
+  }
+  return map;
+}
 
 export async function listLibraryFiles(): Promise<LibraryFile[]> {
   if (!isSupabaseConfigured() || !supabase) return [];
@@ -91,7 +107,9 @@ export async function listLibraryFiles(): Promise<LibraryFile[]> {
     console.warn("[library] list:", error.message);
     return [];
   }
-  return ((data as unknown as FileRow[]) || []).map(rowToFile);
+  const rows = (data as FileRow[]) || [];
+  const lookup = await fetchCustomerLookup(rows);
+  return rows.map((r) => rowToFile(r, lookup));
 }
 
 export async function getLibraryFile(id: string): Promise<LibraryFile | null> {
@@ -105,18 +123,37 @@ export async function getLibraryFile(id: string): Promise<LibraryFile | null> {
     if (error) console.warn("[library] get:", error.message);
     return null;
   }
-  return rowToFile(data as unknown as FileRow);
+  const lookup = await fetchCustomerLookup([data as FileRow]);
+  return rowToFile(data as FileRow, lookup);
+}
+
+/** Files visible to a specific customer = either universal OR including this customer. */
+export async function listLibraryFilesForCustomer(
+  customerId: string
+): Promise<LibraryFile[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  // PostgREST: customer_ids @> ARRAY[id]  OR  customer_ids IS NULL OR length 0
+  const { data, error } = await supabase
+    .from("library_files")
+    .select(SELECT_COLS)
+    .or(`customer_ids.cs.{${customerId}},customer_ids.is.null`)
+    .order("uploaded_at", { ascending: false });
+  if (error) {
+    console.warn("[library] list for customer:", error.message);
+    return [];
+  }
+  const rows = (data as FileRow[]) || [];
+  const lookup = await fetchCustomerLookup(rows);
+  return rows.map((r) => rowToFile(r, lookup));
 }
 
 export async function uploadLibraryFile(
   file: File,
-  opts?: { customerId?: string | null; category?: string | null }
+  opts?: { customerIds?: string[] | null; category?: string | null }
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
-  // Build a unique storage path so two files with the same display name
-  // don't clobber each other in storage.
   const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const storagePath = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
 
@@ -131,6 +168,9 @@ export async function uploadLibraryFile(
   const { data: userData } = await supabase.auth.getUser();
   const userId = userData.user?.id ?? null;
 
+  // Normalise: null OR empty array → null (universal).
+  const ids = opts?.customerIds && opts.customerIds.length > 0 ? opts.customerIds : null;
+
   const { data, error: insErr } = await supabase
     .from("library_files")
     .insert({
@@ -139,14 +179,12 @@ export async function uploadLibraryFile(
       size_bytes: file.size,
       mime_type: file.type || null,
       category: opts?.category || DEFAULT_CATEGORY,
-      customer_id: opts?.customerId || null,
+      customer_ids: ids,
       uploaded_by: userId,
     })
     .select("id")
     .single();
   if (insErr) {
-    // Storage row landed but metadata insert failed — try to roll back the
-    // upload so we don't leak orphan files.
     await supabase.storage.from(BUCKET).remove([storagePath]);
     return { ok: false, error: insErr.message };
   }
@@ -156,7 +194,8 @@ export async function uploadLibraryFile(
 export interface LibraryFileUpdate {
   name?: string;
   category?: string | null;
-  customerId?: string | null;
+  /** undefined = leave unchanged. null = universal. [] also treated as universal. */
+  customerIds?: string[] | null;
 }
 
 export async function updateLibraryFile(
@@ -169,10 +208,10 @@ export async function updateLibraryFile(
   const dbPatch: Record<string, unknown> = {};
   if (patch.name !== undefined) dbPatch.name = patch.name.trim();
   if (patch.category !== undefined) dbPatch.category = patch.category;
-  if (patch.customerId !== undefined) dbPatch.customer_id = patch.customerId;
-  // Note: we deliberately leave the metadata UPDATE policy off (per the
-  // README RLS table). If you re-enable it in Phase 4, remember to widen
-  // it for managers only.
+  if (patch.customerIds !== undefined) {
+    dbPatch.customer_ids =
+      patch.customerIds && patch.customerIds.length > 0 ? patch.customerIds : null;
+  }
   const { error } = await supabase
     .from("library_files")
     .update(dbPatch)
@@ -187,15 +226,12 @@ export async function deleteLibraryFile(
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
-  // Storage first; if it fails, the metadata row stays so we can retry.
   const { error: storageErr } = await supabase.storage
     .from(BUCKET)
     .remove([f.storagePath]);
   if (storageErr) {
     // eslint-disable-next-line no-console
     console.warn("[library] storage delete:", storageErr.message);
-    // Don't bail — try the metadata delete anyway, in case the storage
-    // object was already missing.
   }
   const { error: dbErr } = await supabase.from("library_files").delete().eq("id", f.id);
   if (dbErr) return { ok: false, error: dbErr.message };
