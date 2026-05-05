@@ -1,4 +1,7 @@
-import { notFound } from "next/navigation";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
@@ -6,24 +9,102 @@ import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { CustomerSwatch, RepAvatar } from "@/components/ui/Avatars";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { AC } from "@/lib/tokens";
-import { CUSTOMERS, REPS } from "@/lib/mock-data";
+import { REPS } from "@/lib/mock-data";
+import { getCustomer, setCustomerActive, deleteCustomer } from "@/lib/customers-store";
+import type { Customer } from "@/lib/types";
 
-export default async function CustomerDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
-  const c = CUSTOMERS.find((x) => x.id === id);
-  if (!c) notFound();
+export default function CustomerDetailPage() {
+  const router = useRouter();
+  const params = useParams<{ id: string }>();
+  const id = params.id;
+  const [c, setC] = useState<Customer | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const found = await getCustomer(id);
+      if (cancelled) return;
+      setC(found);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (loading) {
+    return (
+      <AdminShell breadcrumbs={["Home", "Customers", "…"]}>
+        <div style={{ padding: 20, color: AC.mute, fontFamily: AC.font }}>Loading…</div>
+      </AdminShell>
+    );
+  }
+
+  if (!c) {
+    return (
+      <AdminShell breadcrumbs={["Home", "Customers", "Not found"]}>
+        <div style={{ padding: 20, color: AC.danger, fontFamily: AC.font }}>
+          Customer not found. It may have been deleted, or you may need to log in.
+        </div>
+      </AdminShell>
+    );
+  }
+
+  const isActive = c.active !== false;
+
+  async function onToggleActive() {
+    if (busy || !c) return;
+    setActionError(null);
+    setBusy(true);
+    const result = await setCustomerActive(id, !isActive);
+    setBusy(false);
+    if (!result.ok) {
+      setActionError(result.error || "Failed to update status.");
+      return;
+    }
+    setC({ ...c, active: !isActive });
+  }
+
+  async function onDelete() {
+    if (busy) return;
+    const ok = window.confirm(
+      `Permanently delete "${c!.name}"? This cannot be undone. Any historical shifts for this customer may be affected.`
+    );
+    if (!ok) return;
+    setActionError(null);
+    setBusy(true);
+    const result = await deleteCustomer(id);
+    setBusy(false);
+    if (!result.ok) {
+      setActionError(result.error || "Failed to delete.");
+      return;
+    }
+    router.push("/customers");
+  }
 
   return (
     <AdminShell
       breadcrumbs={["Home", "Customers", c.name]}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          <Btn icon="edit" size="sm">Edit</Btn>
-          <Btn icon="plus" kind="primary" size="sm">Add site</Btn>
+          <Btn icon="edit" size="sm" onClick={() => router.push(`/customers/${id}/edit`)}>
+            Edit address
+          </Btn>
+          {isActive ? (
+            <Btn size="sm" onClick={onToggleActive}>
+              {busy ? "…" : "Deactivate"}
+            </Btn>
+          ) : (
+            <Btn size="sm" kind="primary" onClick={onToggleActive}>
+              {busy ? "…" : "Reactivate"}
+            </Btn>
+          )}
+          <Btn size="sm" kind="danger" onClick={onDelete}>
+            Delete
+          </Btn>
         </div>
       }
     >
@@ -37,6 +118,21 @@ export default async function CustomerDetailPage({
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {actionError && (
+            <div
+              style={{
+                padding: "10px 12px",
+                background: AC.dangerTint,
+                color: "#9c1a3c",
+                borderRadius: 10,
+                fontFamily: AC.font,
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              {actionError}
+            </div>
+          )}
           <Card padding={20}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
               <CustomerSwatch customer={c} size={56} />
@@ -55,19 +151,46 @@ export default async function CustomerDetailPage({
                 <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute, marginTop: 2 }}>
                   Account {c.code} · {c.region} region · {c.sites} sites
                 </div>
+                {(c.address || (c.latitude != null && c.longitude != null)) && (
+                  <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
+                    {c.address && (
+                      <div
+                        style={{
+                          fontFamily: AC.font,
+                          fontSize: 12,
+                          color: AC.ink2,
+                          fontWeight: 500,
+                        }}
+                      >
+                        <AGlyph name="pin" size={11} color={AC.mute} /> {c.address}
+                      </div>
+                    )}
+                    {c.latitude != null && c.longitude != null && (
+                      <div
+                        style={{
+                          fontFamily: AC.fontMono,
+                          fontSize: 11,
+                          color: AC.mute,
+                        }}
+                      >
+                        {c.latitude.toFixed(5)}, {c.longitude.toFixed(5)}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                   <span
                     style={{
                       padding: "3px 9px",
                       borderRadius: 99,
-                      background: AC.okTint,
-                      color: "#0F5A38",
+                      background: isActive ? AC.okTint : AC.bg,
+                      color: isActive ? "#0F5A38" : AC.mute,
                       fontFamily: AC.font,
                       fontSize: 11,
                       fontWeight: 700,
                     }}
                   >
-                    ● Active
+                    ● {isActive ? "Active" : "Inactive"}
                   </span>
                   <span
                     style={{

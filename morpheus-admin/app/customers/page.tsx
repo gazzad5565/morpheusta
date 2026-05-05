@@ -91,7 +91,14 @@ export default function CustomersPage() {
                 href={`/customers/${c.id}`}
                 style={{ textDecoration: "none", color: "inherit" }}
               >
-                <Card padding={0} style={{ overflow: "hidden", height: "100%" }}>
+                <Card
+                  padding={0}
+                  style={{
+                    overflow: "hidden",
+                    height: "100%",
+                    opacity: c.active === false ? 0.55 : 1,
+                  }}
+                >
                   <div
                     style={{
                       height: 64,
@@ -110,14 +117,14 @@ export default function CustomersPage() {
                         padding: "2px 8px",
                         borderRadius: 99,
                         background: "#fff",
-                        color: AC.ok,
+                        color: c.active === false ? AC.mute : AC.ok,
                         fontFamily: AC.font,
                         fontSize: 10.5,
                         fontWeight: 700,
                         border: `1px solid ${AC.line}`,
                       }}
                     >
-                      ● Active
+                      ● {c.active === false ? "Inactive" : "Active"}
                     </span>
                   </div>
                   <div style={{ padding: "24px 16px 14px" }}>

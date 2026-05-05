@@ -1,13 +1,12 @@
 /**
  * Customers store — Phase 3.
  *
- * Reads & writes the `customers` table in Supabase. Falls back to the
- * static CUSTOMERS list from mock-data when Supabase isn't configured
- * (e.g. local dev without env vars), so the UI stays usable.
+ * Reads & writes the `customers` table in Supabase. No mock fallback —
+ * if Supabase isn't reachable or returns an error, callers see an empty
+ * list (and the failure surfaces in the console).
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
-import { CUSTOMERS as FALLBACK_CUSTOMERS } from "./mock-data";
 import type { Customer } from "./types";
 
 interface DbRow {
@@ -18,6 +17,10 @@ interface DbRow {
   code: number;
   region: string | null;
   city: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  active: boolean | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -32,23 +35,40 @@ function rowToCustomer(row: DbRow): Customer {
     geofence: 75,
     shiftsThisWeek: 0,
     tier: "Standard",
+    address: row.address ?? undefined,
+    latitude: row.latitude ?? undefined,
+    longitude: row.longitude ?? undefined,
+    active: row.active ?? true,
   };
 }
 
 export async function listCustomers(): Promise<Customer[]> {
-  if (!isSupabaseConfigured() || !supabase) {
-    return FALLBACK_CUSTOMERS;
-  }
+  if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
     .from("customers")
     .select("*")
     .order("name", { ascending: true });
   if (error) {
     // eslint-disable-next-line no-console
-    console.warn("[customers] list error, using fallback:", error.message);
-    return FALLBACK_CUSTOMERS;
+    console.warn("[customers] list error:", error.message);
+    return [];
   }
   return (data as DbRow[]).map(rowToCustomer);
+}
+
+export async function getCustomer(id: string): Promise<Customer | null> {
+  if (!isSupabaseConfigured() || !supabase) return null;
+  const { data, error } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[customers] get error:", error.message);
+    return null;
+  }
+  return data ? rowToCustomer(data as DbRow) : null;
 }
 
 export interface NewCustomer {
@@ -58,6 +78,9 @@ export interface NewCustomer {
   code: number;
   region?: string;
   city?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export async function createCustomer(
@@ -84,7 +107,51 @@ export async function createCustomer(
     code: c.code,
     region: c.region || null,
     city: c.city || null,
+    address: c.address || null,
+    latitude: c.latitude ?? null,
+    longitude: c.longitude ?? null,
   });
   if (error) return { ok: false, error: error.message };
   return { ok: true, id };
+}
+
+export interface CustomerPatch {
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+export async function updateCustomer(
+  id: string,
+  patch: CustomerPatch
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { error } = await supabase.from("customers").update(patch).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function setCustomerActive(
+  id: string,
+  active: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { error } = await supabase.from("customers").update({ active }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function deleteCustomer(
+  id: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { error } = await supabase.from("customers").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }

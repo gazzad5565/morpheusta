@@ -32,6 +32,10 @@ export interface Customer {
   shiftsThisWeek: number;
   color: string;
   tier?: "Premium" | "Standard";
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  active?: boolean;
 }
 
 export type ShiftState =

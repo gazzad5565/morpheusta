@@ -10,6 +10,7 @@ import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
 import { createCustomer } from "@/lib/customers-store";
+import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import type { Customer } from "@/lib/types";
 
 const SWATCHES = [
@@ -39,9 +40,12 @@ export default function NewCustomerPage() {
   const [color, setColor] = useState(SWATCHES[0]);
   const [region, setRegion] = useState<Customer["region"]>("North");
   const [city, setCity] = useState("");
+  const [address, setAddress] = useState("");
+  const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [code, setCode] = useState<string>(String(Math.floor(Math.random() * 9000) + 1000));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [geocodeNote, setGeocodeNote] = useState<string | null>(null);
 
   // Auto-fill initials from name when user hasn't manually typed any
   const [initialsManuallyEdited, setInitialsManuallyEdited] = useState(false);
@@ -66,12 +70,37 @@ export default function NewCustomerPage() {
   const onSubmit = async () => {
     if (busy) return;
     setError(null);
+    setGeocodeNote(null);
     if (!name.trim()) return setError("Name is required.");
     if (!initials.trim()) return setError("Initials are required.");
     const codeNum = parseInt(code, 10);
     if (Number.isNaN(codeNum)) return setError("Code must be a number.");
 
     setBusy(true);
+
+    let latitude: number | undefined;
+    let longitude: number | undefined;
+    const trimmedAddress = address.trim();
+    if (trimmedAddress) {
+      if (pickedCoords) {
+        latitude = pickedCoords.lat;
+        longitude = pickedCoords.lng;
+      } else {
+        try {
+          const res = await fetch(`/api/geocode?q=${encodeURIComponent(trimmedAddress)}`);
+          if (res.ok) {
+            const data = (await res.json()) as { latitude: number; longitude: number };
+            latitude = data.latitude;
+            longitude = data.longitude;
+          } else {
+            setGeocodeNote("Could not geocode address — saving without coordinates.");
+          }
+        } catch {
+          setGeocodeNote("Geocoder unreachable — saving without coordinates.");
+        }
+      }
+    }
+
     const result = await createCustomer({
       name: name.trim(),
       initials: initials.trim().slice(0, 3).toUpperCase(),
@@ -79,6 +108,9 @@ export default function NewCustomerPage() {
       code: codeNum,
       region,
       city: city.trim() || undefined,
+      address: trimmedAddress || undefined,
+      latitude,
+      longitude,
     });
     setBusy(false);
     if (!result.ok) {
@@ -172,6 +204,27 @@ export default function NewCustomerPage() {
             </Field>
           </div>
 
+          <Field
+            label="Address"
+            hint={
+              pickedCoords
+                ? `Coordinates locked: ${pickedCoords.lat.toFixed(5)}, ${pickedCoords.lng.toFixed(5)}`
+                : "Start typing — pick a match from the list to lock coordinates."
+            }
+          >
+            <AddressAutocomplete
+              value={address}
+              onChange={(v) => {
+                setAddress(v);
+                if (pickedCoords) setPickedCoords(null);
+              }}
+              onSelect={(s) => {
+                setPickedCoords({ lat: s.latitude, lng: s.longitude });
+              }}
+              placeholder="e.g. 1480 Riverside Way, Cape Town"
+            />
+          </Field>
+
           <Field label="Account code" hint="Internal reference number — auto-generated, edit if needed.">
             <input
               value={code}
@@ -180,6 +233,23 @@ export default function NewCustomerPage() {
               style={{ ...inputStyle, maxWidth: 160, fontFamily: AC.fontMono }}
             />
           </Field>
+
+          {geocodeNote && (
+            <div
+              style={{
+                padding: "10px 12px",
+                background: AC.bg,
+                color: AC.ink2,
+                borderRadius: 10,
+                fontSize: 13,
+                fontWeight: 500,
+                marginBottom: 12,
+                border: `1px solid ${AC.line}`,
+              }}
+            >
+              {geocodeNote}
+            </div>
+          )}
 
           {error && (
             <div
