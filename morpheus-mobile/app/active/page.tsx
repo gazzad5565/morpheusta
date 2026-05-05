@@ -16,6 +16,7 @@ import {
   SectionLabel,
 } from "@/components/Chrome";
 import { Glyph, formatTime, type GlyphName } from "@/components/Glyph";
+import { startLocationTracking } from "@/lib/location-tracker";
 
 export default function ActiveShiftPage() {
   const router = useRouter();
@@ -34,6 +35,12 @@ export default function ActiveShiftPage() {
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // Live-track this rep's location for the admin map while the shift is active.
+  useEffect(() => {
+    const tracker = startLocationTracking();
+    return () => tracker.stop();
   }, []);
 
   const elapsed = Math.max(0, Math.floor((now - shiftStartTs) / 1000));
