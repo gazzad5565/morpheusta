@@ -77,7 +77,7 @@ export default function RequestsPage() {
       return;
     }
     setPendingDelete(r.id);
-    const result = await deleteRequest(r.id);
+    const result = await deleteRequest(r.id, "declined");
     setPendingDelete(null);
     if (!result.ok) {
       alert(`Couldn't decline: ${result.error}`);

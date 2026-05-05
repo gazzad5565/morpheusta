@@ -6,6 +6,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { logEvent } from "./events-store";
 
 export interface ShiftRow {
   id: string;
@@ -100,9 +101,18 @@ export async function createShift(
       tasks_total: s.tasks_total ?? 4,
       rep_id: s.rep_id || null,
     })
-    .select("id")
+    .select("id, customers(name)")
     .single();
   if (error) return { ok: false, error: error.message };
+  const customerName =
+    (data as { customers?: { name?: string } } | null)?.customers?.name || "a customer";
+  await logEvent({
+    event_type: "shift.scheduled",
+    shift_id: data?.id,
+    customer_id: s.customer_id,
+    message: `Scheduled ${customerName} on ${s.shift_date} ${s.start_time}–${s.end_time}`,
+    meta: { rep_assigned: s.rep_id ? true : false },
+  });
   return { ok: true, id: data?.id };
 }
 
@@ -110,8 +120,20 @@ export async function deleteShift(
   id: string
 ): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured() || !supabase) return { ok: false, error: "Database not configured" };
+  const { data: row } = await supabase
+    .from("shifts")
+    .select("customer_id, customers(name)")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase.from("shifts").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
+  const customerName =
+    (row as { customers?: { name?: string } } | null)?.customers?.name || "a customer";
+  await logEvent({
+    event_type: "shift.deleted",
+    customer_id: (row as { customer_id?: string } | null)?.customer_id || null,
+    message: `Removed shift at ${customerName}`,
+  });
   return { ok: true };
 }
 

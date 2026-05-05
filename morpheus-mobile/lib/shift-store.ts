@@ -16,6 +16,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { logEvent } from "./events-store";
 import type { Shift } from "./mock-data";
 
 const KEY = "morpheus.requested-shifts.v1";
@@ -144,7 +145,13 @@ export async function addRequestedShift(
   if (error) {
     // eslint-disable-next-line no-console
     console.warn("[shift-store] add error:", error.message);
+    return;
   }
+  await logEvent({
+    event_type: "request.submitted",
+    customer_id: shift.id,
+    message: `Requested ${shift.name}`,
+  });
 }
 
 export async function removeRequestedShift(id: string): Promise<void> {

@@ -205,7 +205,7 @@ function NewShiftPage() {
     }
 
     if (fromRequest && errs.length === 0) {
-      const del = await deleteRequest(fromRequest);
+      const del = await deleteRequest(fromRequest, "scheduled");
       if (!del.ok) {
         // eslint-disable-next-line no-console
         console.warn("[schedule/new] couldn't delete request:", del.error);

@@ -7,6 +7,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { logEvent } from "./events-store";
 import type { Customer } from "./types";
 
 interface DbRow {
@@ -113,6 +114,11 @@ export async function createCustomer(
     longitude: c.longitude ?? null,
   });
   if (error) return { ok: false, error: error.message };
+  await logEvent({
+    event_type: "customer.created",
+    customer_id: id,
+    message: `Added customer ${c.name}`,
+  });
   return { ok: true, id };
 }
 
@@ -143,8 +149,19 @@ export async function setCustomerActive(
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
+  const { data: row } = await supabase
+    .from("customers")
+    .select("name")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase.from("customers").update({ active }).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  const name = (row as { name?: string } | null)?.name || "customer";
+  await logEvent({
+    event_type: active ? "customer.reactivated" : "customer.deactivated",
+    customer_id: id,
+    message: `${active ? "Reactivated" : "Deactivated"} ${name}`,
+  });
   return { ok: true };
 }
 
@@ -154,7 +171,17 @@ export async function deleteCustomer(
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
+  const { data: row } = await supabase
+    .from("customers")
+    .select("name")
+    .eq("id", id)
+    .maybeSingle();
+  const name = (row as { name?: string } | null)?.name || "a customer";
   const { error } = await supabase.from("customers").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
+  await logEvent({
+    event_type: "customer.deleted",
+    message: `Deleted customer ${name}`,
+  });
   return { ok: true };
 }

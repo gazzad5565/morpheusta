@@ -109,9 +109,35 @@ export default function ActiveShiftPage() {
   const mm = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
 
-  // Breaks are not yet a DB feature; the rep can't see/use them until that
-  // arrives. Empty for now.
-  const breaks: Task[] = [];
+  // Standard break options. Not a DB feature (yet) — these are timer-only
+  // so the rep can pause inside an active shift. Tap any → opens the
+  // sheet → Start break → timer runs → End break.
+  const breaks: Task[] = [
+    {
+      id: "break-15",
+      name: "Short break",
+      compulsory: false,
+      duration: 15,
+      description: "A quick 15-minute break.",
+      kind: "break",
+    },
+    {
+      id: "break-30",
+      name: "Lunch break",
+      compulsory: false,
+      duration: 30,
+      description: "A 30-minute lunch break.",
+      kind: "break",
+    },
+    {
+      id: "break-60",
+      name: "Long break",
+      compulsory: false,
+      duration: 60,
+      description: "An hour-long break.",
+      kind: "break",
+    },
+  ];
   const compulsory = tasks.filter((t) => t.compulsory);
   const available = tasks.filter((t) => !t.compulsory);
   const compulsoryDone = compulsory.every((t) => completedTaskIds.includes(t.id));
@@ -421,15 +447,32 @@ export default function ActiveShiftPage() {
         />
         {tasksOpen && (
           <div style={{ padding: "4px 0 12px" }}>
-            {compulsory.map((t) => (
-              <TaskRow
-                key={t.id}
-                task={t}
-                completed={completedTaskIds.includes(t.id)}
-                active={activeTaskId === t.id}
-                onClick={() => setOpenSheet({ task: t })}
-              />
-            ))}
+            {compulsory.length === 0 ? (
+              <div
+                style={{
+                  padding: "12px 14px",
+                  background: MC.card,
+                  border: `1px dashed ${MC.line}`,
+                  borderRadius: 12,
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  color: MC.mute,
+                  textAlign: "center",
+                }}
+              >
+                No compulsory tasks for this customer yet.
+              </div>
+            ) : (
+              compulsory.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  completed={completedTaskIds.includes(t.id)}
+                  active={activeTaskId === t.id}
+                  onClick={() => setOpenSheet({ task: t })}
+                />
+              ))
+            )}
           </div>
         )}
       </div>
@@ -448,15 +491,32 @@ export default function ActiveShiftPage() {
         />
         {availOpen && (
           <div style={{ padding: "4px 0 12px" }}>
-            {available.map((t) => (
-              <TaskRow
-                key={t.id}
-                task={t}
-                completed={completedTaskIds.includes(t.id)}
-                active={activeTaskId === t.id}
-                onClick={() => setOpenSheet({ task: t })}
-              />
-            ))}
+            {available.length === 0 ? (
+              <div
+                style={{
+                  padding: "12px 14px",
+                  background: MC.card,
+                  border: `1px dashed ${MC.line}`,
+                  borderRadius: 12,
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  color: MC.mute,
+                  textAlign: "center",
+                }}
+              >
+                No optional tasks for this customer yet.
+              </div>
+            ) : (
+              available.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  completed={completedTaskIds.includes(t.id)}
+                  active={activeTaskId === t.id}
+                  onClick={() => setOpenSheet({ task: t })}
+                />
+              ))
+            )}
           </div>
         )}
       </div>

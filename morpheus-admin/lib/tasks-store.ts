@@ -7,6 +7,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { logEvent } from "./events-store";
 
 export interface TaskRow {
   id: string;
@@ -108,6 +109,14 @@ export async function createTask(
 
   const { error } = await supabase.from("customer_tasks").insert(rows);
   if (error) return { ok: false, error: error.message };
+  await logEvent({
+    event_type: "task.created",
+    message:
+      t.customerIds === null
+        ? `Added universal task "${t.name}"`
+        : `Added task "${t.name}" to ${rows.length} customer${rows.length === 1 ? "" : "s"}`,
+    meta: { customer_count: rows.length },
+  });
   return { ok: true, count: rows.length };
 }
 
@@ -115,8 +124,19 @@ export async function deleteTask(
   id: string
 ): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured() || !supabase) return { ok: false, error: "Database not configured" };
+  const { data: row } = await supabase
+    .from("customer_tasks")
+    .select("name, customer_id")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase.from("customer_tasks").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
+  const taskName = (row as { name?: string } | null)?.name || "task";
+  await logEvent({
+    event_type: "task.deleted",
+    customer_id: (row as { customer_id?: string | null } | null)?.customer_id || null,
+    message: `Removed task "${taskName}"`,
+  });
   return { ok: true };
 }
 

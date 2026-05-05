@@ -10,6 +10,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { logEvent } from "./events-store";
 import type { Shift } from "./mock-data";
 
 interface ShiftRow {
@@ -158,6 +159,13 @@ export async function claimShift(
   const userId = userData.user?.id;
   if (!userId) return { ok: false, error: "Not signed in" };
 
+  // Look up the shift first so we can include the customer in the event log.
+  const { data: shiftRow } = await supabase
+    .from("shifts")
+    .select("customer_id, customers(name)")
+    .eq("id", shiftId)
+    .maybeSingle();
+
   const { error } = await supabase
     .from("shifts")
     .update({ rep_id: userId })
@@ -165,6 +173,15 @@ export async function claimShift(
     .is("rep_id", null); // Only succeeds if it's still unassigned (race-safe)
 
   if (error) return { ok: false, error: error.message };
+  const customerName =
+    (shiftRow as { customers?: { name?: string } } | null)?.customers?.name || "a customer";
+  await logEvent({
+    event_type: "shift.claimed",
+    shift_id: shiftId,
+    customer_id:
+      (shiftRow as { customer_id?: string } | null)?.customer_id || null,
+    message: `Claimed shift at ${customerName}`,
+  });
   return { ok: true };
 }
 
@@ -195,6 +212,11 @@ export async function checkInToShift(
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
+  const { data: shiftRow } = await supabase
+    .from("shifts")
+    .select("customer_id, customers(name)")
+    .eq("id", shiftId)
+    .maybeSingle();
   const { error } = await supabase
     .from("shifts")
     .update({
@@ -203,6 +225,15 @@ export async function checkInToShift(
     })
     .eq("id", shiftId);
   if (error) return { ok: false, error: error.message };
+  const customerName =
+    (shiftRow as { customers?: { name?: string } } | null)?.customers?.name || "customer";
+  await logEvent({
+    event_type: "shift.checked_in",
+    shift_id: shiftId,
+    customer_id:
+      (shiftRow as { customer_id?: string } | null)?.customer_id || null,
+    message: `Checked into ${customerName}`,
+  });
   return { ok: true };
 }
 
@@ -248,9 +279,24 @@ export async function checkOutOfShift(
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
+  const { data: shiftRow } = await supabase
+    .from("shifts")
+    .select("customer_id, customers(name)")
+    .eq("id", shiftId)
+    .maybeSingle();
   const update: Record<string, unknown> = { state: "complete" };
   if (typeof tasksDone === "number") update.tasks_done = tasksDone;
   const { error } = await supabase.from("shifts").update(update).eq("id", shiftId);
   if (error) return { ok: false, error: error.message };
+  const customerName =
+    (shiftRow as { customers?: { name?: string } } | null)?.customers?.name || "customer";
+  await logEvent({
+    event_type: "shift.checked_out",
+    shift_id: shiftId,
+    customer_id:
+      (shiftRow as { customer_id?: string } | null)?.customer_id || null,
+    message: `Checked out of ${customerName}`,
+    meta: typeof tasksDone === "number" ? { tasks_done: tasksDone } : undefined,
+  });
   return { ok: true };
 }

@@ -11,6 +11,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { logEvent } from "./events-store";
 import type { Customer } from "./types";
 
 const BUCKET = "library";
@@ -188,6 +189,11 @@ export async function uploadLibraryFile(
     await supabase.storage.from(BUCKET).remove([storagePath]);
     return { ok: false, error: insErr.message };
   }
+  await logEvent({
+    event_type: "library.uploaded",
+    message: `Uploaded ${file.name}`,
+    meta: { size_bytes: file.size, customer_ids: ids },
+  });
   return { ok: true, id: data?.id };
 }
 
@@ -235,6 +241,10 @@ export async function deleteLibraryFile(
   }
   const { error: dbErr } = await supabase.from("library_files").delete().eq("id", f.id);
   if (dbErr) return { ok: false, error: dbErr.message };
+  await logEvent({
+    event_type: "library.deleted",
+    message: `Deleted ${f.name}`,
+  });
   return { ok: true };
 }
 

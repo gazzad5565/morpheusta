@@ -9,6 +9,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { logEvent, type EventType } from "./events-store";
 
 export interface PendingRequest {
   id: string; // composite "{userId}-{customerId}"
@@ -144,14 +145,40 @@ export function subscribeRequests(onChange: () => void): () => void {
   }
 }
 
-/** Delete a single request by composite id (used after approving + scheduling, or on decline). */
+/**
+ * Delete a single request by composite id. Pass `outcome` so the event
+ * log knows whether this was a "scheduled" approval (the schedule form
+ * deletes after creating the shift) or a manual "declined" action.
+ */
 export async function deleteRequest(
-  id: string
+  id: string,
+  outcome: "scheduled" | "declined" | "handled" = "handled"
 ): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
+  const { data: row } = await supabase
+    .from("requested_shifts")
+    .select("customer_id, customer_name")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase.from("requested_shifts").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
+  const customerName =
+    (row as { customer_name?: string } | null)?.customer_name || "a customer";
+  const eventType: EventType =
+    outcome === "scheduled"
+      ? "request.scheduled"
+      : outcome === "declined"
+      ? "request.declined"
+      : "request.declined";
+  await logEvent({
+    event_type: eventType,
+    customer_id: (row as { customer_id?: string } | null)?.customer_id || null,
+    message:
+      outcome === "scheduled"
+        ? `Approved request for ${customerName}`
+        : `Declined request for ${customerName}`,
+  });
   return { ok: true };
 }

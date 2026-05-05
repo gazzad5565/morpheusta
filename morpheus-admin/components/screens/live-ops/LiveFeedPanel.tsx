@@ -1,5 +1,20 @@
 "use client";
 
+/**
+ * Live Feed — two tabs:
+ *
+ *   1. "Needs action" → pending rep-requested shifts. Each row has
+ *      Schedule (→ /schedule/new pre-filled) + Decline. Subscribed to
+ *      requested_shifts realtime so the badge + list flip live.
+ *
+ *   2. "All activity" → the shift_events log, newest first. Subscribed
+ *      to shift_events INSERT so new rows appear at the top in real
+ *      time.
+ *
+ * The previous "Needs action" placeholder + the separate "Requests" tab
+ * were redundant — they're the same thing. Merged into one.
+ */
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AC } from "@/lib/tokens";
@@ -12,8 +27,15 @@ import {
   subscribeRequests,
   type PendingRequest,
 } from "@/lib/requests-store";
+import {
+  listRecentEvents,
+  subscribeEvents,
+  EVENT_LABEL,
+  eventTone,
+  type ShiftEvent,
+} from "@/lib/events-store";
 
-type TabKey = "needs-action" | "all" | "requests";
+type TabKey = "needs-action" | "all";
 
 function formatRelative(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -30,14 +52,16 @@ function formatRelative(iso: string): string {
 export function LiveFeedPanel() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("needs-action");
+
+  // Pending requests (Needs action)
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   const [requestsLoaded, setRequestsLoaded] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // Always fetch the request count so we can show it on the tab badge,
-  // not only when the tab is active. Subscribes to realtime changes so
-  // the count + list flip the moment a rep submits / admin schedules /
-  // admin declines.
+  // Activity (All activity)
+  const [events, setEvents] = useState<ShiftEvent[]>([]);
+  const [eventsLoaded, setEventsLoaded] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -54,6 +78,23 @@ export function LiveFeedPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    listRecentEvents(50).then((rows) => {
+      if (cancelled) return;
+      setEvents(rows);
+      setEventsLoaded(true);
+    });
+    // Realtime: prepend new events as they arrive.
+    const unsub = subscribeEvents((newEvent) => {
+      setEvents((prev) => [newEvent, ...prev].slice(0, 50));
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
   const onApprove = (r: PendingRequest) => {
     const qs = new URLSearchParams({
       rep: r.repId,
@@ -64,11 +105,9 @@ export function LiveFeedPanel() {
   };
 
   const onDecline = async (r: PendingRequest) => {
-    if (!confirm(`Decline ${r.repName}'s request for ${r.customerName}?`)) {
-      return;
-    }
+    if (!confirm(`Decline ${r.repName}'s request for ${r.customerName}?`)) return;
     setBusyId(r.id);
-    const result = await deleteRequest(r.id);
+    const result = await deleteRequest(r.id, "declined");
     setBusyId(null);
     if (!result.ok) {
       alert(`Couldn't decline: ${result.error}`);
@@ -77,18 +116,14 @@ export function LiveFeedPanel() {
     setRequests((rs) => rs.filter((x) => x.id !== r.id));
   };
 
-  // "Needs action" and "All activity" tabs depend on a shift_events log
-  // table that doesn't exist yet (deferred). They render empty states
-  // until that lands. "Requests" is real and live.
   const tabs: { key: TabKey; label: string; count: number; tone?: string }[] = [
-    { key: "needs-action", label: "Needs action", count: 0 },
-    { key: "all", label: "All activity", count: 0 },
     {
-      key: "requests",
-      label: "Requests",
+      key: "needs-action",
+      label: "Needs action",
       count: requests.length,
       tone: requests.length > 0 ? AC.brand : undefined,
     },
+    { key: "all", label: "All activity", count: events.length },
   ];
 
   return (
@@ -113,23 +148,29 @@ export function LiveFeedPanel() {
           >
             Live feed
           </div>
-          <button
-            type="button"
+          <span
             style={{
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
               fontFamily: AC.font,
-              fontSize: 11.5,
-              color: AC.mute,
-              fontWeight: 600,
-              display: "flex",
+              fontSize: 10,
+              fontWeight: 700,
+              color: AC.ok,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              display: "inline-flex",
               alignItems: "center",
-              gap: 4,
+              gap: 5,
             }}
           >
-            Today <AGlyph name="chev-d" size={11} color={AC.mute} />
-          </button>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 99,
+                background: AC.ok,
+              }}
+            />
+            Live
+          </span>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
           {tabs.map((t) => {
@@ -165,12 +206,7 @@ export function LiveFeedPanel() {
                     borderRadius: 99,
                     fontSize: 10,
                     fontWeight: 700,
-                    background:
-                      t.tone === AC.danger
-                        ? AC.dangerTint
-                        : t.tone === AC.brand
-                        ? AC.brandTint
-                        : AC.bg,
+                    background: t.tone === AC.brand ? AC.brandTint : AC.bg,
                     color: t.tone || AC.mute,
                   }}
                 >
@@ -182,10 +218,8 @@ export function LiveFeedPanel() {
         </div>
       </div>
 
-      {activeTab === "needs-action" && <NeedsActionList />}
-      {activeTab === "all" && <AllActivityList />}
-      {activeTab === "requests" && (
-        <RequestsList
+      {activeTab === "needs-action" && (
+        <NeedsActionList
           requests={requests}
           loaded={requestsLoaded}
           busyId={busyId}
@@ -193,56 +227,14 @@ export function LiveFeedPanel() {
           onDecline={onDecline}
         />
       )}
+      {activeTab === "all" && <AllActivityList events={events} loaded={eventsLoaded} />}
     </Card>
   );
 }
 
-function NeedsActionList() {
-  return (
-    <EmptyTab
-      title="No issues right now"
-      sub="Late check-ins, off-site exceptions, and stalled shifts will appear here once the event log is wired (deferred)."
-    />
-  );
-}
+// ─── Needs action ──────────────────────────────────────────────────────
 
-function AllActivityList() {
-  return (
-    <EmptyTab
-      title="No activity yet"
-      sub="Check-ins, claims, and completions will stream here once the event log is wired (deferred)."
-    />
-  );
-}
-
-function EmptyTab({ title, sub }: { title: string; sub: string }) {
-  return (
-    <div
-      style={{
-        padding: "32px 24px",
-        textAlign: "center",
-        background: "#fff",
-      }}
-    >
-      <div style={{ fontFamily: AC.font, fontSize: 13, fontWeight: 600, color: AC.ink2 }}>
-        {title}
-      </div>
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 11.5,
-          color: AC.mute,
-          marginTop: 6,
-          lineHeight: 1.5,
-        }}
-      >
-        {sub}
-      </div>
-    </div>
-  );
-}
-
-function RequestsList({
+function NeedsActionList({
   requests,
   loaded,
   busyId,
@@ -257,15 +249,7 @@ function RequestsList({
 }) {
   if (!loaded) {
     return (
-      <div
-        style={{
-          padding: 24,
-          fontFamily: AC.font,
-          fontSize: 12,
-          color: AC.mute,
-          textAlign: "center",
-        }}
-      >
+      <div style={{ padding: 24, fontFamily: AC.font, fontSize: 12, color: AC.mute, textAlign: "center" }}>
         Loading…
       </div>
     );
@@ -275,21 +259,23 @@ function RequestsList({
       <div
         style={{
           padding: 28,
-          fontFamily: AC.font,
-          fontSize: 12,
-          color: AC.mute,
           textAlign: "center",
-          background: AC.brandSoft,
-          margin: 10,
-          borderRadius: 10,
+          background: "#fff",
         }}
       >
-        <AGlyph name="check" size={18} color={AC.ok} />
-        <div style={{ marginTop: 6, fontSize: 12.5, color: AC.ink2, fontWeight: 600 }}>
-          No pending requests
+        <div style={{ fontFamily: AC.font, fontSize: 13, fontWeight: 600, color: AC.ink2 }}>
+          All clear
         </div>
-        <div style={{ marginTop: 3, fontSize: 11 }}>
-          Reps can request a customer from the mobile app.
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11.5,
+            color: AC.mute,
+            marginTop: 6,
+            lineHeight: 1.5,
+          }}
+        >
+          Nothing needs attention. Rep requests + flagged shifts will land here.
         </div>
       </div>
     );
@@ -412,6 +398,113 @@ function RequestsList({
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ─── All activity ──────────────────────────────────────────────────────
+
+function AllActivityList({
+  events,
+  loaded,
+}: {
+  events: ShiftEvent[];
+  loaded: boolean;
+}) {
+  if (!loaded) {
+    return (
+      <div style={{ padding: 24, fontFamily: AC.font, fontSize: 12, color: AC.mute, textAlign: "center" }}>
+        Loading…
+      </div>
+    );
+  }
+  if (events.length === 0) {
+    return (
+      <div
+        style={{
+          padding: 28,
+          textAlign: "center",
+          background: "#fff",
+        }}
+      >
+        <div style={{ fontFamily: AC.font, fontSize: 13, fontWeight: 600, color: AC.ink2 }}>
+          Quiet right now
+        </div>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11.5,
+            color: AC.mute,
+            marginTop: 6,
+            lineHeight: 1.5,
+          }}
+        >
+          Check-ins, claims, schedules, requests, customer changes — they'll all stream
+          here as they happen.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: "10px 12px", maxHeight: 480, overflowY: "auto" }}>
+      {events.map((e, i) => {
+        const tone = eventTone(e.event_type);
+        const accent =
+          tone === "ok"
+            ? AC.ok
+            : tone === "warn"
+            ? AC.warn
+            : tone === "danger"
+            ? AC.danger
+            : AC.brand;
+        return (
+          <div
+            key={e.id}
+            style={{
+              padding: "8px 10px",
+              borderBottom: i < events.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+              borderLeft: `3px solid ${accent}`,
+              marginLeft: -4,
+              paddingLeft: 11,
+              display: "flex",
+              gap: 10,
+              alignItems: "flex-start",
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 12,
+                  color: AC.ink,
+                  fontWeight: 500,
+                  lineHeight: 1.4,
+                }}
+              >
+                <b style={{ fontWeight: 700 }}>{e.actor_label || "System"}</b>{" "}
+                <span style={{ color: AC.mute }}>{EVENT_LABEL[e.event_type] || e.event_type}</span>
+                {e.message && (
+                  <>
+                    {" — "}
+                    <span style={{ color: AC.ink2 }}>{e.message}</span>
+                  </>
+                )}
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.fontMono,
+                  fontSize: 10.5,
+                  color: AC.hint,
+                  marginTop: 2,
+                  fontWeight: 600,
+                }}
+              >
+                {formatRelative(e.created_at)} ago
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
