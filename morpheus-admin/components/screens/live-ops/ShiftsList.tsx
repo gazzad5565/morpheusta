@@ -18,7 +18,7 @@ import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { RepAvatar } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
-import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listShifts, subscribeShifts, type ShiftRow } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 
 const STATE_MAP: Record<string, { label: string; bg: string; ink: string; dot: string }> = {
@@ -73,7 +73,7 @@ export function ShiftsList() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       const [shiftRows, profileRows] = await Promise.all([
         listShifts(),
         listProfiles({ role: "rep" }),
@@ -90,9 +90,14 @@ export function ShiftsList() {
       setReps(repMap);
       setRows(shiftRows);
       setLoading(false);
-    })();
+    };
+    load();
+    // Refetch on any shifts change (rep checks in/out, claims, manager
+    // schedules, etc) so the table updates without a manual refresh.
+    const unsub = subscribeShifts(load);
     return () => {
       cancelled = true;
+      unsub();
     };
   }, []);
 

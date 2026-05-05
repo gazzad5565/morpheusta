@@ -1,9 +1,20 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AC } from "@/lib/tokens";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { RepAvatar } from "@/components/ui/Avatars";
 import { Btn } from "@/components/ui/Btn";
 import { EXCEPTIONS, FEED, getRep } from "@/lib/mock-data";
+import {
+  listPendingRequests,
+  deleteRequest,
+  type PendingRequest,
+} from "@/lib/requests-store";
+
+type TabKey = "needs-action" | "all" | "requests";
 
 const KIND_LABEL: Record<string, string> = {
   late: "Late",
@@ -13,7 +24,78 @@ const KIND_LABEL: Record<string, string> = {
   missed: "Missed",
 };
 
+function formatRelative(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const days = Math.floor(h / 24);
+  return `${days}d`;
+}
+
 export function LiveFeedPanel() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<TabKey>("needs-action");
+  const [requests, setRequests] = useState<PendingRequest[]>([]);
+  const [requestsLoaded, setRequestsLoaded] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Always fetch the request count so we can show it on the tab badge,
+  // not only when the tab is active.
+  useEffect(() => {
+    let cancelled = false;
+    listPendingRequests().then((rows) => {
+      if (cancelled) return;
+      setRequests(rows);
+      setRequestsLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const onApprove = (r: PendingRequest) => {
+    const qs = new URLSearchParams({
+      rep: r.repId,
+      customer: r.customerId,
+      request: r.id,
+    });
+    router.push(`/schedule/new?${qs.toString()}`);
+  };
+
+  const onDecline = async (r: PendingRequest) => {
+    if (!confirm(`Decline ${r.repName}'s request for ${r.customerName}?`)) {
+      return;
+    }
+    setBusyId(r.id);
+    const result = await deleteRequest(r.id);
+    setBusyId(null);
+    if (!result.ok) {
+      alert(`Couldn't decline: ${result.error}`);
+      return;
+    }
+    setRequests((rs) => rs.filter((x) => x.id !== r.id));
+  };
+
+  const tabs: { key: TabKey; label: string; count: number; tone?: string }[] = [
+    {
+      key: "needs-action",
+      label: "Needs action",
+      count: EXCEPTIONS.length,
+      tone: AC.danger,
+    },
+    { key: "all", label: "All activity", count: FEED.length },
+    {
+      key: "requests",
+      label: "Requests",
+      count: requests.length,
+      tone: requests.length > 0 ? AC.brand : undefined,
+    },
+  ];
+
   return (
     <Card padding={0}>
       <div style={{ padding: "12px 14px 0", borderBottom: `1px solid ${AC.line}` }}>
@@ -55,144 +137,393 @@ export function LiveFeedPanel() {
           </button>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
-          {[
-            { label: "Needs action", count: EXCEPTIONS.length, active: true, tone: AC.danger },
-            { label: "All activity", count: FEED.length, active: false },
-            { label: "On break", count: 2, active: false },
-          ].map((t) => (
-            <button
-              key={t.label}
-              type="button"
-              style={{
-                padding: "6px 10px",
-                borderRadius: "6px 6px 0 0",
-                background: "transparent",
-                border: "none",
-                borderBottom: t.active
-                  ? `2px solid ${AC.ink}`
-                  : `2px solid transparent`,
-                fontFamily: AC.font,
-                fontSize: 11.5,
-                fontWeight: 700,
-                color: t.active ? AC.ink : AC.mute,
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                marginBottom: -1,
-              }}
-            >
-              {t.label}
-              <span
+          {tabs.map((t) => {
+            const active = activeTab === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setActiveTab(t.key)}
                 style={{
-                  padding: "1px 6px",
-                  borderRadius: 99,
-                  fontSize: 10,
+                  padding: "6px 10px",
+                  borderRadius: "6px 6px 0 0",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: active
+                    ? `2px solid ${AC.ink}`
+                    : `2px solid transparent`,
+                  fontFamily: AC.font,
+                  fontSize: 11.5,
                   fontWeight: 700,
-                  background: t.tone ? AC.dangerTint : AC.bg,
-                  color: t.tone || AC.mute,
+                  color: active ? AC.ink : AC.mute,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  marginBottom: -1,
                 }}
               >
-                {t.count}
-              </span>
-            </button>
-          ))}
+                {t.label}
+                <span
+                  style={{
+                    padding: "1px 6px",
+                    borderRadius: 99,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    background:
+                      t.tone === AC.danger
+                        ? AC.dangerTint
+                        : t.tone === AC.brand
+                        ? AC.brandTint
+                        : AC.bg,
+                    color: t.tone || AC.mute,
+                  }}
+                >
+                  {t.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      <div style={{ padding: "8px 10px 6px", background: "#FFF8F6" }}>
-        {EXCEPTIONS.map((e, i) => {
-          const rep = getRep(e.repId);
-          if (!rep) return null;
-          return (
-            <div
-              key={e.id}
-              style={{
-                padding: 10,
-                marginBottom: i === EXCEPTIONS.length - 1 ? 0 : 6,
-                background: "#fff",
-                border: `1px solid ${AC.line}`,
-                borderLeft: `3px solid ${AC.danger}`,
-                borderRadius: 8,
-                display: "flex",
-                gap: 10,
-                alignItems: "flex-start",
-              }}
-            >
-              <RepAvatar rep={rep} size={28} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    marginBottom: 3,
-                    flexWrap: "wrap",
-                    lineHeight: 1.15,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 12.5,
-                      fontWeight: 700,
-                      color: AC.ink,
-                      letterSpacing: -0.1,
-                    }}
-                  >
-                    {rep.name}
-                  </span>
-                  <span
-                    style={{
-                      padding: "2px 6px",
-                      borderRadius: 99,
-                      background: AC.dangerTint,
-                      color: AC.danger,
-                      fontFamily: AC.font,
-                      fontSize: 9.5,
-                      fontWeight: 700,
-                      letterSpacing: 0.4,
-                      textTransform: "uppercase",
-                      lineHeight: 1.2,
-                    }}
-                  >
-                    {KIND_LABEL[e.kind]}
-                  </span>
-                  <div style={{ flex: 1 }} />
-                  <span
-                    style={{
-                      fontFamily: AC.fontMono,
-                      fontSize: 10.5,
-                      color: AC.hint,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {e.ts}
-                  </span>
-                </div>
-                <div
+      {activeTab === "needs-action" && <NeedsActionList />}
+      {activeTab === "all" && <AllActivityList />}
+      {activeTab === "requests" && (
+        <RequestsList
+          requests={requests}
+          loaded={requestsLoaded}
+          busyId={busyId}
+          onApprove={onApprove}
+          onDecline={onDecline}
+        />
+      )}
+    </Card>
+  );
+}
+
+function NeedsActionList() {
+  return (
+    <div style={{ padding: "8px 10px 6px", background: "#FFF8F6" }}>
+      {EXCEPTIONS.map((e, i) => {
+        const rep = getRep(e.repId);
+        if (!rep) return null;
+        return (
+          <div
+            key={e.id}
+            style={{
+              padding: 10,
+              marginBottom: i === EXCEPTIONS.length - 1 ? 0 : 6,
+              background: "#fff",
+              border: `1px solid ${AC.line}`,
+              borderLeft: `3px solid ${AC.danger}`,
+              borderRadius: 8,
+              display: "flex",
+              gap: 10,
+              alignItems: "flex-start",
+            }}
+          >
+            <RepAvatar rep={rep} size={28} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginBottom: 3,
+                  flexWrap: "wrap",
+                  lineHeight: 1.15,
+                }}
+              >
+                <span
                   style={{
                     fontFamily: AC.font,
-                    fontSize: 11.5,
-                    color: AC.ink2,
-                    lineHeight: 1.45,
-                    fontWeight: 500,
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    color: AC.ink,
+                    letterSpacing: -0.1,
                   }}
                 >
-                  {e.text}
-                </div>
-                <div style={{ fontFamily: AC.font, fontSize: 10.5, color: AC.mute, marginTop: 2 }}>
-                  {e.meta}
-                </div>
-                <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
-                  <Btn size="sm" kind="primary">Resolve</Btn>
-                  <Btn size="sm">Message</Btn>
-                </div>
+                  {rep.name}
+                </span>
+                <span
+                  style={{
+                    padding: "2px 6px",
+                    borderRadius: 99,
+                    background: AC.dangerTint,
+                    color: AC.danger,
+                    fontFamily: AC.font,
+                    fontSize: 9.5,
+                    fontWeight: 700,
+                    letterSpacing: 0.4,
+                    textTransform: "uppercase",
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {KIND_LABEL[e.kind]}
+                </span>
+                <div style={{ flex: 1 }} />
+                <span
+                  style={{
+                    fontFamily: AC.fontMono,
+                    fontSize: 10.5,
+                    color: AC.hint,
+                    fontWeight: 600,
+                  }}
+                >
+                  {e.ts}
+                </span>
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11.5,
+                  color: AC.ink2,
+                  lineHeight: 1.45,
+                  fontWeight: 500,
+                }}
+              >
+                {e.text}
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 10.5,
+                  color: AC.mute,
+                  marginTop: 2,
+                }}
+              >
+                {e.meta}
+              </div>
+              <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
+                <Btn size="sm" kind="primary">Resolve</Btn>
+                <Btn size="sm">Message</Btn>
               </div>
             </div>
-          );
-        })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AllActivityList() {
+  return (
+    <div style={{ padding: "10px 12px" }}>
+      {FEED.map((f, i) => {
+        const rep = getRep(f.repId);
+        return (
+          <div
+            key={`${f.ts}-${f.repId}-${i}`}
+            style={{
+              padding: "8px 4px",
+              borderBottom: i < FEED.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+              display: "flex",
+              gap: 10,
+              alignItems: "flex-start",
+            }}
+          >
+            {rep && <RepAvatar rep={rep} size={24} />}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 12,
+                  color: AC.ink,
+                  fontWeight: 500,
+                }}
+              >
+                {f.msg}
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.fontMono,
+                  fontSize: 10.5,
+                  color: AC.hint,
+                  marginTop: 2,
+                  fontWeight: 600,
+                }}
+              >
+                {f.ts}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RequestsList({
+  requests,
+  loaded,
+  busyId,
+  onApprove,
+  onDecline,
+}: {
+  requests: PendingRequest[];
+  loaded: boolean;
+  busyId: string | null;
+  onApprove: (r: PendingRequest) => void;
+  onDecline: (r: PendingRequest) => void;
+}) {
+  if (!loaded) {
+    return (
+      <div
+        style={{
+          padding: 24,
+          fontFamily: AC.font,
+          fontSize: 12,
+          color: AC.mute,
+          textAlign: "center",
+        }}
+      >
+        Loading…
       </div>
-    </Card>
+    );
+  }
+  if (requests.length === 0) {
+    return (
+      <div
+        style={{
+          padding: 28,
+          fontFamily: AC.font,
+          fontSize: 12,
+          color: AC.mute,
+          textAlign: "center",
+          background: AC.brandSoft,
+          margin: 10,
+          borderRadius: 10,
+        }}
+      >
+        <AGlyph name="check" size={18} color={AC.ok} />
+        <div style={{ marginTop: 6, fontSize: 12.5, color: AC.ink2, fontWeight: 600 }}>
+          No pending requests
+        </div>
+        <div style={{ marginTop: 3, fontSize: 11 }}>
+          Reps can request a customer from the mobile app.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: "8px 10px 10px", background: AC.brandSoft }}>
+      {requests.map((r, i) => (
+        <div
+          key={r.id}
+          style={{
+            padding: 10,
+            marginBottom: i === requests.length - 1 ? 0 : 6,
+            background: "#fff",
+            border: `1px solid ${AC.line}`,
+            borderLeft: `3px solid ${AC.brand}`,
+            borderRadius: 8,
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-start",
+          }}
+        >
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              background: r.customerColor,
+              color: "#fff",
+              fontFamily: AC.font,
+              fontSize: 10.5,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            {r.customerInitials}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 3,
+                flexWrap: "wrap",
+                lineHeight: 1.15,
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  color: AC.ink,
+                  letterSpacing: -0.1,
+                }}
+              >
+                {r.repName}
+              </span>
+              <span
+                style={{
+                  padding: "2px 6px",
+                  borderRadius: 99,
+                  background: AC.brandTint,
+                  color: AC.brandDeep,
+                  fontFamily: AC.font,
+                  fontSize: 9.5,
+                  fontWeight: 700,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                  lineHeight: 1.2,
+                }}
+              >
+                Request
+              </span>
+              <div style={{ flex: 1 }} />
+              <span
+                style={{
+                  fontFamily: AC.fontMono,
+                  fontSize: 10.5,
+                  color: AC.hint,
+                  fontWeight: 600,
+                }}
+              >
+                {formatRelative(r.requestedAt)}
+              </span>
+            </div>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 11.5,
+                color: AC.ink2,
+                lineHeight: 1.45,
+                fontWeight: 500,
+              }}
+            >
+              Wants to work <b style={{ color: AC.ink }}>{r.customerName}</b> · #{r.customerCode}
+            </div>
+            <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
+              <Btn
+                size="sm"
+                kind="primary"
+                icon="check"
+                onClick={() => onApprove(r)}
+                disabled={busyId === r.id}
+              >
+                Schedule
+              </Btn>
+              <Btn
+                size="sm"
+                icon="x"
+                onClick={() => onDecline(r)}
+                disabled={busyId === r.id}
+              >
+                Decline
+              </Btn>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

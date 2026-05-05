@@ -90,3 +90,27 @@ export async function deleteShift(
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+/**
+ * Subscribe to realtime changes on the shifts table. The callback is
+ * called on any insert/update/delete. Caller decides what to do — most
+ * consumers just refetch their list.
+ *
+ * Returns an unsubscribe function. Requires the shifts table to be in
+ * the supabase_realtime publication
+ * (see db/migrations/2026_05_05_shifts_realtime.sql).
+ */
+export function subscribeShifts(onChange: () => void): () => void {
+  if (!isSupabaseConfigured() || !supabase) return () => {};
+  const channel = supabase
+    .channel("shifts_live")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "shifts" },
+      () => onChange()
+    )
+    .subscribe();
+  return () => {
+    supabase!.removeChannel(channel);
+  };
+}

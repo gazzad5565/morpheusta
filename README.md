@@ -320,7 +320,7 @@ Every table has RLS on. The current policies:
 | Table | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
 | `customers` | any authenticated | any authenticated | any authenticated | any authenticated |
-| `requested_shifts` | `rep_id = auth.uid()` (own rows only) | `rep_id = auth.uid()` | (none — not allowed) | `rep_id = auth.uid()` |
+| `requested_shifts` | any authenticated (admin inbox) — was rep-only in 3b | `rep_id = auth.uid()` | any authenticated (admin marks/clears requests) | any authenticated (admin clears after handling) |
 | `shifts` | any authenticated (admin needs to see all) | any authenticated | `rep_id = auth.uid()` OR `rep_id IS NULL` (rep updates own + claims unassigned) | any authenticated |
 | `profiles` | any authenticated | (trigger only) | `id = auth.uid()` (own row only) | (none) |
 | `rep_locations` | any authenticated (admin map reads all) | `rep_id = auth.uid()` (own row only) | `rep_id = auth.uid()` (own row only) | `rep_id = auth.uid()` (own row only — used on check-out to clear the dot) |
@@ -428,6 +428,8 @@ Or via CLI: `npx vercel rollback`.
 - **Mobile claim flow** — unassigned shifts show a "Claim" button that sets `rep_id = auth.uid()` race-safely
 - **Mobile check-in writes to DB** — sets `state='in-progress'` + `check_in_at` timestamp
 - **Mobile check-out writes to DB** — "Confirm check-out" calls `checkOutOfShift()` (state→`complete`, stores tasks_done) and `clearRepLocation()` (drops the green dot from the admin map via Realtime)
+- **Admin Requests inbox** — `/requests` page lists pending rep-requested shifts; manager taps "Schedule" to open `/schedule/new` pre-filled with rep + customer (and the request id), which on save creates the shift and deletes the request so the inbox stays clean. "Decline" deletes the request directly. Same inbox is also surfaced as a "Requests" tab on the home page Live Feed.
+- **Realtime Live Ops board** — KpiStrip and ShiftsList both subscribe to `shifts` table changes via Supabase Realtime. When a rep checks in / claims / completes, or a manager schedules, the dashboard updates without a refresh.
 - **Profiles table + auto-trigger** — `handle_new_user()` creates a profile row on signup; carries `role` ('rep' | 'manager') and display `name`
 - **Reps section in admin** — list view + per-rep detail page (today's shifts, lifetime stats)
 - **Live Ops board reads real data** — KPI strip + shifts table compute from Supabase
@@ -446,16 +448,15 @@ Or via CLI: `npx vercel rollback`.
 These are the next obvious chunks of work, roughly in order of impact:
 
 1. **Phase 4: Tighten RLS by role.** Right now any authenticated user can write to `customers`/`shifts`. Use the `profiles.role` column to restrict INSERT/DELETE on those tables to `role = 'manager'`. SELECT can stay open. Mobile reps would only see DB-level errors if they try to misbehave through the API.
-2. **Approve / decline rep-requested shifts in admin.** The `requested_shifts.status` column exists; needs an admin page listing pending requests with approve/decline buttons. On approve, create a row in `shifts` with `rep_id` pre-assigned.
-3. **Background location tracking on mobile.** Today GPS only updates while the active-shift screen is in the foreground (browser limitation). For background tracking we'd need a Capacitor wrap or a service worker with `periodicSync` (limited support).
-4. **Real-time updates on the Live Ops board** as reps check in (no manual refresh) — `rep_locations` is already on `supabase_realtime`; extend the same pattern to `shifts` for state changes (in-progress, complete).
-5. **Live feed event log.** Currently `LiveFeedPanel` is mock data. Build a `shift_events` table that logs check-ins, claims, completions; render it in real-time order.
-6. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Needs the event log above + a daily aggregation query.
-7. **Tasks + library** migrated to DB (admin manages task templates per customer).
-8. **Email confirmation** turned back on for production.
-9. **Promote `db/migrations/` to the Supabase CLI** so migrations apply automatically per environment instead of being pasted into the SQL Editor by hand.
-10. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
-11. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence — also unlocks proper background location.
+2. **Background location tracking on mobile.** Today GPS only updates while the active-shift screen is in the foreground (browser limitation). For background tracking we'd need a Capacitor wrap or a service worker with `periodicSync` (limited support).
+3. **Live feed "Needs action" + "All activity" tabs use real data.** The Live Feed now has a working "Requests" tab (real data) but the other two tabs still render the mock `EXCEPTIONS` and `FEED` arrays. They'd be powered by the event log below.
+4. **Live feed event log.** Build a `shift_events` table that logs check-ins, claims, completions, off-site exceptions, etc; render it in the "Needs action" + "All activity" tabs in real-time order.
+5. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Needs the event log above + a daily aggregation query.
+6. **Tasks + library** migrated to DB (admin manages task templates per customer).
+7. **Email confirmation** turned back on for production.
+8. **Promote `db/migrations/` to the Supabase CLI** so migrations apply automatically per environment instead of being pasted into the SQL Editor by hand.
+9. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
+10. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence — also unlocks proper background location.
 
 ---
 
@@ -545,6 +546,8 @@ morpheus-admin/lib/customers-store.ts          ← customers CRUD + soft delete 
 morpheus-admin/lib/shifts-store.ts             ← admin-side shifts CRUD
 morpheus-admin/lib/profiles-store.ts           ← list reps for assignment dropdown
 morpheus-admin/lib/rep-locations-store.ts      ← read live rep GPS + Supabase Realtime subscription helper
+morpheus-admin/lib/requests-store.ts           ← list pending rep requests + delete on approve/decline
+morpheus-admin/app/requests/page.tsx           ← admin Requests inbox (also surfaced as a tab on Live Ops home)
 morpheus-admin/app/api/geocode/route.ts        ← Nominatim geocode proxy (address → lat/lng)
 morpheus-admin/app/api/geocode/suggest/route.ts ← Nominatim autocomplete suggestions
 morpheus-admin/app/schedule/new/page.tsx       ← create-shift form (with rep picker)

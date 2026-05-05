@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { AC } from "@/lib/tokens";
-import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listShifts, subscribeShifts, type ShiftRow } from "@/lib/shifts-store";
 import { listProfiles } from "@/lib/profiles-store";
 
 type Tone = "ok" | "warn" | "danger" | "info";
@@ -106,7 +106,7 @@ export function KpiStrip() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       const [shifts, reps] = await Promise.all([
         listShifts(),
         listProfiles({ role: "rep" }),
@@ -114,9 +114,13 @@ export function KpiStrip() {
       if (cancelled) return;
       setK(computeKpis(shifts, reps.length));
       setLoading(false);
-    })();
+    };
+    load();
+    // Recompute on every shifts change so the KPIs reflect reality live.
+    const unsub = subscribeShifts(load);
     return () => {
       cancelled = true;
+      unsub();
     };
   }, []);
 

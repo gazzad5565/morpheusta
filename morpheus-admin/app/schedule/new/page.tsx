@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
@@ -12,14 +12,29 @@ import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
 import { createShift } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import { deleteRequest } from "@/lib/requests-store";
 import type { Customer } from "@/lib/types";
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function NewShiftPage() {
+export default function NewShiftPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <NewShiftPage />
+    </Suspense>
+  );
+}
+
+function NewShiftPage() {
   const router = useRouter();
+  const params = useSearchParams();
+  // When the page is opened from /requests via "Approve & schedule", these
+  // params pre-fill the form and trigger a request deletion on save.
+  const fromRep = params.get("rep") || "";
+  const fromCustomer = params.get("customer") || "";
+  const fromRequest = params.get("request") || "";
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [reps, setReps] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,15 +56,23 @@ export default function NewShiftPage() {
       ([cs, rs]) => {
         if (cancelled) return;
         setCustomers(cs);
-        setCustomerId(cs[0]?.id || "");
+        // Pre-fill from a rep request when present, otherwise default to first.
+        const initialCustomer =
+          fromCustomer && cs.some((c) => c.id === fromCustomer)
+            ? fromCustomer
+            : cs[0]?.id || "";
+        setCustomerId(initialCustomer);
         setReps(rs);
+        if (fromRep && rs.some((r) => r.id === fromRep)) {
+          setRepId(fromRep);
+        }
         setLoading(false);
       }
     );
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [fromCustomer, fromRep]);
 
   const selectedCustomer = customers.find((c) => c.id === customerId);
   const selectedRep = reps.find((r) => r.id === repId);
@@ -74,12 +97,23 @@ export default function NewShiftPage() {
       tasks_total: tasksNum,
       rep_id: repId || null, // empty string → null (claimable)
     });
-    setBusy(false);
     if (!result.ok) {
+      setBusy(false);
       setError(result.error || "Failed to create shift.");
       return;
     }
-    router.push("/schedule");
+    // If we got here from a rep request, clean up that pending row so the
+    // Requests inbox reflects that this is now scheduled.
+    if (fromRequest) {
+      const del = await deleteRequest(fromRequest);
+      if (!del.ok) {
+        // Don't block the navigation — the shift is created. Just log.
+        // eslint-disable-next-line no-console
+        console.warn("[schedule/new] couldn't delete request:", del.error);
+      }
+    }
+    setBusy(false);
+    router.push(fromRequest ? "/requests" : "/schedule");
   };
 
   return (

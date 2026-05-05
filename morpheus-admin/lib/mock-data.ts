@@ -137,6 +137,7 @@ export const NAV_ITEMS = [
   { id: "reps", label: "Reps", glyph: "reps", href: "/reps" },
   { id: "customers", label: "Customers", glyph: "customer", href: "/customers" },
   { id: "schedule", label: "Schedule", glyph: "cal", href: "/schedule" },
+  { id: "requests", label: "Requests", glyph: "send", href: "/requests" },
   { id: "tasks", label: "Tasks", glyph: "tasks", href: "/tasks" },
   { id: "reports", label: "Reports", glyph: "chart", href: "/reports" },
   { id: "library", label: "Library", glyph: "lib", href: "/library" },
