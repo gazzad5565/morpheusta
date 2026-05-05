@@ -35,17 +35,22 @@ Both share a single Supabase project (URL: `https://otweltzwwhrvhtvaqsci.supabas
 /                                  ← this repo (gazzad5565/morpheusta)
 ├── README.md                      ← you are here
 ├── .gitignore
+├── db/
+│   └── migrations/                ← SQL migrations (run manually in Supabase SQL Editor; safe to re-run)
 ├── morpheus-admin/                ← Next.js app: admin console (desktop)
 │   ├── app/                       ← routes (one folder = one page)
+│   │   ├── api/geocode/           ← server proxies for Nominatim (search + suggest)
+│   │   └── customers/[id]/edit/   ← edit customer (address + name)
 │   ├── components/                ← AdminShell, Sidebar, AuthGate, UI
 │   ├── lib/
 │   │   ├── supabase.ts            ← Supabase client
 │   │   ├── auth.ts                ← signIn / signUp / signOut helpers
-│   │   ├── customers-store.ts     ← read + create customers in DB
+│   │   ├── customers-store.ts     ← customers CRUD + soft delete (active flag)
 │   │   ├── shifts-store.ts        ← list + create + delete shifts in DB
 │   │   ├── profiles-store.ts      ← list reps/managers from profiles table
+│   │   ├── rep-locations-store.ts ← read live rep GPS + Realtime subscription
 │   │   ├── tokens.ts              ← AC design tokens
-│   │   └── mock-data.ts           ← fallback data when DB unconfigured
+│   │   └── mock-data.ts           ← fallback data for shifts/profiles when DB unconfigured (customers no longer use this)
 │   └── public/                    ← PWA manifest, icons
 └── morpheus-mobile/               ← Next.js app: mobile rep app (PWA)
     ├── app/
@@ -57,6 +62,7 @@ Both share a single Supabase project (URL: `https://otweltzwwhrvhtvaqsci.supabas
     │   ├── shifts-store.ts        ← assigned/unassigned shifts + check-in
     │   ├── profiles-store.ts      ← read/update own profile (greeting name)
     │   ├── customers-store.ts     ← read customers from DB (read-only)
+    │   ├── location-tracker.ts    ← upserts GPS to rep_locations while active shift screen is open
     │   ├── tokens.ts              ← MC design tokens
     │   └── mock-data.ts           ← fallback static data
     └── public/                    ← PWA manifest, icons, app icon
@@ -73,7 +79,9 @@ Both share a single Supabase project (URL: `https://otweltzwwhrvhtvaqsci.supabas
 | Framework | Next.js 16 (App Router) | React + routing + serverless functions in one |
 | UI | React 19 + TypeScript | Type-safe components |
 | Styling | Inline styles + design tokens (`AC` admin / `MC` mobile) | Matches design handoff pixel-perfect; refactor to Tailwind later if wanted |
-| Backend | Supabase (Postgres + Auth + RLS) | DB + auth + realtime in one service, generous free tier |
+| Backend | Supabase (Postgres + Auth + RLS + Realtime) | DB + auth + realtime in one service, generous free tier |
+| Maps | MapLibre GL + OpenFreeMap tiles | Free vector tiles, no API key, swappable for Mapbox later if needed |
+| Geocoding | Nominatim (OpenStreetMap) via server proxy | Free, used for customer address autocomplete + lat/lng lookup |
 | Hosting | Vercel | Zero-config Next.js deploys, free tier covers small usage |
 | Auth | Supabase Auth (email + password) | Email confirmation OFF for fast iteration |
 | PWA | Custom manifest + icons | Installs to home screen on iOS/Android |
@@ -235,7 +243,7 @@ Logout calls `supabase.auth.signOut({ scope: "global" })` (invalidates the JWT s
 ### Current schema
 
 ```sql
--- customers (Phase 3a, all authenticated users can read/write)
+-- customers (Phase 3a + 3e, all authenticated users can read/write)
 customers {
   id            text PRIMARY KEY    -- e.g. 'gw' or generated slug
   name          text                -- e.g. 'GreenWave Innovations'
@@ -244,6 +252,10 @@ customers {
   code          int                 -- account number
   region        text NULL
   city          text NULL
+  address       text NULL           -- full street address (Nominatim-resolved)
+  latitude      double precision NULL  -- decimal degrees, used by the field map
+  longitude     double precision NULL
+  active        boolean DEFAULT true   -- soft-delete flag; INACTIVE rows hidden from map + lists by default
   created_at    timestamptz
 }
 
@@ -287,6 +299,18 @@ profiles {
   role        text DEFAULT 'rep'          -- 'rep' | 'manager'
   created_at  timestamptz
 }
+
+-- rep_locations (Phase 3f, live GPS for the field map)
+-- One row per rep, upserted from morpheus-mobile's location-tracker while
+-- the active-shift screen is open. Realtime publication enabled so the
+-- admin map can subscribe to live position changes.
+rep_locations {
+  rep_id      uuid PRIMARY KEY → auth.users  -- ON DELETE CASCADE
+  latitude    double precision
+  longitude   double precision
+  accuracy_m  int NULL
+  recorded_at timestamptz DEFAULT now()
+}
 ```
 
 ### Row Level Security (RLS)
@@ -299,18 +323,22 @@ Every table has RLS on. The current policies:
 | `requested_shifts` | `rep_id = auth.uid()` (own rows only) | `rep_id = auth.uid()` | (none — not allowed) | `rep_id = auth.uid()` |
 | `shifts` | any authenticated (admin needs to see all) | any authenticated | `rep_id = auth.uid()` OR `rep_id IS NULL` (rep updates own + claims unassigned) | any authenticated |
 | `profiles` | any authenticated | (trigger only) | `id = auth.uid()` (own row only) | (none) |
+| `rep_locations` | any authenticated (admin map reads all) | `rep_id = auth.uid()` (own row only) | `rep_id = auth.uid()` (own row only) | (none) |
 
 > ⚠️ Most policies are **temporary Phase 3** — they let any logged-in user perform most actions. In production, these would be tightened to "manager role only" for customers/shifts insert+delete once we add role-based access control. See "Deferred work" below.
 
 ### How to run new SQL
 
-There's no migrations system yet (deferred). To change schema:
+We have a **lightweight migrations folder** but no automated runner yet — files in `db/migrations/` are the canonical SQL for every schema change, and they're applied by hand against Supabase.
 
-1. Open Supabase dashboard → SQL Editor → New query
-2. Paste SQL → Run
-3. Mirror the SQL in this README so devs know the current state
+To change schema:
 
-When migrations become important (e.g. when there's >1 dev), set up [Supabase migrations CLI](https://supabase.com/docs/guides/cli/local-development#database-migrations).
+1. Add a new file under `db/migrations/`, named `YYYY_MM_DD_<short_description>.sql`. Use `IF NOT EXISTS` / `IF EXISTS` so the file is safe to re-run.
+2. Open Supabase dashboard → SQL Editor → paste the file's contents → Run.
+3. Mirror the schema change in this README's Database section.
+4. Commit the migration file alongside the code that depends on it.
+
+When >1 dev or staging environments arrive, promote this to the [Supabase migrations CLI](https://supabase.com/docs/guides/cli/local-development#database-migrations) so migrations are applied automatically and tracked.
 
 ---
 
@@ -402,6 +430,11 @@ Or via CLI: `npx vercel rollback`.
 - **Profiles table + auto-trigger** — `handle_new_user()` creates a profile row on signup; carries `role` ('rep' | 'manager') and display `name`
 - **Reps section in admin** — list view + per-rep detail page (today's shifts, lifetime stats)
 - **Live Ops board reads real data** — KPI strip + shifts table compute from Supabase
+- **Real field map (admin)** — MapLibre GL + OpenFreeMap vector tiles, replaces the SVG faux map. Plots active customers with coordinates.
+- **Customer addresses + geocoding** — `address`/`latitude`/`longitude` columns on `customers`; address autocomplete via Nominatim (server-proxied to satisfy User-Agent ToS); `app/api/geocode/{route.ts,suggest/route.ts}` are the two server routes.
+- **Edit + soft-delete customers** — `app/customers/[id]/edit` to set/change address; deactivate/reactivate via the `active` flag (INACTIVE badge in list); hard-delete still available. Customer detail page is a client component now (server components couldn't see auth, RLS was silently returning empty).
+- **Live rep tracking on the field map** — mobile pushes GPS to `rep_locations` (throttled to 30s, only while the active-shift screen is open); admin map subscribes via Supabase Realtime and renders rep dots that update live.
+- **DB migrations folder** — `db/migrations/` holds canonical SQL for every schema change (still applied by hand in Supabase SQL Editor; CLI promotion is deferred).
 - Side menu navigation on mobile (with both back-button + menu access on top-level pages)
 - Map shows route preview when "Directions" is tapped, animates when "Start travelling" is active
 - Personalised dashboard greeting using the logged-in user's profile name (fallback to email)
@@ -414,15 +447,15 @@ These are the next obvious chunks of work, roughly in order of impact:
 1. **Phase 4: Tighten RLS by role.** Right now any authenticated user can write to `customers`/`shifts`. Use the `profiles.role` column to restrict INSERT/DELETE on those tables to `role = 'manager'`. SELECT can stay open. Mobile reps would only see DB-level errors if they try to misbehave through the API.
 2. **Mobile check-out flow UI.** `checkOutOfShift()` exists in `morpheus-mobile/lib/shifts-store.ts` but no button calls it yet. Wire it up on the active-shift screen.
 3. **Approve / decline rep-requested shifts in admin.** The `requested_shifts.status` column exists; needs an admin page listing pending requests with approve/decline buttons. On approve, create a row in `shifts` with `rep_id` pre-assigned.
-4. **Real-time updates** via Supabase Realtime — admin Live Ops board live-updates as reps check in (no manual refresh).
-5. **Real maps** (MapLibre or Mapbox) instead of SVG faux maps. Needs lat/lng on `customers` (and probably `shifts` if route-specific).
+4. **Background location tracking on mobile.** Today GPS only updates while the active-shift screen is in the foreground (browser limitation). For background tracking we'd need a Capacitor wrap or a service worker with `periodicSync` (limited support).
+5. **Real-time updates on the Live Ops board** as reps check in (no manual refresh) — `rep_locations` is already on `supabase_realtime`; extend the same pattern to `shifts` for state changes (in-progress, complete).
 6. **Live feed event log.** Currently `LiveFeedPanel` is mock data. Build a `shift_events` table that logs check-ins, claims, completions; render it in real-time order.
 7. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Needs the event log above + a daily aggregation query.
 8. **Tasks + library** migrated to DB (admin manages task templates per customer).
 9. **Email confirmation** turned back on for production.
-10. **Migrations system** (Supabase CLI) so schema changes are tracked in Git rather than ad-hoc SQL editor pastes.
+10. **Promote `db/migrations/` to the Supabase CLI** so migrations apply automatically per environment instead of being pasted into the SQL Editor by hand.
 11. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
-12. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence.
+12. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence — also unlocks proper background location.
 
 ---
 
@@ -498,19 +531,30 @@ morpheus-{mobile,admin}/lib/supabase.ts        ← Supabase client init
 morpheus-{mobile,admin}/lib/auth.ts            ← signIn / signUp / signOut
 morpheus-{mobile,admin}/components/AuthGate.tsx ← redirect-if-unauth wrapper
 morpheus-{mobile,admin}/lib/tokens.ts          ← design tokens (AC for admin, MC for mobile)
-morpheus-{mobile,admin}/lib/mock-data.ts       ← fallback static data when DB is offline
+morpheus-{mobile,admin}/lib/mock-data.ts       ← fallback static data (shifts/profiles only — customers is DB-only)
+db/migrations/                                 ← canonical SQL for every schema change (apply by hand in Supabase SQL Editor)
 morpheus-mobile/lib/shift-store.ts             ← requested_shifts CRUD
 morpheus-mobile/lib/shifts-store.ts            ← shifts list/claim/check-in/check-out
 morpheus-mobile/lib/profiles-store.ts          ← own profile read/update
+morpheus-mobile/lib/location-tracker.ts        ← startLocationTracking() — upserts GPS to rep_locations every 30s while active
 morpheus-mobile/components/MenuShell.tsx       ← side menu state provider
 morpheus-mobile/components/SideMenu.tsx        ← the slide-in menu
+morpheus-mobile/app/active/page.tsx            ← active shift screen; mounts location tracker
 morpheus-mobile/app/check-in/page.tsx          ← reads ?shift=, calls checkInToShift
-morpheus-admin/lib/customers-store.ts          ← customers CRUD
+morpheus-admin/lib/customers-store.ts          ← customers CRUD + soft delete (active flag)
 morpheus-admin/lib/shifts-store.ts             ← admin-side shifts CRUD
 morpheus-admin/lib/profiles-store.ts           ← list reps for assignment dropdown
+morpheus-admin/lib/rep-locations-store.ts      ← read live rep GPS + Supabase Realtime subscription helper
+morpheus-admin/app/api/geocode/route.ts        ← Nominatim geocode proxy (address → lat/lng)
+morpheus-admin/app/api/geocode/suggest/route.ts ← Nominatim autocomplete suggestions
 morpheus-admin/app/schedule/new/page.tsx       ← create-shift form (with rep picker)
+morpheus-admin/app/customers/new/page.tsx      ← create customer (address autocomplete)
+morpheus-admin/app/customers/[id]/page.tsx     ← customer detail (client component — see Decision #4)
+morpheus-admin/app/customers/[id]/edit/page.tsx ← edit customer (rename + change address)
 morpheus-admin/app/reps/page.tsx               ← reps list (all profiles role='rep')
 morpheus-admin/app/reps/[id]/page.tsx          ← rep detail page
+morpheus-admin/components/screens/live-ops/MapPanel.tsx       ← entry, picks server vs client mount
+morpheus-admin/components/screens/live-ops/MapPanelClient.tsx ← MapLibre map + customer pins + live rep dots
 morpheus-admin/components/screens/live-ops/    ← KpiStrip, ShiftsList (real data)
 morpheus-admin/components/shell/AdminShell.tsx ← desktop chrome (sidebar + topbar)
 ```
@@ -527,11 +571,17 @@ These are calls we made along the way that future-you should understand:
 
 3. **No backend code (yet) — Supabase does it all.** Database, auth, RLS — all in Supabase. Next.js doesn't have any server-side route handlers in this repo. If you need server-only logic (e.g. a webhook receiver, or admin-only mutations that bypass RLS), add Next.js API routes under `app/api/` and use the Supabase service-role key (which is secret — keep it server-side only).
 
-4. **No `customers` UPDATE policy.** Admin can list, insert, delete customers but not update them yet. Wasn't needed for the demo. Add the policy when you build an "Edit customer" page.
+4. **Customer detail page is a client component, not server.** When it was a server component the authenticated Supabase session wasn't visible to it, so RLS silently returned empty rows. Switching to a client component fixed it. Same pattern applies to any page that needs the signed-in user's view of an RLS-gated table.
 
 5. **Composite primary key on `requested_shifts`.** The row id is `${userId}-${customerId}` so two different users can both request the same customer. Customer-level matching uses `customer_id` everywhere in code, not `id`.
 
 6. **Logout uses `window.location.href`, not `router.replace`.** See the Auth section. This is intentional — don't change it back.
+
+7. **Geocoding is server-proxied, not called from the browser.** Nominatim's ToS requires a descriptive User-Agent. The two routes under `app/api/geocode/` set that header server-side; the client only ever talks to our own endpoints. Don't move these calls to the browser.
+
+8. **`rep_locations` uses upsert with `onConflict: "rep_id"`.** One row per rep. We don't keep a history table — only "where are they right now." If we ever need a breadcrumb trail, that's a separate `rep_location_history` table, not a schema change here.
+
+9. **Mock customer fallback was removed.** Both apps now require Supabase to be configured for customers. Mocks remain for shifts/profiles fallback in dev, but customers is DB-only.
 
 ---
 
