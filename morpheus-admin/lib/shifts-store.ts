@@ -99,18 +99,43 @@ export async function deleteShift(
  * Returns an unsubscribe function. Requires the shifts table to be in
  * the supabase_realtime publication
  * (see db/migrations/2026_05_05_shifts_realtime.sql).
+ *
+ * Each call gets a unique channel name. supabase-js stores channels by
+ * name on the client; if two subscribers used the same name the second
+ * call collided with the first — which crashed the whole dashboard
+ * because both KpiStrip and ShiftsList subscribe at the same time.
+ *
+ * Wrapped in a try/catch so a misbehaving realtime client (publication
+ * not configured, websocket can't open, etc) can never bring down the
+ * page that called us. Worst case: no live updates, manual refresh
+ * still works.
  */
+let _shiftsChannelCounter = 0;
+
 export function subscribeShifts(onChange: () => void): () => void {
   if (!isSupabaseConfigured() || !supabase) return () => {};
-  const channel = supabase
-    .channel("shifts_live")
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "shifts" },
-      () => onChange()
-    )
-    .subscribe();
-  return () => {
-    supabase!.removeChannel(channel);
-  };
+  try {
+    _shiftsChannelCounter += 1;
+    const channelName = `shifts_live_${Date.now()}_${_shiftsChannelCounter}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "shifts" },
+        () => onChange()
+      )
+      .subscribe();
+    return () => {
+      try {
+        supabase!.removeChannel(channel);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[shifts] removeChannel failed:", err);
+      }
+    };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] subscribe failed:", err);
+    return () => {};
+  }
 }
