@@ -1,14 +1,44 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
+import { useState, useEffect, useMemo } from "react";
 import { MC } from "@/lib/tokens";
-import { SAMPLE, type Shift } from "@/lib/mock-data";
+import { type Shift } from "@/lib/mock-data";
 import { AppHeader, AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
 import { Glyph, formatTime } from "@/components/Glyph";
 import { getUser } from "@/lib/auth";
 import { listMyShiftsToday } from "@/lib/shifts-store";
 import { getMyProfile } from "@/lib/profiles-store";
+import { listLibraryFiles } from "@/lib/library-store";
+
+// MapLibre needs `window`; defer to client-only.
+const DashboardMap = dynamic(
+  () => import("@/components/DashboardMap").then((m) => m.DashboardMap),
+  { ssr: false }
+);
+
+type DbShift = Shift & {
+  realId: string;
+  repId: string | null;
+  checkInAt: string | null;
+  state: string;
+};
+
+function formatTodayHeader(): string {
+  const d = new Date();
+  return d
+    .toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric" })
+    .replace(",", " ·");
+}
+
+function formatNowTime(): string {
+  return new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
 
 /**
  * Friendly display name from an email address. Falls back gracefully when
@@ -27,31 +57,53 @@ function nameFromEmail(email: string | null | undefined): string {
 }
 
 export default function DashboardPage() {
-  // Lifted state — both Up Next and the map react to these.
+  // Lifted state — UpNextCard reacts to these.
   // directionsOpen: rep tapped "Directions" to preview the route on the map.
   // travellingSince: rep tapped "Start travelling" — route is now live.
-  // The map shows the route view when EITHER is active.
   const [directionsOpen, setDirectionsOpen] = useState(false);
   const [travellingSince, setTravellingSince] = useState<number | null>(null);
 
   // Greeting prefers the profiles.name (set on signup), falls back to email.
   const [displayName, setDisplayName] = useState<string>("");
+  // Real shifts-today list, used for the count + the progress bar.
+  const [shifts, setShifts] = useState<DbShift[]>([]);
+  const [shiftsLoaded, setShiftsLoaded] = useState(false);
+  // Real library file count, used for the Library shortcut subtitle.
+  const [libraryCount, setLibraryCount] = useState<number | null>(null);
+
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getMyProfile(), getUser()]).then(([profile, user]) => {
-      if (cancelled) return;
-      // Prefer profile.name, then derive from email
-      const fromProfile = profile?.name?.trim();
-      setDisplayName(fromProfile || nameFromEmail(user?.email));
-    });
+    Promise.all([getMyProfile(), getUser(), listMyShiftsToday(), listLibraryFiles()]).then(
+      ([profile, user, myShifts, libFiles]) => {
+        if (cancelled) return;
+        const fromProfile = profile?.name?.trim();
+        setDisplayName(fromProfile || nameFromEmail(user?.email));
+        setShifts(myShifts);
+        setShiftsLoaded(true);
+        setLibraryCount(libFiles.length);
+      }
+    );
     return () => {
       cancelled = true;
     };
   }, []);
 
+  const todayHeader = useMemo(formatTodayHeader, []);
+  // Tick the AppHeader's last-sync label so it reflects real "now" rather
+  // than a hardcoded time. Updates once a minute.
+  const [nowLabel, setNowLabel] = useState<string>(() => formatNowTime());
+  useEffect(() => {
+    const t = setInterval(() => setNowLabel(formatNowTime()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const completedCount = shifts.filter((s) => s.state === "complete").length;
+  const inProgressCount = shifts.filter((s) => s.state === "in-progress").length;
+  const totalCount = shifts.length;
+
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
-      <AppHeader title="Dashboard" lastSync="02:12 PM" />
+      <AppHeader title="Dashboard" lastSync={nowLabel} />
 
       {/* Welcome — extra top padding so it clears the absolute-positioned LAST SYNC label */}
       <div style={{ padding: "32px 20px 6px" }}>
@@ -65,7 +117,7 @@ export default function DashboardPage() {
             textTransform: "uppercase",
           }}
         >
-          Thu · 23 Apr 2026
+          {todayHeader}
         </div>
         <div
           style={{
@@ -81,7 +133,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Shifts-today summary */}
+      {/* Shifts-today summary — real data */}
       <div style={{ padding: "14px 20px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -95,10 +147,15 @@ export default function DashboardPage() {
                 lineHeight: 1,
               }}
             >
-              {SAMPLE.shifts.length}
+              {shiftsLoaded ? totalCount : "—"}
             </div>
             <div style={{ fontFamily: MC.font, fontSize: 14, fontWeight: 500, color: MC.mute }}>
-              shifts today
+              shift{totalCount === 1 ? "" : "s"} today
+              {shiftsLoaded && completedCount > 0 && (
+                <span style={{ marginLeft: 6, color: MC.ok, fontWeight: 600 }}>
+                  · {completedCount} done
+                </span>
+              )}
             </div>
           </div>
           <Link
@@ -120,39 +177,48 @@ export default function DashboardPage() {
             <Glyph name="chev-r" size={14} color={MC.brandDeep} />
           </Link>
         </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-          {SAMPLE.shifts.map((_s, i) => (
-            <div
-              key={i}
-              style={{
-                flex: 1,
-                height: 5,
-                borderRadius: 999,
-                background: i === 0 ? MC.brand : "#DCE0E6",
-              }}
-            />
-          ))}
-        </div>
+        {/* Progress bar: green = complete, brand = in-progress, grey = scheduled. */}
+        {totalCount > 0 && (
+          <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+            {shifts.map((s) => (
+              <div
+                key={s.realId}
+                style={{
+                  flex: 1,
+                  height: 5,
+                  borderRadius: 999,
+                  background:
+                    s.state === "complete"
+                      ? MC.ok
+                      : s.state === "in-progress"
+                      ? MC.brand
+                      : "#DCE0E6",
+                }}
+                title={`${s.name} · ${s.state}`}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Today's route — all shift locations plotted; reacts to directions + travel state */}
-      <TodaysRouteMap
-        showRoute={directionsOpen || travellingSince !== null}
-        isTravelling={travellingSince !== null}
-      />
+      {/* Real map of today's shift locations + the rep's own GPS dot. */}
+      {shiftsLoaded && shifts.length > 0 && <DashboardMap shifts={shifts} />}
 
-      {/* Up Next — controls directions + travel state */}
+      {/* Up Next — primary CTA */}
       <UpNextCard
+        shifts={shifts}
+        loaded={shiftsLoaded}
         directionsOpen={directionsOpen}
         setDirectionsOpen={setDirectionsOpen}
         travellingSince={travellingSince}
         setTravellingSince={setTravellingSince}
+        inProgressCount={inProgressCount}
       />
 
       {/* Break — usable between shifts too, not just during */}
       <BreakCard />
 
-      {/* Library shortcut */}
+      {/* Library shortcut — count is real */}
       <Link
         href="/library"
         style={{ padding: "14px 16px 22px", textDecoration: "none", display: "block" }}
@@ -194,15 +260,16 @@ export default function DashboardPage() {
               Library
             </div>
             <div style={{ fontFamily: MC.font, fontSize: 12.5, color: MC.mute, marginTop: 2 }}>
-              2 new files
+              {libraryCount === null
+                ? "Loading…"
+                : libraryCount === 0
+                ? "No files yet"
+                : `${libraryCount} file${libraryCount === 1 ? "" : "s"}`}
             </div>
           </div>
           <Glyph name="chev-r" size={18} color={MC.hint} />
         </div>
       </Link>
-
-      {/* Yesterday — tucked below Library as low-priority info, visually demoted */}
-      <YesterdayCard />
 
       <AppFooter />
     </div>
@@ -210,37 +277,36 @@ export default function DashboardPage() {
 }
 
 /**
- * Up Next card — shows the rep's next shift with two stacked actions:
- * Start travelling (precursor) and Check in to shift (primary). When
- * travelling is active, the top "UP NEXT" pill flips to a live travelling
- * pill with elapsed time and a Stop affordance.
+ * Up Next card — picks the next thing the rep should focus on:
+ *   - If they have an in-progress shift → "Resume shift" CTA.
+ *   - Else if they have a scheduled shift today → "Check in to shift" CTA.
+ *   - Else → empty state nudging /shifts.
+ *
+ * Shifts come down from the dashboard so we don't double-fetch.
  */
 function UpNextCard({
+  shifts,
+  loaded,
   directionsOpen,
   setDirectionsOpen,
   travellingSince,
   setTravellingSince,
+  inProgressCount,
 }: {
+  shifts: DbShift[];
+  loaded: boolean;
   directionsOpen: boolean;
   setDirectionsOpen: (v: boolean) => void;
   travellingSince: number | null;
   setTravellingSince: (v: number | null) => void;
+  inProgressCount: number;
 }) {
-  // Pull the rep's next assigned shift from the DB on mount. realId is the
-  // shift's database UUID — passed to /check-in so the right row gets updated.
-  const [next, setNext] = useState<(Shift & { realId: string }) | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    listMyShiftsToday().then((rows) => {
-      if (cancelled) return;
-      setNext(rows[0] || null);
-      setLoaded(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Prefer the in-progress shift; otherwise the earliest scheduled one.
+  const inProgress = shifts.find((s) => s.state === "in-progress");
+  const scheduled = shifts.find((s) => s.state === "scheduled");
+  const next = inProgress || scheduled || null;
+  const isResume = !!inProgress;
+  void inProgressCount; // currently unused; kept for future polish
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -451,12 +517,19 @@ function UpNextCard({
                 </button>
               )}
             </div>
-            <Link href={`/check-in?shift=${next.realId}`} style={{ textDecoration: "none" }}>
-              <PrimaryButton icon="log">Check in to shift</PrimaryButton>
-            </Link>
+            {isResume ? (
+              <Link href="/active" style={{ textDecoration: "none" }}>
+                <PrimaryButton icon="arrow-r">Resume shift</PrimaryButton>
+              </Link>
+            ) : (
+              <Link href={`/check-in?shift=${next.realId}`} style={{ textDecoration: "none" }}>
+                <PrimaryButton icon="log">Check in to shift</PrimaryButton>
+              </Link>
+            )}
           </div>
 
-          {/* Distance/lateness warning */}
+          {/* Lateness/info banner — only shown for not-yet-checked-in shifts. */}
+          {!isResume && (
           <div
             style={{
               marginTop: 12,
@@ -473,9 +546,10 @@ function UpNextCard({
           >
             <Glyph name="info" size={14} color="#b27606" />
             <span>
-              You&apos;re <b>3 km</b> from site. You&apos;ll need to record a reason at check-in.
+              You&apos;ll record any off-site or late reason at check-in.
             </span>
           </div>
+          )}
         </div>
       </div>
     </div>
@@ -723,510 +797,3 @@ function TravellingPill({ elapsedLabel }: { elapsedLabel: string }) {
   );
 }
 
-/**
- * TodaysRouteMap — abstract map card with all shift locations plotted as
- * colored pins, plus the rep's current location. Visual at-a-glance of "where
- * you'll be today". Faux map (no tiles, no external deps).
- *
- * When `travellingSince` is set, the map enters an "en route" state: the
- * destination pin (next shift) glows, other pins fade, the route line
- * thickens and animates, and the bottom summary pill flips to a live ETA.
- */
-function TodaysRouteMap({
-  showRoute,
-  isTravelling,
-}: {
-  showRoute: boolean;
-  isTravelling: boolean;
-}) {
-  // Hand-placed pin coordinates within the map (% of width/height).
-  // Spread so they look like four sites scattered across a city/region.
-  const pins = [
-    { shift: SAMPLE.shifts[0], x: 28, y: 32, order: 1 }, // GreenWave (destination)
-    { shift: SAMPLE.shifts[1], x: 64, y: 26, order: 2 }, // NextGen
-    { shift: SAMPLE.shifts[2], x: 76, y: 64, order: 3 }, // Optima
-    { shift: SAMPLE.shifts[3], x: 42, y: 76, order: 4 }, // SiteB
-  ];
-  // User position
-  const userX = 50;
-  const userY = 52;
-  const destination = pins[0];
-
-  return (
-    <div style={{ padding: "12px 16px 0" }}>
-      <div
-        style={{
-          background: MC.card,
-          borderRadius: MC.radiusCard,
-          border: `1px solid ${MC.line}`,
-          overflow: "hidden",
-          boxShadow: "0 1px 2px rgba(10,15,30,.04)",
-        }}
-      >
-        {/* Map area */}
-        <div
-          style={{
-            position: "relative",
-            height: 180,
-            background: "linear-gradient(170deg, #DCEBEE 0%, #E5EFE3 70%, #EAEEDF 100%)",
-          }}
-        >
-          {/* Stylised park / water blobs */}
-          <svg
-            viewBox="0 0 400 180"
-            preserveAspectRatio="none"
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-          >
-            {/* water */}
-            <path
-              d="M260,0 Q360,20 400,60 L400,0 Z"
-              fill="#B6D9E7"
-              opacity="0.55"
-            />
-            {/* parks */}
-            <ellipse cx="120" cy="140" rx="50" ry="22" fill="#9DC59A" opacity="0.45" />
-            <ellipse cx="320" cy="120" rx="34" ry="18" fill="#9DC59A" opacity="0.4" />
-            {/* roads */}
-            <path
-              d="M0,90 Q100,70 200,95 T400,80"
-              stroke="#fff"
-              strokeWidth="5"
-              fill="none"
-              opacity=".85"
-            />
-            <path
-              d="M40,0 Q70,80 100,180"
-              stroke="#fff"
-              strokeWidth="3"
-              fill="none"
-              opacity=".7"
-            />
-            <path
-              d="M280,0 L260,180"
-              stroke="#fff"
-              strokeWidth="3"
-              fill="none"
-              opacity=".7"
-            />
-            <path
-              d="M0,140 Q200,130 400,150"
-              stroke="#fff"
-              strokeWidth="3"
-              fill="none"
-              opacity=".6"
-            />
-          </svg>
-
-          {/* Route line — thicker when route view is shown; flows only when travelling */}
-          <svg
-            viewBox="0 0 100 100"
-            preserveAspectRatio="none"
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-          >
-            <line
-              x1={userX}
-              y1={userY}
-              x2={destination.x}
-              y2={destination.y}
-              stroke={destination.shift.color}
-              strokeWidth={showRoute ? "1.2" : "0.6"}
-              strokeDasharray={showRoute ? "3 2" : "2 2"}
-              strokeLinecap="round"
-              opacity={showRoute ? 1 : 0.85}
-              style={
-                isTravelling
-                  ? { animation: "mc-flow 0.8s linear infinite" }
-                  : undefined
-              }
-            />
-          </svg>
-
-          {/* Customer pins — non-destination pins fade when route is shown */}
-          {pins.map((p) => {
-            const isDestination = p.shift.id === destination.shift.id;
-            return (
-              <ShiftPin
-                key={p.shift.id}
-                x={p.x}
-                y={p.y}
-                order={p.order}
-                color={p.shift.color}
-                initials={p.shift.initials}
-                fade={showRoute && !isDestination}
-                glow={isTravelling && isDestination}
-              />
-            );
-          })}
-
-          {/* User dot */}
-          <UserDot x={userX} y={userY} />
-
-          {/* Bottom-left summary pill — three states: overview / preview / travelling */}
-          {isTravelling ? (
-            <div
-              style={{
-                position: "absolute",
-                bottom: 10,
-                left: 10,
-                background: destination.shift.color,
-                color: "#fff",
-                padding: "6px 11px",
-                borderRadius: 999,
-                fontFamily: MC.font,
-                fontSize: 11.5,
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                boxShadow: `0 4px 14px ${destination.shift.color}66`,
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: "#fff",
-                  position: "relative",
-                }}
-              >
-                <span
-                  style={{
-                    position: "absolute",
-                    inset: -3,
-                    borderRadius: "50%",
-                    border: "1.5px solid #fff",
-                    opacity: 0.5,
-                    animation: "mc-pulse 1.6s ease-out infinite",
-                  }}
-                />
-              </span>
-              <span style={{ letterSpacing: 0.5, textTransform: "uppercase" }}>
-                En route
-              </span>
-              <span style={{ opacity: 0.6 }}>·</span>
-              <span style={{ fontVariantNumeric: "tabular-nums" }}>~ 8 min</span>
-            </div>
-          ) : showRoute ? (
-            <div
-              style={{
-                position: "absolute",
-                bottom: 10,
-                left: 10,
-                background: "#fff",
-                color: MC.ink,
-                padding: "6px 11px",
-                borderRadius: 999,
-                fontFamily: MC.font,
-                fontSize: 11.5,
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                border: `1px solid ${destination.shift.color}55`,
-                boxShadow: "0 2px 6px rgba(0,0,0,.08)",
-              }}
-            >
-              <Glyph
-                name="pin"
-                size={12}
-                color={destination.shift.color}
-                strokeWidth={2.2}
-              />
-              <span style={{ letterSpacing: 0.5, textTransform: "uppercase" }}>
-                Preview
-              </span>
-              <span style={{ opacity: 0.4 }}>·</span>
-              <span style={{ fontVariantNumeric: "tabular-nums" }}>3 km · 8 min</span>
-            </div>
-          ) : (
-            <div
-              style={{
-                position: "absolute",
-                bottom: 10,
-                left: 10,
-                background: "rgba(23,26,31,.92)",
-                color: "#fff",
-                padding: "6px 11px",
-                borderRadius: 999,
-                fontFamily: MC.font,
-                fontSize: 11.5,
-                fontWeight: 600,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                backdropFilter: "blur(8px)",
-              }}
-            >
-              <Glyph name="pin" size={12} color="#fff" strokeWidth={2.2} />
-              <span>{pins.length} shifts today</span>
-              <span style={{ opacity: 0.5 }}>·</span>
-              <span style={{ fontVariantNumeric: "tabular-nums" }}>17 km total</span>
-            </div>
-          )}
-
-          {/* Top-right eyebrow */}
-          <div
-            style={{
-              position: "absolute",
-              top: 10,
-              right: 10,
-              background: "#fff",
-              padding: "5px 10px",
-              borderRadius: 999,
-              fontFamily: MC.font,
-              fontSize: 10.5,
-              fontWeight: 700,
-              letterSpacing: 0.5,
-              textTransform: "uppercase",
-              color: showRoute ? destination.shift.color : MC.mute,
-              boxShadow: "0 2px 6px rgba(0,0,0,.08)",
-            }}
-          >
-            {isTravelling
-              ? `→ ${destination.shift.initials}`
-              : showRoute
-              ? `Directions · ${destination.shift.initials}`
-              : "Today’s route"}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ShiftPin({
-  x,
-  y,
-  order,
-  color,
-  initials,
-  fade,
-  glow,
-}: {
-  x: number;
-  y: number;
-  order: number;
-  color: string;
-  initials: string;
-  fade?: boolean;
-  glow?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: `${x}%`,
-        top: `${y}%`,
-        transform: "translate(-50%, -100%)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        opacity: fade ? 0.35 : 1,
-        transition: "opacity .25s ease",
-        zIndex: glow ? 2 : 1,
-      }}
-    >
-      <div
-        style={{
-          padding: "3px 7px",
-          background: color,
-          color: "#fff",
-          fontFamily: MC.font,
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: 0.3,
-          borderRadius: 4,
-          marginBottom: 2,
-          boxShadow: glow
-            ? `0 2px 6px rgba(0,0,0,.25), 0 0 0 3px ${color}33, 0 0 0 6px ${color}1A`
-            : "0 2px 6px rgba(0,0,0,.25)",
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-        }}
-      >
-        <span
-          style={{
-            width: 14,
-            height: 14,
-            borderRadius: "50%",
-            background: "rgba(255,255,255,.25)",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 9,
-            fontWeight: 800,
-          }}
-        >
-          {order}
-        </span>
-        {initials}
-      </div>
-      <div style={{ position: "relative", width: 22, height: 26 }}>
-        {glow && (
-          <div
-            style={{
-              position: "absolute",
-              left: "50%",
-              top: 11,
-              transform: "translate(-50%, -50%)",
-              width: 36,
-              height: 36,
-              borderRadius: "50%",
-              background: `${color}40`,
-              animation: "mc-map-pulse 1.6s ease-out infinite",
-            }}
-          />
-        )}
-        <svg width="22" height="26" viewBox="0 0 22 26" style={{ position: "relative" }}>
-          <path
-            d="M11 25 Q4 17 4 11 a7 7 0 1 1 14 0 Q18 17 11 25z"
-            fill={color}
-            stroke="#fff"
-            strokeWidth="2"
-          />
-          <circle cx="11" cy="11" r="3" fill="#fff" />
-        </svg>
-      </div>
-    </div>
-  );
-}
-
-function UserDot({ x, y }: { x: number; y: number }) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        left: `${x}%`,
-        top: `${y}%`,
-        transform: "translate(-50%, -50%)",
-        width: 28,
-        height: 28,
-        borderRadius: "50%",
-        background: `${MC.brand}33`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          borderRadius: "50%",
-          border: `2px solid ${MC.brand}`,
-          animation: "mc-map-pulse 1.6s ease-out infinite",
-        }}
-      />
-      <div
-        style={{
-          width: 12,
-          height: 12,
-          borderRadius: "50%",
-          background: MC.brand,
-          border: "2px solid #fff",
-          boxShadow: "0 0 0 1px rgba(0,0,0,.15)",
-        }}
-      />
-    </div>
-  );
-}
-
-/**
- * YesterdayCard — low-priority "history" info row. Sits below Library at the
- * bottom of the dashboard. Flat (no card chrome), preceded by a thin divider
- * + eyebrow label so it reads as informational, not actionable.
- */
-function YesterdayCard() {
-  // In Phase 2 these come from the API.
-  const visitsCount = 4;
-  const totalTimeLabel = "8h 47m";
-
-  return (
-    <div style={{ padding: "16px 24px 24px" }}>
-      {/* Eyebrow with hairlines either side */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ flex: 1, height: 1, background: MC.line, opacity: 0.7 }} />
-        <div
-          style={{
-            fontFamily: MC.font,
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: 1.2,
-            textTransform: "uppercase",
-            color: MC.hint,
-          }}
-        >
-          Recent
-        </div>
-        <div style={{ flex: 1, height: 1, background: MC.line, opacity: 0.7 }} />
-      </div>
-
-      {/* Flat row, no card background — just info */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "4px 4px",
-        }}
-      >
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            background: MC.bg,
-            border: `1px solid ${MC.line}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >
-          <Glyph name="clock" size={15} color={MC.mute} strokeWidth={2} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontFamily: MC.font,
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: 0.8,
-              textTransform: "uppercase",
-              color: MC.hint,
-            }}
-          >
-            Yesterday
-          </div>
-          <div
-            style={{
-              fontFamily: MC.font,
-              fontSize: 12.5,
-              color: MC.mute,
-              fontWeight: 500,
-              marginTop: 2,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              flexWrap: "wrap",
-            }}
-          >
-            <span>{visitsCount} visits</span>
-            <span style={{ color: MC.hint, opacity: 0.4 }}>·</span>
-            <span>{totalTimeLabel} worked</span>
-          </div>
-        </div>
-        <Glyph name="chev-r" size={14} color={MC.hint} />
-      </div>
-    </div>
-  );
-}

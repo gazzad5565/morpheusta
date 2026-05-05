@@ -291,10 +291,13 @@ shifts {
 }
 
 -- customer_tasks (Phase 3g, admin-managed task templates)
--- Each row is one task the rep should perform on a shift at this customer.
+-- Each row is one task. customer_id NULL = universal (applies to ALL
+-- customers); a specific UUID = applies only to that customer. Multi-
+-- customer tasks are stored as N rows (one per selected customer) at
+-- create time.
 customer_tasks {
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid()
-  customer_id  text → customers
+  customer_id  text NULL → customers   -- NULL = universal
   name         text NOT NULL
   description  text NULL
   duration_min int DEFAULT 10
@@ -460,7 +463,9 @@ Or via CLI: `npx vercel rollback`.
 - **Mobile check-out writes to DB** — "Confirm check-out" calls `checkOutOfShift()` (state→`complete`, stores tasks_done) and `clearRepLocation()` (drops the green dot from the admin map via Realtime)
 - **Admin Requests inbox** — `/requests` page lists pending rep-requested shifts; manager taps "Schedule" to open `/schedule/new` pre-filled with rep + customer (and the request id), which on save creates the shift and deletes the request so the inbox stays clean. "Decline" deletes the request directly. Same inbox is also surfaced as a "Requests" tab on the home page Live Feed.
 - **Realtime Live Ops board** — KpiStrip and ShiftsList both subscribe to `shifts` table changes via Supabase Realtime. When a rep checks in / claims / completes, or a manager schedules, the dashboard updates without a refresh.
-- **Customer tasks** — admin manages a per-customer task list at `/tasks` (real CRUD: create via `/tasks/new`, delete inline). Mobile `/active` fetches the tasks for the rep's current shift's customer and renders them under the timer. Compulsory tasks block check-out until done; `tasks_done` count goes back to the DB on check-out.
+- **Customer tasks** — admin manages a task library at `/tasks`. When creating, a task can be **universal** (applies to ALL customers, one row with `customer_id = NULL`), **specific** (one customer), or **multiple** (sprays one row per selected customer). Mobile `/active` fetches the customer's specific tasks PLUS any universal ones and renders them under the timer. Compulsory tasks block check-out until done; `tasks_done` count goes back to the DB on check-out.
+- **Mobile shifts list shows state** — `/shifts` "Scheduled for me" sorts in-progress → scheduled → complete (so finished shifts sink to the bottom), with a green "Complete" badge on done shifts (dimmed, struck-through times) and a brand "In progress" badge with a "Resume shift" button on the active one.
+- **Mobile dashboard is fully real-data** — date is today's actual date, "last sync" is real now, shift count + progress bar reflect today's DB shifts (green segment for complete, brand for in-progress, grey for scheduled), Library shortcut shows real file count, "Up next" picks the in-progress shift first (with "Resume shift") then the next scheduled (with "Check in"), and the route-preview card is a real MapLibre map plotting today's customer pins + the rep's GPS dot.
 - **Library** — admin uploads files at `/library` (with optional customer association) into Supabase Storage bucket `library` + metadata in `library_files`. Mobile `/library` lists everything reps can see; tap any file to open it via a short-lived signed URL.
 - **Real-data only** — `/active`, `/check-out`, and the Live Feed's "Needs action" / "All activity" tabs no longer fall back to mock samples. With an empty database, every page shows a clean empty state ready to be populated.
 - **Profiles table + auto-trigger** — `handle_new_user()` creates a profile row on signup; carries `role` ('rep' | 'manager') and display `name`

@@ -43,6 +43,8 @@ export interface Customer {
   code: number;
   region: string;
   city: string;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 const ALL_CUSTOMERS_RAW: Omit<Customer, "color">[] = [

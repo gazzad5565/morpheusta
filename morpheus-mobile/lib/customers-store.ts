@@ -18,6 +18,8 @@ interface DbRow {
   code: number;
   region: string | null;
   city: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -29,6 +31,8 @@ function rowToCustomer(row: DbRow): Customer {
     code: row.code,
     region: row.region || "—",
     city: row.city || "—",
+    latitude: row.latitude,
+    longitude: row.longitude,
   };
 }
 

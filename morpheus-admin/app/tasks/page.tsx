@@ -52,8 +52,11 @@ export default function TasksPage() {
     return rows.filter((r) => {
       if (activeFilter === "compulsory" && !r.compulsory) return false;
       if (activeFilter === "optional" && r.compulsory) return false;
-      if (customerFilter !== "All" && r.customers?.id !== customerFilter) return false;
-      return true;
+      if (customerFilter === "All") return true;
+      if (customerFilter === "Universal") return r.customer_id === null;
+      // Universal tasks always show under any specific-customer filter too,
+      // since they apply to that customer.
+      return r.customer_id === null || r.customers?.id === customerFilter;
     });
   }, [rows, activeFilter, customerFilter]);
 
@@ -124,6 +127,7 @@ export default function TasksPage() {
               }}
             >
               <option value="All">All customers</option>
+              <option value="Universal">Universal (all-customers tasks)</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -258,39 +262,59 @@ export default function TasksPage() {
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  {t.customers && (
-                    <div
+                  {t.customer_id === null ? (
+                    <span
                       style={{
-                        width: 22,
-                        height: 22,
-                        borderRadius: 5,
-                        background: t.customers.color,
-                        color: "#fff",
+                        padding: "3px 9px",
+                        borderRadius: 99,
+                        background: AC.brandSoft,
+                        color: AC.brandInk,
                         fontFamily: AC.font,
-                        fontSize: 9,
+                        fontSize: 11,
                         fontWeight: 700,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexShrink: 0,
+                        letterSpacing: 0.3,
+                        textTransform: "uppercase",
                       }}
                     >
-                      {t.customers.initials}
-                    </div>
+                      All customers
+                    </span>
+                  ) : (
+                    <>
+                      {t.customers && (
+                        <div
+                          style={{
+                            width: 22,
+                            height: 22,
+                            borderRadius: 5,
+                            background: t.customers.color,
+                            color: "#fff",
+                            fontFamily: AC.font,
+                            fontSize: 9,
+                            fontWeight: 700,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {t.customers.initials}
+                        </div>
+                      )}
+                      <div
+                        style={{
+                          fontFamily: AC.font,
+                          fontSize: 12,
+                          color: AC.ink2,
+                          fontWeight: 500,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {t.customers?.name || t.customer_id}
+                      </div>
+                    </>
                   )}
-                  <div
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 12,
-                      color: AC.ink2,
-                      fontWeight: 500,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {t.customers?.name || t.customer_id}
-                  </div>
                 </div>
                 <div
                   style={{

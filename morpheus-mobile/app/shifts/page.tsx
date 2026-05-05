@@ -14,8 +14,13 @@ import {
 import { AppHeader, AppFooter, CustomerTile, SectionLabel } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
 
-// A shift row from the DB carries internal id + repId alongside the display fields.
-type DbShift = Shift & { realId: string; repId: string | null };
+// A shift row from the DB carries internal id + state alongside the display fields.
+type DbShift = Shift & {
+  realId: string;
+  repId: string | null;
+  checkInAt: string | null;
+  state: string;
+};
 
 export default function ShiftsListPage() {
   const router = useRouter();
@@ -37,6 +42,15 @@ export default function ShiftsListPage() {
       listUnassignedShiftsToday(),
       listRequestedShifts(),
     ]).then(([m, u, r]) => {
+      // Sort: in-progress first → scheduled → complete (so completed
+      // shifts sink to the bottom of the list).
+      const order: Record<string, number> = {
+        "in-progress": 0,
+        scheduled: 1,
+        late: 2,
+        complete: 3,
+      };
+      m.sort((a, b) => (order[a.state] ?? 1) - (order[b.state] ?? 1));
       setMine(m);
       setUnassigned(u);
       setRequested(r);
@@ -88,11 +102,13 @@ export default function ShiftsListPage() {
             <ShiftRow
               key={s.realId}
               shift={s}
+              state={s.state}
               expanded={expandedId === s.realId}
               onToggle={() =>
                 setExpandedId(expandedId === s.realId ? null : s.realId)
               }
               onCheckIn={() => onCheckIn(s.realId)}
+              onResume={() => router.push("/active")}
             />
           ))
         )}
@@ -197,6 +213,7 @@ function SkeletonRow() {
 
 function ShiftRow({
   shift,
+  state,
   expanded,
   unscheduled,
   requested,
@@ -204,10 +221,13 @@ function ShiftRow({
   claiming,
   onToggle,
   onCheckIn,
+  onResume,
   onRemove,
   onClaim,
 }: {
   shift: Shift;
+  /** The shift's lifecycle state (scheduled | in-progress | complete | late). Only meaningful for "Mine". */
+  state?: string;
   expanded: boolean;
   unscheduled?: boolean;
   requested?: boolean;
@@ -215,19 +235,33 @@ function ShiftRow({
   claiming?: boolean;
   onToggle?: () => void;
   onCheckIn?: () => void;
+  onResume?: () => void;
   onRemove?: () => void;
   onClaim?: () => void;
 }) {
+  const isComplete = state === "complete";
+  const isInProgress = state === "in-progress";
+  const stateBadge = (() => {
+    if (unscheduled) return null;
+    if (isComplete) {
+      return { label: "Complete", bg: MC.okTint, fg: "#0d6a45" };
+    }
+    if (isInProgress) {
+      return { label: "In progress", bg: MC.brandTint, fg: MC.brandInk };
+    }
+    return null;
+  })();
   return (
     <div
       style={{
         background: MC.card,
         borderRadius: MC.radiusCard,
-        border: `1px solid ${MC.line}`,
+        border: `1px solid ${isInProgress ? MC.brand + "55" : MC.line}`,
         overflow: "hidden",
         boxShadow: expanded
           ? "0 12px 28px rgba(10,15,30,.09)"
           : "0 1px 2px rgba(10,15,30,.04)",
+        opacity: isComplete ? 0.78 : 1,
       }}
     >
       <button
@@ -334,10 +368,26 @@ function ShiftRow({
             ) : (
               <>
                 <Glyph name="clock" size={13} color={MC.mute} strokeWidth={2} />
-                <span>
+                <span style={{ textDecoration: isComplete ? "line-through" : "none" }}>
                   {shift.start}–{shift.end}
                 </span>
-                {shift.distance && (
+                {stateBadge && (
+                  <span
+                    style={{
+                      padding: "1px 7px",
+                      borderRadius: 999,
+                      background: stateBadge.bg,
+                      color: stateBadge.fg,
+                      fontSize: 9.5,
+                      fontWeight: 700,
+                      letterSpacing: 0.4,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {stateBadge.label}
+                  </span>
+                )}
+                {!stateBadge && shift.distance && (
                   <>
                     <span style={{ opacity: 0.4 }}>·</span>
                     <span>{shift.distance}</span>
@@ -413,34 +463,83 @@ function ShiftRow({
             padding: "12px 14px 14px",
           }}
         >
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" style={secondaryBtn}>
-              <Glyph name="pin" size={16} color={MC.ink2} />
-              <span>Directions</span>
-            </button>
-            <button
-              type="button"
-              onClick={onCheckIn}
-              style={{ ...secondaryBtn, flex: 1.4 }}
+          {isComplete ? (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 12px",
+                background: MC.okTint,
+                borderRadius: 11,
+                color: "#0d6a45",
+                fontFamily: MC.font,
+                fontSize: 13,
+                fontWeight: 600,
+              }}
             >
-              <span
-                style={{
-                  background: MC.brand,
-                  color: "#fff",
-                  width: 24,
-                  height: 24,
-                  borderRadius: 6,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginRight: 6,
-                }}
+              <Glyph name="check-circle" size={18} color={MC.ok} strokeWidth={2.2} />
+              <span>Shift complete. Nice work.</span>
+            </div>
+          ) : isInProgress ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" style={secondaryBtn}>
+                <Glyph name="pin" size={16} color={MC.ink2} />
+                <span>Directions</span>
+              </button>
+              <button
+                type="button"
+                onClick={onResume}
+                style={{ ...secondaryBtn, flex: 1.4 }}
               >
-                <Glyph name="log" size={14} color="#fff" strokeWidth={2.2} />
-              </span>
-              <span style={{ color: MC.brandDeep, fontWeight: 600 }}>Check in</span>
-            </button>
-          </div>
+                <span
+                  style={{
+                    background: MC.brand,
+                    color: "#fff",
+                    width: 24,
+                    height: 24,
+                    borderRadius: 6,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginRight: 6,
+                  }}
+                >
+                  <Glyph name="arrow-r" size={14} color="#fff" strokeWidth={2.2} />
+                </span>
+                <span style={{ color: MC.brandDeep, fontWeight: 600 }}>Resume shift</span>
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" style={secondaryBtn}>
+                <Glyph name="pin" size={16} color={MC.ink2} />
+                <span>Directions</span>
+              </button>
+              <button
+                type="button"
+                onClick={onCheckIn}
+                style={{ ...secondaryBtn, flex: 1.4 }}
+              >
+                <span
+                  style={{
+                    background: MC.brand,
+                    color: "#fff",
+                    width: 24,
+                    height: 24,
+                    borderRadius: 6,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    marginRight: 6,
+                  }}
+                >
+                  <Glyph name="log" size={14} color="#fff" strokeWidth={2.2} />
+                </span>
+                <span style={{ color: MC.brandDeep, fontWeight: 600 }}>Check in</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

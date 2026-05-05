@@ -45,7 +45,7 @@ function formatTimeLabel(t: string): string {
 
 function rowToShift(
   row: ShiftRow
-): Shift & { realId: string; repId: string | null; checkInAt: string | null } {
+): Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string } {
   const c = row.customers;
   return {
     // The "id" used by mobile UI for matching is customer id
@@ -57,10 +57,11 @@ function rowToShift(
     start: formatTimeLabel(row.start_time),
     end: formatTimeLabel(row.end_time),
     distance: row.distance_label || "",
-    // Internal — for claim/check-in/timer
+    // Internal — for claim/check-in/timer + state badge
     realId: row.id,
     repId: row.rep_id,
     checkInAt: row.check_in_at,
+    state: row.state,
   };
 }
 
@@ -70,7 +71,7 @@ function todayISO(): string {
 
 /** Shifts assigned to the current user, today. */
 export async function listMyShiftsToday(): Promise<
-  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null }>
+  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string }>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data: userData } = await supabase.auth.getUser();
@@ -101,7 +102,7 @@ export async function listMyShiftsToday(): Promise<
  * returns the most recently checked-in one.
  */
 export async function getMyActiveShift(): Promise<
-  (Shift & { realId: string; repId: string | null; checkInAt: string | null }) | null
+  (Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string }) | null
 > {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data: userData } = await supabase.auth.getUser();
@@ -128,7 +129,7 @@ export async function getMyActiveShift(): Promise<
 
 /** Unassigned shifts today — anyone authenticated can see + claim. */
 export async function listUnassignedShiftsToday(): Promise<
-  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null }>
+  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string }>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
@@ -170,7 +171,7 @@ export async function claimShift(
 /** Fetch a single shift by id, joined with its customer. */
 export async function getShiftById(
   shiftId: string
-): Promise<(Shift & { realId: string; repId: string | null; checkInAt: string | null }) | null> {
+): Promise<(Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string }) | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")
@@ -220,10 +221,12 @@ export interface TaskRow {
 
 export async function getTasksForCustomer(customerId: string): Promise<TaskRow[]> {
   if (!isSupabaseConfigured() || !supabase) return [];
+  // Match this customer's specific tasks AND any universal (NULL) tasks
+  // that apply to all customers.
   const { data, error } = await supabase
     .from("customer_tasks")
     .select("id, name, description, duration_min, compulsory, sort_order")
-    .eq("customer_id", customerId)
+    .or(`customer_id.eq.${customerId},customer_id.is.null`)
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
   if (error) {
