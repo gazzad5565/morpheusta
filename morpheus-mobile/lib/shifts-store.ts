@@ -43,7 +43,9 @@ function formatTimeLabel(t: string): string {
   return `${h12}:${mm} ${ampm}`;
 }
 
-function rowToShift(row: ShiftRow): Shift & { realId: string; repId: string | null } {
+function rowToShift(
+  row: ShiftRow
+): Shift & { realId: string; repId: string | null; checkInAt: string | null } {
   const c = row.customers;
   return {
     // The "id" used by mobile UI for matching is customer id
@@ -55,9 +57,10 @@ function rowToShift(row: ShiftRow): Shift & { realId: string; repId: string | nu
     start: formatTimeLabel(row.start_time),
     end: formatTimeLabel(row.end_time),
     distance: row.distance_label || "",
-    // Internal — for claim/check-in
+    // Internal — for claim/check-in/timer
     realId: row.id,
     repId: row.rep_id,
+    checkInAt: row.check_in_at,
   };
 }
 
@@ -67,7 +70,7 @@ function todayISO(): string {
 
 /** Shifts assigned to the current user, today. */
 export async function listMyShiftsToday(): Promise<
-  Array<Shift & { realId: string; repId: string | null }>
+  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null }>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data: userData } = await supabase.auth.getUser();
@@ -98,7 +101,7 @@ export async function listMyShiftsToday(): Promise<
  * returns the most recently checked-in one.
  */
 export async function getMyActiveShift(): Promise<
-  (Shift & { realId: string; repId: string | null }) | null
+  (Shift & { realId: string; repId: string | null; checkInAt: string | null }) | null
 > {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data: userData } = await supabase.auth.getUser();
@@ -125,7 +128,7 @@ export async function getMyActiveShift(): Promise<
 
 /** Unassigned shifts today — anyone authenticated can see + claim. */
 export async function listUnassignedShiftsToday(): Promise<
-  Array<Shift & { realId: string; repId: string | null }>
+  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null }>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
@@ -167,7 +170,7 @@ export async function claimShift(
 /** Fetch a single shift by id, joined with its customer. */
 export async function getShiftById(
   shiftId: string
-): Promise<(Shift & { realId: string; repId: string | null }) | null> {
+): Promise<(Shift & { realId: string; repId: string | null; checkInAt: string | null }) | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")
@@ -200,6 +203,35 @@ export async function checkInToShift(
     .eq("id", shiftId);
   if (error) return { ok: false, error: error.message };
   return { ok: true };
+}
+
+/**
+ * Tasks defined for a customer (admin-managed via /tasks).
+ * Used on the active-shift screen so the rep sees what to do at this site.
+ */
+export interface TaskRow {
+  id: string;
+  name: string;
+  description: string | null;
+  duration_min: number;
+  compulsory: boolean;
+  sort_order: number;
+}
+
+export async function getTasksForCustomer(customerId: string): Promise<TaskRow[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const { data, error } = await supabase
+    .from("customer_tasks")
+    .select("id, name, description, duration_min, compulsory, sort_order")
+    .eq("customer_id", customerId)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] getTasksForCustomer:", error.message);
+    return [];
+  }
+  return (data as TaskRow[]) || [];
 }
 
 /**

@@ -5,9 +5,7 @@ import { useRouter } from "next/navigation";
 import { AC } from "@/lib/tokens";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
-import { RepAvatar } from "@/components/ui/Avatars";
 import { Btn } from "@/components/ui/Btn";
-import { EXCEPTIONS, FEED, getRep } from "@/lib/mock-data";
 import {
   listPendingRequests,
   deleteRequest,
@@ -15,14 +13,6 @@ import {
 } from "@/lib/requests-store";
 
 type TabKey = "needs-action" | "all" | "requests";
-
-const KIND_LABEL: Record<string, string> = {
-  late: "Late",
-  offsite: "Off-site",
-  checkin: "Check-in",
-  travel: "Travelling",
-  missed: "Missed",
-};
 
 function formatRelative(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -80,14 +70,12 @@ export function LiveFeedPanel() {
     setRequests((rs) => rs.filter((x) => x.id !== r.id));
   };
 
+  // "Needs action" and "All activity" tabs depend on a shift_events log
+  // table that doesn't exist yet (deferred). They render empty states
+  // until that lands. "Requests" is real and live.
   const tabs: { key: TabKey; label: string; count: number; tone?: string }[] = [
-    {
-      key: "needs-action",
-      label: "Needs action",
-      count: EXCEPTIONS.length,
-      tone: AC.danger,
-    },
-    { key: "all", label: "All activity", count: FEED.length },
+    { key: "needs-action", label: "Needs action", count: 0 },
+    { key: "all", label: "All activity", count: 0 },
     {
       key: "requests",
       label: "Requests",
@@ -204,152 +192,45 @@ export function LiveFeedPanel() {
 
 function NeedsActionList() {
   return (
-    <div style={{ padding: "8px 10px 6px", background: "#FFF8F6" }}>
-      {EXCEPTIONS.map((e, i) => {
-        const rep = getRep(e.repId);
-        if (!rep) return null;
-        return (
-          <div
-            key={e.id}
-            style={{
-              padding: 10,
-              marginBottom: i === EXCEPTIONS.length - 1 ? 0 : 6,
-              background: "#fff",
-              border: `1px solid ${AC.line}`,
-              borderLeft: `3px solid ${AC.danger}`,
-              borderRadius: 8,
-              display: "flex",
-              gap: 10,
-              alignItems: "flex-start",
-            }}
-          >
-            <RepAvatar rep={rep} size={28} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  marginBottom: 3,
-                  flexWrap: "wrap",
-                  lineHeight: 1.15,
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    color: AC.ink,
-                    letterSpacing: -0.1,
-                  }}
-                >
-                  {rep.name}
-                </span>
-                <span
-                  style={{
-                    padding: "2px 6px",
-                    borderRadius: 99,
-                    background: AC.dangerTint,
-                    color: AC.danger,
-                    fontFamily: AC.font,
-                    fontSize: 9.5,
-                    fontWeight: 700,
-                    letterSpacing: 0.4,
-                    textTransform: "uppercase",
-                    lineHeight: 1.2,
-                  }}
-                >
-                  {KIND_LABEL[e.kind]}
-                </span>
-                <div style={{ flex: 1 }} />
-                <span
-                  style={{
-                    fontFamily: AC.fontMono,
-                    fontSize: 10.5,
-                    color: AC.hint,
-                    fontWeight: 600,
-                  }}
-                >
-                  {e.ts}
-                </span>
-              </div>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 11.5,
-                  color: AC.ink2,
-                  lineHeight: 1.45,
-                  fontWeight: 500,
-                }}
-              >
-                {e.text}
-              </div>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 10.5,
-                  color: AC.mute,
-                  marginTop: 2,
-                }}
-              >
-                {e.meta}
-              </div>
-              <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
-                <Btn size="sm" kind="primary">Resolve</Btn>
-                <Btn size="sm">Message</Btn>
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <EmptyTab
+      title="No issues right now"
+      sub="Late check-ins, off-site exceptions, and stalled shifts will appear here once the event log is wired (deferred)."
+    />
   );
 }
 
 function AllActivityList() {
   return (
-    <div style={{ padding: "10px 12px" }}>
-      {FEED.map((f, i) => {
-        const rep = getRep(f.repId);
-        return (
-          <div
-            key={`${f.ts}-${f.repId}-${i}`}
-            style={{
-              padding: "8px 4px",
-              borderBottom: i < FEED.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-              display: "flex",
-              gap: 10,
-              alignItems: "flex-start",
-            }}
-          >
-            {rep && <RepAvatar rep={rep} size={24} />}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 12,
-                  color: AC.ink,
-                  fontWeight: 500,
-                }}
-              >
-                {f.msg}
-              </div>
-              <div
-                style={{
-                  fontFamily: AC.fontMono,
-                  fontSize: 10.5,
-                  color: AC.hint,
-                  marginTop: 2,
-                  fontWeight: 600,
-                }}
-              >
-                {f.ts}
-              </div>
-            </div>
-          </div>
-        );
-      })}
+    <EmptyTab
+      title="No activity yet"
+      sub="Check-ins, claims, and completions will stream here once the event log is wired (deferred)."
+    />
+  );
+}
+
+function EmptyTab({ title, sub }: { title: string; sub: string }) {
+  return (
+    <div
+      style={{
+        padding: "32px 24px",
+        textAlign: "center",
+        background: "#fff",
+      }}
+    >
+      <div style={{ fontFamily: AC.font, fontSize: 13, fontWeight: 600, color: AC.ink2 }}>
+        {title}
+      </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11.5,
+          color: AC.mute,
+          marginTop: 6,
+          lineHeight: 1.5,
+        }}
+      >
+        {sub}
+      </div>
     </div>
   );
 }

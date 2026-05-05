@@ -1,31 +1,159 @@
+"use client";
+
+/**
+ * Admin Library page — real data.
+ *
+ * Lists every uploaded file in public.library_files (joined with the
+ * customer when one is associated). Upload pushes the file to Supabase
+ * Storage bucket "library" and inserts a metadata row. Click a file to
+ * open it via a short-lived signed URL.
+ */
+
+import { useEffect, useRef, useState } from "react";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
-import { SegTabs } from "@/components/ui/SegTabs";
-import { FilterChip } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
-import { CUSTOMERS } from "@/lib/mock-data";
+import { listCustomers } from "@/lib/customers-store";
+import {
+  listLibraryFiles,
+  uploadLibraryFile,
+  deleteLibraryFile,
+  getLibraryDownloadUrl,
+  formatFileSize,
+  type LibraryFile,
+} from "@/lib/library-store";
+import type { Customer } from "@/lib/types";
 
-const FILES = [
-  { name: "Onboarding handbook 2025.pdf", size: "2.4 MB", date: "12 May", custIdx: 0, type: "pdf" as const },
-  { name: "Cold-storage SOP v3.pdf", size: "880 KB", date: "11 May", custIdx: 2, type: "pdf" as const },
-  { name: "Site map — Aria HQ.png", size: "1.1 MB", date: "10 May", custIdx: 5, type: "img" as const },
-  { name: "Promotional standee guide.pdf", size: "3.7 MB", date: "08 May", custIdx: 4, type: "pdf" as const },
-  { name: "Uniform standards.pdf", size: "510 KB", date: "02 May", custIdx: -1, type: "pdf" as const },
-  { name: "Weekly checklist template.xlsx", size: "74 KB", date: "28 Apr", custIdx: 6, type: "xls" as const },
-  { name: "Loading-bay photos · folder", size: "24 files", date: "27 Apr", custIdx: 6, type: "folder" as const },
-  { name: "Vendor contact sheet.pdf", size: "120 KB", date: "20 Apr", custIdx: -1, type: "pdf" as const },
-];
+function fileGlyph(mime: string | null): GlyphName {
+  if (!mime) return "lib";
+  if (mime.startsWith("image/")) return "eye";
+  return "lib";
+}
+
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 export default function LibraryPage() {
+  const [files, setFiles] = useState<LibraryFile[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [filterCustomer, setFilterCustomer] = useState<string>("All");
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingCustomer, setPendingCustomer] = useState<string>("");
+
+  const reload = () => {
+    listLibraryFiles().then((rows) => {
+      setFiles(rows);
+      setLoaded(true);
+    });
+  };
+
+  useEffect(() => {
+    reload();
+    listCustomers().then(setCustomers);
+  }, []);
+
+  const onUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-upload of same file later
+    if (!file) return;
+
+    setUploading(true);
+    const result = await uploadLibraryFile(file, {
+      customerId: pendingCustomer || null,
+    });
+    setUploading(false);
+    if (!result.ok) {
+      alert(`Upload failed: ${result.error}`);
+      return;
+    }
+    setPendingCustomer("");
+    reload();
+  };
+
+  const onOpen = async (f: LibraryFile) => {
+    const r = await getLibraryDownloadUrl(f.storagePath);
+    if (!r.ok || !r.url) {
+      alert(`Couldn't generate download link: ${r.error}`);
+      return;
+    }
+    window.open(r.url, "_blank", "noopener,noreferrer");
+  };
+
+  const onDelete = async (f: LibraryFile) => {
+    if (!confirm(`Delete "${f.name}"? This removes the file from storage.`)) {
+      return;
+    }
+    setBusyId(f.id);
+    const r = await deleteLibraryFile(f);
+    setBusyId(null);
+    if (!r.ok) {
+      alert(`Couldn't delete: ${r.error}`);
+      return;
+    }
+    setFiles((arr) => arr.filter((x) => x.id !== f.id));
+  };
+
+  const filtered =
+    filterCustomer === "All"
+      ? files
+      : filterCustomer === "Shared"
+      ? files.filter((f) => !f.customerId)
+      : files.filter((f) => f.customerId === filterCustomer);
+
   return (
     <AdminShell
       breadcrumbs={["Home", "Library"]}
       actions={
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn icon="plus" size="sm">New folder</Btn>
-          <Btn icon="upload" kind="primary" size="sm">Upload</Btn>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select
+            value={pendingCustomer}
+            onChange={(e) => setPendingCustomer(e.target.value)}
+            disabled={uploading}
+            style={{
+              padding: "6px 10px",
+              borderRadius: 8,
+              border: `1px solid ${AC.line}`,
+              background: "#fff",
+              fontFamily: AC.font,
+              fontSize: 12,
+              color: AC.ink,
+              cursor: "pointer",
+            }}
+            title="Optionally tag uploads to a customer"
+          >
+            <option value="">Shared with all</option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>
+                For {c.name}
+              </option>
+            ))}
+          </select>
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={onFilePicked}
+            style={{ display: "none" }}
+          />
+          <Btn
+            kind="primary"
+            size="sm"
+            onClick={onUploadClick}
+            disabled={uploading}
+          >
+            {uploading ? "Uploading…" : "Upload file"}
+          </Btn>
         </div>
       }
     >
@@ -38,6 +166,7 @@ export default function LibraryPage() {
           alignItems: "start",
         }}
       >
+        {/* Sidebar filter */}
         <Card padding={10}>
           <div
             style={{
@@ -52,287 +181,331 @@ export default function LibraryPage() {
           >
             Library
           </div>
-          {[
-            { name: "All files", icon: "lib" as GlyphName, count: 247, active: true },
-            { name: "Shared with all", icon: "reps" as GlyphName, count: 18 },
-            { name: "Drafts", icon: "edit" as GlyphName, count: 4 },
-            { name: "Recently uploaded", icon: "clock" as GlyphName, count: 12 },
-          ].map((f) => (
-            <FolderItem key={f.name} {...f} />
-          ))}
-          <div style={{ height: 1, background: AC.line, margin: "8px 4px" }} />
+          <SidebarItem
+            icon="lib"
+            name="All files"
+            count={files.length}
+            active={filterCustomer === "All"}
+            onClick={() => setFilterCustomer("All")}
+          />
+          <SidebarItem
+            icon="reps"
+            name="Shared with all"
+            count={files.filter((f) => !f.customerId).length}
+            active={filterCustomer === "Shared"}
+            onClick={() => setFilterCustomer("Shared")}
+          />
           <div
             style={{
+              padding: "10px 8px 4px",
               fontFamily: AC.font,
               fontSize: 10.5,
               color: AC.mute,
               fontWeight: 700,
               letterSpacing: 0.4,
               textTransform: "uppercase",
-              padding: "6px 8px",
             }}
           >
             By customer
           </div>
-          {CUSTOMERS.slice(0, 5).map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 9,
-                padding: "7px 8px",
-                borderRadius: 6,
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                width: "100%",
-                textAlign: "left",
-              }}
-            >
-              <div style={{ width: 16, height: 16, borderRadius: 4, background: c.color }} />
-              <div
-                style={{
-                  flex: 1,
-                  fontFamily: AC.font,
-                  fontSize: 12,
-                  color: AC.ink2,
-                  fontWeight: 500,
-                }}
-              >
-                {c.name}
-              </div>
-              <div style={{ fontFamily: AC.font, fontSize: 10.5, color: AC.mute }}>
-                {c.shiftsThisWeek}
-              </div>
-            </button>
-          ))}
+          {customers.map((c) => {
+            const count = files.filter((f) => f.customerId === c.id).length;
+            if (count === 0) return null;
+            return (
+              <SidebarItem
+                key={c.id}
+                icon="customer"
+                name={c.name}
+                count={count}
+                active={filterCustomer === c.id}
+                onClick={() => setFilterCustomer(c.id)}
+              />
+            );
+          })}
         </Card>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Card padding={12}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <FilterChip active>All types</FilterChip>
-              <FilterChip>PDFs</FilterChip>
-              <FilterChip>Images</FilterChip>
-              <FilterChip>Spreadsheets</FilterChip>
-              <div style={{ flex: 1 }} />
-              <SegTabs tabs={["Grid", "List"]} active="List" />
-            </div>
-          </Card>
-          <Card padding={0}>
+        {/* File table */}
+        <Card padding={0}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "2.4fr 1.4fr 100px 100px 60px",
+              gap: 14,
+              padding: "10px 16px",
+              background: AC.bg,
+              borderBottom: `1px solid ${AC.line}`,
+              fontFamily: AC.font,
+              fontSize: 11,
+              color: AC.mute,
+              fontWeight: 600,
+              letterSpacing: 0.3,
+              textTransform: "uppercase",
+            }}
+          >
+            <div>Name</div>
+            <div>Customer</div>
+            <div>Size</div>
+            <div>Uploaded</div>
+            <div></div>
+          </div>
+
+          {!loaded ? (
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "36px 2.4fr 1.4fr 100px 100px 36px",
-                gap: 14,
-                padding: "10px 16px",
-                background: AC.bg,
-                borderBottom: `1px solid ${AC.line}`,
+                padding: 28,
                 fontFamily: AC.font,
-                fontSize: 11,
+                fontSize: 13,
                 color: AC.mute,
-                fontWeight: 600,
-                letterSpacing: 0.3,
-                textTransform: "uppercase",
+                textAlign: "center",
               }}
             >
-              <div></div>
-              <div>Name</div>
-              <div>Shared with</div>
-              <div>Size</div>
-              <div>Modified</div>
-              <div></div>
+              Loading library…
             </div>
-            {FILES.map((f, i) => {
-              const cust = f.custIdx >= 0 ? CUSTOMERS[f.custIdx] : null;
-              return (
-                <div
-                  key={i}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "36px 2.4fr 1.4fr 100px 100px 36px",
-                    gap: 14,
-                    alignItems: "center",
-                    padding: "11px 16px",
-                    borderBottom: `1px solid ${AC.lineDim}`,
-                  }}
-                >
-                  <FileIcon type={f.type} />
+          ) : filtered.length === 0 ? (
+            <div
+              style={{
+                padding: 36,
+                fontFamily: AC.font,
+                fontSize: 13,
+                color: AC.mute,
+                textAlign: "center",
+              }}
+            >
+              {files.length === 0 ? (
+                <>
+                  No files uploaded yet.
+                  <br />
+                  <span style={{ fontSize: 11.5 }}>
+                    Click <b style={{ color: AC.ink2 }}>Upload file</b> to add one.
+                  </span>
+                </>
+              ) : (
+                "No files match this filter."
+              )}
+            </div>
+          ) : (
+            filtered.map((f) => (
+              <div
+                key={f.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "2.4fr 1.4fr 100px 100px 60px",
+                  gap: 14,
+                  alignItems: "center",
+                  padding: "12px 16px",
+                  borderBottom: `1px solid ${AC.lineDim}`,
+                  background: "#fff",
+                  cursor: "pointer",
+                }}
+                onClick={() => onOpen(f)}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                   <div
                     style={{
-                      fontFamily: AC.font,
-                      fontSize: 13,
-                      color: AC.ink,
-                      fontWeight: 600,
-                      letterSpacing: -0.1,
-                    }}
-                  >
-                    {f.name}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {cust ? (
-                      <>
-                        <div
-                          style={{
-                            width: 18,
-                            height: 18,
-                            borderRadius: 4,
-                            background: cust.color,
-                            color: "#fff",
-                            fontFamily: AC.font,
-                            fontSize: 8,
-                            fontWeight: 700,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                          }}
-                        >
-                          {cust.initials}
-                        </div>
-                        <div
-                          style={{
-                            fontFamily: AC.font,
-                            fontSize: 11.5,
-                            color: AC.ink2,
-                            fontWeight: 500,
-                          }}
-                        >
-                          {cust.name}
-                        </div>
-                      </>
-                    ) : (
-                      <span
-                        style={{
-                          padding: "1px 8px",
-                          borderRadius: 99,
-                          background: AC.brandSoft,
-                          color: AC.brandInk,
-                          fontFamily: AC.font,
-                          fontSize: 10.5,
-                          fontWeight: 700,
-                        }}
-                      >
-                        All reps
-                      </span>
-                    )}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 11.5,
-                      color: AC.mute,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {f.size}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 11.5,
-                      color: AC.mute,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {f.date}
-                  </div>
-                  <button
-                    type="button"
-                    style={{
-                      width: 26,
-                      height: 26,
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
+                      width: 30,
+                      height: 30,
+                      borderRadius: 7,
+                      background: AC.brandSoft,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
+                      flexShrink: 0,
                     }}
                   >
-                    <AGlyph name="more" size={16} color={AC.mute} />
+                    <AGlyph name={fileGlyph(f.mimeType)} size={15} color={AC.brandDeep} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontFamily: AC.font,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: AC.ink,
+                        letterSpacing: -0.1,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {f.name}
+                    </div>
+                    {f.mimeType && (
+                      <div
+                        style={{
+                          fontFamily: AC.font,
+                          fontSize: 11,
+                          color: AC.mute,
+                          marginTop: 2,
+                        }}
+                      >
+                        {f.mimeType}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  {f.customerColor && f.customerInitials ? (
+                    <>
+                      <div
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: 5,
+                          background: f.customerColor,
+                          color: "#fff",
+                          fontFamily: AC.font,
+                          fontSize: 9,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {f.customerInitials}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: AC.font,
+                          fontSize: 12,
+                          color: AC.ink2,
+                          fontWeight: 500,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {f.customerName}
+                      </div>
+                    </>
+                  ) : (
+                    <span
+                      style={{
+                        fontFamily: AC.font,
+                        fontSize: 11,
+                        color: AC.mute,
+                        fontStyle: "italic",
+                      }}
+                    >
+                      Shared with all
+                    </span>
+                  )}
+                </div>
+                <div
+                  style={{
+                    fontFamily: AC.fontMono,
+                    fontSize: 12,
+                    color: AC.ink2,
+                    fontWeight: 600,
+                  }}
+                >
+                  {formatFileSize(f.sizeBytes)}
+                </div>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 12,
+                    color: AC.mute,
+                    fontWeight: 500,
+                  }}
+                >
+                  {shortDate(f.uploadedAt)}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(f);
+                    }}
+                    disabled={busyId === f.id}
+                    title="Delete file"
+                    aria-label="Delete file"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      background: "transparent",
+                      border: "none",
+                      cursor: busyId === f.id ? "not-allowed" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      opacity: busyId === f.id ? 0.4 : 1,
+                    }}
+                  >
+                    <AGlyph name="x" size={14} color={AC.mute} />
                   </button>
                 </div>
-              );
-            })}
-          </Card>
-        </div>
+              </div>
+            ))
+          )}
+        </Card>
       </div>
     </AdminShell>
   );
 }
 
-function FolderItem({
-  name,
+function SidebarItem({
   icon,
+  name,
   count,
   active,
+  onClick,
 }: {
-  name: string;
   icon: GlyphName;
+  name: string;
   count: number;
-  active?: boolean;
+  active: boolean;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
+      onClick={onClick}
       style={{
+        width: "100%",
         display: "flex",
         alignItems: "center",
         gap: 9,
-        padding: "7px 8px",
-        borderRadius: 6,
+        padding: "8px 10px",
         background: active ? AC.brandSoft : "transparent",
         border: "none",
+        borderRadius: 8,
         cursor: "pointer",
-        width: "100%",
+        color: active ? AC.brandInk : AC.ink2,
+        fontFamily: AC.font,
+        fontSize: 12.5,
+        fontWeight: active ? 600 : 500,
+        letterSpacing: -0.1,
         textAlign: "left",
+        marginTop: 2,
       }}
     >
       <AGlyph name={icon} size={14} color={active ? AC.brandDeep : AC.mute} />
-      <div
+      <span
         style={{
           flex: 1,
-          fontFamily: AC.font,
-          fontSize: 12,
-          color: active ? AC.brandInk : AC.ink2,
-          fontWeight: active ? 700 : 500,
+          minWidth: 0,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
         }}
       >
         {name}
-      </div>
-      <div style={{ fontFamily: AC.font, fontSize: 10.5, color: AC.mute }}>{count}</div>
+      </span>
+      <span
+        style={{
+          padding: "1px 7px",
+          borderRadius: 99,
+          background: AC.bg,
+          color: AC.mute,
+          fontSize: 10.5,
+          fontWeight: 700,
+        }}
+      >
+        {count}
+      </span>
     </button>
-  );
-}
-
-function FileIcon({ type }: { type: "pdf" | "img" | "xls" | "folder" }) {
-  const map = {
-    pdf: { bg: "#FCE6E8", fg: "#B22D38", label: "PDF" },
-    img: { bg: "#E2F1FA", fg: "#1B6BA8", label: "IMG" },
-    xls: { bg: "#DEF2E5", fg: "#1F7A48", label: "XLS" },
-    folder: { bg: "#FFF3D7", fg: "#A37404", label: "📁" },
-  } as const;
-  const m = map[type] || map.pdf;
-  return (
-    <div
-      style={{
-        width: 28,
-        height: 28,
-        borderRadius: 6,
-        background: m.bg,
-        color: m.fg,
-        fontFamily: AC.font,
-        fontSize: 9.5,
-        fontWeight: 800,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        letterSpacing: 0.2,
-      }}
-    >
-      {m.label}
-    </div>
   );
 }

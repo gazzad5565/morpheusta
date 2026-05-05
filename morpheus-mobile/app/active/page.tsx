@@ -1,14 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
-import {
-  ACTIVE_SAMPLE_TASKS,
-  ACTIVE_SAMPLE_BREAKS,
-  SAMPLE,
-  type Task,
-} from "@/lib/mock-data";
+import { type Task } from "@/lib/mock-data";
 import {
   AppHeader,
   AppFooter,
@@ -17,11 +12,77 @@ import {
 } from "@/components/Chrome";
 import { Glyph, formatTime, type GlyphName } from "@/components/Glyph";
 import { startLocationTracking } from "@/lib/location-tracker";
+import {
+  getMyActiveShift,
+  getTasksForCustomer,
+  type TaskRow,
+} from "@/lib/shifts-store";
+
+interface ShiftData {
+  name: string;
+  initials: string;
+  color: string;
+  code: number;
+  distance: string;
+  checkInAt: string | null;
+  customerId: string;
+}
 
 export default function ActiveShiftPage() {
   const router = useRouter();
-  const shift = SAMPLE.shifts[0];
-  const [shiftStartTs] = useState(() => Date.now() - 5 * 60 * 1000);
+
+  const [shiftData, setShiftData] = useState<ShiftData | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loadedShift, setLoadedShift] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const s = await getMyActiveShift();
+      if (cancelled) return;
+      if (!s) {
+        setLoadedShift(true);
+        return;
+      }
+      setShiftData({
+        name: s.name,
+        initials: s.initials,
+        color: s.color,
+        code: s.code,
+        distance: s.distance,
+        checkInAt: s.checkInAt,
+        customerId: s.id,
+      });
+      setLoadedShift(true);
+      const rows = await getTasksForCustomer(s.id);
+      if (cancelled) return;
+      setTasks(
+        rows.map((r: TaskRow): Task => ({
+          id: r.id,
+          name: r.name,
+          duration: r.duration_min,
+          compulsory: r.compulsory,
+          description: r.description ?? "",
+        }))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const shift = shiftData;
+  // Anchor the timer to the real check-in time when we have it. While the
+  // fetch is in flight (or there's no active shift) fall back to "5 min
+  // ago" so the timer renders something sensible.
+  const shiftStartTs = useMemo(() => {
+    if (shiftData?.checkInAt) {
+      const t = new Date(shiftData.checkInAt).getTime();
+      if (!Number.isNaN(t)) return t;
+    }
+    return Date.now() - 5 * 60 * 1000;
+  }, [shiftData?.checkInAt]);
+
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [activeTaskStartedAt, setActiveTaskStartedAt] = useState<number | null>(null);
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
@@ -48,13 +109,82 @@ export default function ActiveShiftPage() {
   const mm = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
 
-  const tasks = ACTIVE_SAMPLE_TASKS;
-  const breaks = ACTIVE_SAMPLE_BREAKS;
+  // Breaks are not yet a DB feature; the rep can't see/use them until that
+  // arrives. Empty for now.
+  const breaks: Task[] = [];
   const compulsory = tasks.filter((t) => t.compulsory);
   const available = tasks.filter((t) => !t.compulsory);
   const compulsoryDone = compulsory.every((t) => completedTaskIds.includes(t.id));
   const completeCount = completedTaskIds.length;
   const totalCount = tasks.length;
+
+  // No active shift → guide the rep back to /shifts. Shows while the fetch
+  // is in flight too, so we don't briefly render placeholder customer info.
+  if (!shift) {
+    return (
+      <div style={{ background: MC.bg, minHeight: "100%" }}>
+        <AppHeader title="Shift Dashboard" onBack={() => router.push("/")} />
+        <div style={{ padding: "32px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div
+            style={{
+              background: MC.card,
+              border: `1px dashed ${MC.line}`,
+              borderRadius: MC.radiusCard,
+              padding: 28,
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: MC.fontDisplay,
+                fontSize: 18,
+                fontWeight: 700,
+                color: MC.ink,
+                letterSpacing: -0.3,
+              }}
+            >
+              {loadedShift ? "No active shift" : "Loading…"}
+            </div>
+            {loadedShift && (
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 13,
+                  color: MC.mute,
+                  marginTop: 8,
+                  lineHeight: 1.5,
+                }}
+              >
+                Check in to a shift first. Open <b>Today&apos;s shifts</b> and tap one to begin.
+              </div>
+            )}
+          </div>
+          {loadedShift && (
+            <button
+              type="button"
+              onClick={() => router.push("/shifts")}
+              style={{
+                marginTop: 6,
+                padding: "12px 16px",
+                borderRadius: 12,
+                border: "none",
+                background: MC.brand,
+                color: "#fff",
+                fontFamily: MC.font,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                boxShadow: `0 6px 18px ${MC.brand}55`,
+              }}
+            >
+              Go to Today&apos;s shifts
+            </button>
+          )}
+        </div>
+        <AppFooter />
+      </div>
+    );
+  }
 
   const startTask = () => {
     if (!openSheet) return;

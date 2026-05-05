@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
-import { SAMPLE, ACTIVE_SAMPLE_TASKS, type Shift } from "@/lib/mock-data";
+import { type Shift } from "@/lib/mock-data";
 import {
   AppHeader,
   AppFooter,
@@ -14,7 +14,11 @@ import {
 } from "@/components/Chrome";
 import { Glyph, type GlyphName } from "@/components/Glyph";
 import { clearRepLocation } from "@/lib/location-tracker";
-import { getMyActiveShift, checkOutOfShift } from "@/lib/shifts-store";
+import {
+  getMyActiveShift,
+  checkOutOfShift,
+  getTasksForCustomer,
+} from "@/lib/shifts-store";
 
 const OFFSITE_REASONS = [
   "Wrong location pinned",
@@ -43,30 +47,37 @@ function CheckOutPage() {
   const params = useSearchParams();
 
   // Fetch the rep's currently in-progress shift so we know which row to
-  // mark complete. Falls back to the mock customer for display while the
-  // fetch is in flight.
+  // mark complete and which tasks were required at this customer.
   const [shift, setShift] = useState<
-    (Shift & { realId: string; repId: string | null }) | null
+    (Shift & { realId: string; repId: string | null; checkInAt: string | null }) | null
   >(null);
+  const [shiftLoaded, setShiftLoaded] = useState(false);
+  const [compulsoryTaskIds, setCompulsoryTaskIds] = useState<string[]>([]);
   useEffect(() => {
     let cancelled = false;
-    getMyActiveShift().then((s) => {
-      if (!cancelled) setShift(s);
-    });
+    (async () => {
+      const s = await getMyActiveShift();
+      if (cancelled) return;
+      setShift(s);
+      setShiftLoaded(true);
+      if (s) {
+        const tasks = await getTasksForCustomer(s.id);
+        if (cancelled) return;
+        setCompulsoryTaskIds(tasks.filter((t) => t.compulsory).map((t) => t.id));
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
-  const displayShift = shift ?? SAMPLE.shifts[0];
 
   // Read completed task IDs from URL (set by /active page on Check Out tap).
   const completedIds = (params.get("completed") || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const compulsoryTasks = ACTIVE_SAMPLE_TASKS.filter((t) => t.compulsory);
-  const compulsoryRemaining = compulsoryTasks.filter(
-    (t) => !completedIds.includes(t.id)
+  const compulsoryRemaining = compulsoryTaskIds.filter(
+    (id) => !completedIds.includes(id)
   );
   const compulsoryDone = compulsoryRemaining.length === 0;
 
@@ -109,6 +120,33 @@ function CheckOutPage() {
     router.push(`/summary?${params.toString()}`);
   };
 
+  // No active shift to check out of — guide the rep back. Also covers the
+  // brief "still loading" gap (shows "Loading…" until the fetch resolves).
+  if (!shift) {
+    return (
+      <div style={{ background: MC.bg, minHeight: "100%" }}>
+        <AppHeader title="Check Out" onBack={() => router.push("/")} />
+        <div style={{ padding: "32px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div
+            style={{
+              background: MC.card,
+              border: `1px dashed ${MC.line}`,
+              borderRadius: MC.radiusCard,
+              padding: 28,
+              textAlign: "center",
+              fontFamily: MC.font,
+              fontSize: 14,
+              color: MC.ink2,
+            }}
+          >
+            {shiftLoaded ? "No active shift to check out of." : "Loading…"}
+          </div>
+        </div>
+        <AppFooter />
+      </div>
+    );
+  }
+
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
       <AppHeader title="Check Out" onBack={() => router.back()} />
@@ -125,7 +163,7 @@ function CheckOutPage() {
             gap: 12,
           }}
         >
-          <CustomerTile initials={displayShift.initials} color={displayShift.color} size={44} />
+          <CustomerTile initials={shift.initials} color={shift.color} size={44} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{
@@ -148,7 +186,7 @@ function CheckOutPage() {
                 letterSpacing: -0.3,
               }}
             >
-              {displayShift.name}
+              {shift.name}
             </div>
           </div>
         </div>
@@ -204,8 +242,8 @@ function CheckOutPage() {
                 }}
               >
                 Finish all required tasks before checking out.{" "}
-                <b>{compulsoryRemaining.length} remaining:</b>{" "}
-                {compulsoryRemaining.map((t) => t.name).join(", ")}.
+                <b>{compulsoryRemaining.length} remaining</b>. Head back to your active shift to
+                finish them, then return here to check out.
               </div>
               <button
                 type="button"
@@ -236,7 +274,7 @@ function CheckOutPage() {
       )}
 
       <div style={{ padding: "12px 16px 0" }}>
-        <FauxMap pinColor={displayShift.color} />
+        <FauxMap pinColor={shift.color} />
         <div
           style={{
             marginTop: 8,
@@ -246,7 +284,7 @@ function CheckOutPage() {
             padding: "0 4px",
           }}
         >
-          You&apos;re checking out <b style={{ color: MC.ink }}>3 km</b> away from {displayShift.name}&apos;s
+          You&apos;re checking out <b style={{ color: MC.ink }}>3 km</b> away from {shift.name}&apos;s
           location.
         </div>
       </div>

@@ -7,13 +7,16 @@ import { AGlyph } from "./AGlyph";
 export function FilterChip({
   children,
   active,
+  onClick,
 }: {
   children: React.ReactNode;
   active?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <button
       type="button"
+      onClick={onClick}
       style={{
         padding: "6px 12px",
         borderRadius: 99,

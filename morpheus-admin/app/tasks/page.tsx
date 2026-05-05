@@ -1,44 +1,135 @@
+"use client";
+
+/**
+ * Admin Tasks page — real data.
+ *
+ * Lists every task across all customers (joined with customer info).
+ * Filters: All / By customer (dropdown). Each row has a delete action
+ * via a "more" menu placeholder — kept inline for v1 with a confirm
+ * dialog. New tasks come from /tasks/new.
+ *
+ * Mobile uses these tasks on /active during a shift at a given customer.
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
-import { FilterChip, FilterDropdown, CB } from "@/components/ui/Filters";
+import { FilterChip, FilterDropdown } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
-
-const TASKS = [
-  { name: "Stock count — back office shelves", cust: "GreenWave Innovations", initials: "GW", color: "#D9493D", frequency: "Every shift", est: "15m", requires: ["Photo"], runs: 124 },
-  { name: "Photograph entrance display", cust: "NextGenTech", initials: "NG", color: "#E2A434", frequency: "Daily", est: "5m", requires: ["Photo"], runs: 98 },
-  { name: "Inspect cold-storage temp log", cust: "OptimaSolutions", initials: "OS", color: "#2E9C82", frequency: "Every shift", est: "10m", requires: ["Photo", "Signature"], runs: 211 },
-  { name: "Refill point-of-sale brochures", cust: "OptimaSolutions", initials: "OS", color: "#2E9C82", frequency: "Weekly", est: "8m", requires: [] as string[], runs: 64 },
-  { name: "Verify safety signage in aisle 3", cust: "SiteB Logistics", initials: "SB", color: "#2E4FB8", frequency: "Monthly", est: "12m", requires: ["Photo", "Note"], runs: 18 },
-  { name: "Customer feedback form — 5 entries", cust: "Aria Cosmetics", initials: "AC", color: "#8E4ECC", frequency: "Every shift", est: "25m", requires: ["Form"], runs: 156 },
-  { name: "Loading-bay sweep & photo", cust: "Highmark Retail", initials: "HM", color: "#1FA971", frequency: "Every shift", est: "6m", requires: ["Photo"], runs: 287 },
-  { name: "Replace promotional standee", cust: "Protonix", initials: "PR", color: "#C55A2E", frequency: "Bi-weekly", est: "20m", requires: ["Photo", "Signature"], runs: 28 },
-];
+import { listAllTasks, deleteTask, type TaskRow } from "@/lib/tasks-store";
 
 export default function TasksPage() {
+  const [rows, setRows] = useState<TaskRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<"all" | "compulsory" | "optional">(
+    "all"
+  );
+  const [customerFilter, setCustomerFilter] = useState<string>("All");
+
+  const reload = () => {
+    listAllTasks().then((r) => {
+      setRows(r);
+      setLoaded(true);
+    });
+  };
+  useEffect(() => {
+    reload();
+  }, []);
+
+  const customers = useMemo(() => {
+    const set = new Map<string, string>();
+    for (const r of rows) {
+      if (r.customers) set.set(r.customers.id, r.customers.name);
+    }
+    return Array.from(set.entries()).map(([id, name]) => ({ id, name }));
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    return rows.filter((r) => {
+      if (activeFilter === "compulsory" && !r.compulsory) return false;
+      if (activeFilter === "optional" && r.compulsory) return false;
+      if (customerFilter !== "All" && r.customers?.id !== customerFilter) return false;
+      return true;
+    });
+  }, [rows, activeFilter, customerFilter]);
+
+  const onDelete = async (t: TaskRow) => {
+    if (!confirm(`Delete task "${t.name}" from ${t.customers?.name || "this customer"}?`)) {
+      return;
+    }
+    setBusyId(t.id);
+    const r = await deleteTask(t.id);
+    setBusyId(null);
+    if (!r.ok) {
+      alert(`Couldn't delete: ${r.error}`);
+      return;
+    }
+    setRows((rs) => rs.filter((x) => x.id !== t.id));
+  };
+
+  const compulsoryCount = rows.filter((r) => r.compulsory).length;
+  const optionalCount = rows.filter((r) => !r.compulsory).length;
+
   return (
     <AdminShell
       breadcrumbs={["Home", "Tasks"]}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          <Btn icon="lib" size="sm">Templates</Btn>
-          <Btn icon="plus" kind="primary" size="sm">New task</Btn>
+          <Link href="/tasks/new" style={{ textDecoration: "none" }}>
+            <Btn icon="plus" kind="primary" size="sm">
+              New task
+            </Btn>
+          </Link>
         </div>
       }
     >
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
         <Card padding={12}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <FilterChip active>
-              All <span style={{ color: AC.mute, fontWeight: 500 }}>· 247</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <FilterChip
+              active={activeFilter === "all"}
+              onClick={() => setActiveFilter("all")}
+            >
+              All <span style={{ color: AC.mute, fontWeight: 500 }}>· {rows.length}</span>
             </FilterChip>
-            <FilterChip>Active · 211</FilterChip>
-            <FilterChip>Drafts · 8</FilterChip>
-            <FilterChip>Archived</FilterChip>
+            <FilterChip
+              active={activeFilter === "compulsory"}
+              onClick={() => setActiveFilter("compulsory")}
+            >
+              Compulsory · {compulsoryCount}
+            </FilterChip>
+            <FilterChip
+              active={activeFilter === "optional"}
+              onClick={() => setActiveFilter("optional")}
+            >
+              Optional · {optionalCount}
+            </FilterChip>
             <div style={{ flex: 1 }} />
-            <FilterDropdown label="Customer" value="All" />
-            <FilterDropdown label="Frequency" value="Any" />
+            <select
+              value={customerFilter}
+              onChange={(e) => setCustomerFilter(e.target.value)}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: `1px solid ${AC.line}`,
+                background: "#fff",
+                fontFamily: AC.font,
+                fontSize: 12,
+                color: AC.ink,
+                cursor: "pointer",
+              }}
+            >
+              <option value="All">All customers</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
           </div>
         </Card>
 
@@ -46,7 +137,7 @@ export default function TasksPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "36px 2.4fr 1.4fr 1fr 90px 1fr 90px 36px",
+              gridTemplateColumns: "2.4fr 1.6fr 100px 100px 100px 60px",
               gap: 14,
               padding: "10px 16px",
               background: AC.bg,
@@ -59,148 +150,211 @@ export default function TasksPage() {
               textTransform: "uppercase",
             }}
           >
-            <div>
-              <input type="checkbox" style={CB} readOnly />
-            </div>
             <div>Task</div>
             <div>Customer</div>
-            <div>Frequency</div>
-            <div>Est.</div>
-            <div>Requires</div>
-            <div>Runs (30d)</div>
+            <div>Duration</div>
+            <div>Type</div>
+            <div>Order</div>
             <div></div>
           </div>
-          {TASKS.map((t, i) => (
+
+          {!loaded ? (
             <div
-              key={i}
               style={{
-                display: "grid",
-                gridTemplateColumns: "36px 2.4fr 1.4fr 1fr 90px 1fr 90px 36px",
-                gap: 14,
-                alignItems: "center",
-                padding: "12px 16px",
-                borderBottom: `1px solid ${AC.lineDim}`,
+                padding: 28,
+                fontFamily: AC.font,
+                fontSize: 13,
+                color: AC.mute,
+                textAlign: "center",
               }}
             >
-              <div>
-                <input type="checkbox" style={CB} readOnly />
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                <div
-                  style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 6,
-                    background: AC.brandSoft,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <AGlyph name="check" size={13} color={AC.brandDeep} />
-                </div>
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: AC.ink,
-                    letterSpacing: -0.1,
-                  }}
-                >
-                  {t.name}
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 5,
-                    background: t.color,
-                    color: "#fff",
-                    fontFamily: AC.font,
-                    fontSize: 9,
-                    fontWeight: 700,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  {t.initials}
-                </div>
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 12,
-                    color: AC.ink2,
-                    fontWeight: 500,
-                  }}
-                >
-                  {t.cust}
-                </div>
-              </div>
+              Loading tasks…
+            </div>
+          ) : filtered.length === 0 ? (
+            <div
+              style={{
+                padding: 36,
+                fontFamily: AC.font,
+                fontSize: 13,
+                color: AC.mute,
+                textAlign: "center",
+              }}
+            >
+              {rows.length === 0 ? (
+                <>
+                  No tasks defined yet.
+                  <br />
+                  <span style={{ fontSize: 11.5 }}>
+                    Click <b style={{ color: AC.ink2 }}>New task</b> to add one for a customer.
+                  </span>
+                </>
+              ) : (
+                "No tasks match this filter."
+              )}
+            </div>
+          ) : (
+            filtered.map((t) => (
               <div
-                style={{ fontFamily: AC.font, fontSize: 12, color: AC.ink2, fontWeight: 600 }}
-              >
-                {t.frequency}
-              </div>
-              <div
+                key={t.id}
                 style={{
-                  fontFamily: AC.fontMono,
-                  fontSize: 12,
-                  color: AC.ink2,
-                  fontWeight: 600,
+                  display: "grid",
+                  gridTemplateColumns: "2.4fr 1.6fr 100px 100px 100px 60px",
+                  gap: 14,
+                  alignItems: "center",
+                  padding: "12px 16px",
+                  borderBottom: `1px solid ${AC.lineDim}`,
+                  background: "#fff",
                 }}
               >
-                {t.est}
-              </div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {t.requires.length === 0 && (
-                  <span style={{ fontFamily: AC.font, fontSize: 11, color: AC.faint }}>
-                    —
-                  </span>
-                )}
-                {t.requires.map((r) => (
-                  <span
-                    key={r}
+                <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                  <div
                     style={{
-                      padding: "1px 6px",
-                      borderRadius: 99,
-                      background: AC.bg,
-                      border: `1px solid ${AC.line}`,
-                      color: AC.ink2,
-                      fontFamily: AC.font,
-                      fontSize: 10.5,
-                      fontWeight: 600,
+                      width: 26,
+                      height: 26,
+                      borderRadius: 6,
+                      background: t.compulsory ? AC.dangerTint : AC.brandSoft,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
                     }}
                   >
-                    {r}
+                    <AGlyph
+                      name="check"
+                      size={13}
+                      color={t.compulsory ? AC.danger : AC.brandDeep}
+                    />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontFamily: AC.font,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: AC.ink,
+                        letterSpacing: -0.1,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {t.name}
+                    </div>
+                    {t.description && (
+                      <div
+                        style={{
+                          fontFamily: AC.font,
+                          fontSize: 11.5,
+                          color: AC.mute,
+                          marginTop: 2,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {t.description}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  {t.customers && (
+                    <div
+                      style={{
+                        width: 22,
+                        height: 22,
+                        borderRadius: 5,
+                        background: t.customers.color,
+                        color: "#fff",
+                        fontFamily: AC.font,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {t.customers.initials}
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 12,
+                      color: AC.ink2,
+                      fontWeight: 500,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {t.customers?.name || t.customer_id}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    fontFamily: AC.fontMono,
+                    fontSize: 12,
+                    color: AC.ink2,
+                    fontWeight: 600,
+                  }}
+                >
+                  {t.duration_min}m
+                </div>
+                <div>
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 99,
+                      fontFamily: AC.font,
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: 0.3,
+                      textTransform: "uppercase",
+                      background: t.compulsory ? AC.dangerTint : AC.brandSoft,
+                      color: t.compulsory ? AC.danger : AC.brandDeep,
+                    }}
+                  >
+                    {t.compulsory ? "Compulsory" : "Optional"}
                   </span>
-                ))}
+                </div>
+                <div
+                  style={{
+                    fontFamily: AC.fontMono,
+                    fontSize: 12,
+                    color: AC.mute,
+                    fontWeight: 600,
+                  }}
+                >
+                  {t.sort_order}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(t)}
+                    disabled={busyId === t.id}
+                    title="Delete task"
+                    aria-label="Delete task"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      background: "transparent",
+                      border: "none",
+                      cursor: busyId === t.id ? "not-allowed" : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      opacity: busyId === t.id ? 0.4 : 1,
+                    }}
+                  >
+                    <AGlyph name="x" size={14} color={AC.mute} />
+                  </button>
+                </div>
               </div>
-              <div
-                style={{ fontFamily: AC.font, fontSize: 13, color: AC.ink, fontWeight: 700 }}
-              >
-                {t.runs}
-              </div>
-              <button
-                type="button"
-                style={{
-                  width: 26,
-                  height: 26,
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <AGlyph name="more" size={16} color={AC.mute} />
-              </button>
-            </div>
-          ))}
+            ))
+          )}
         </Card>
       </div>
     </AdminShell>
