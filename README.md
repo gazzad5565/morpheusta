@@ -94,23 +94,47 @@ No tests yet. No CI beyond Vercel auto-deploy on push to `main`.
 
 If you switch computers (or hand this project to a developer), this section is the complete onboarding. You shouldn't need anything that isn't here.
 
-### Where things stand right now (last session, 2026-05-05)
+### Where things stand right now (handover for tomorrow)
 
-**Working end-to-end on real data:**
-- Auth (signup/login/logout) — both apps
-- Admin: customers (create/edit/soft-delete), reps roster + per-rep page, schedule shifts (with optional rep assignment), Live Ops home (real-data KPIs + shifts table + field map with live customer/rep dots), Requests inbox (rep-requested shifts → admin approve/decline → schedule), Tasks library (universal or per-customer, edit + delete), Library file storage (categories + edit + delete), clickable breadcrumbs.
-- Mobile: dashboard (real shifts/date/library count + MapLibre route preview with today's customer pins + GPS dot), shifts list (state badges: scheduled / in-progress / complete; complete sinks to bottom dimmed; "Resume shift" CTA), check-in (writes `state='in-progress'` + `check_in_at`), active shift (real customer info + real per-customer + universal tasks + timer anchored to real check-in time), check-out (writes `state='complete'` + `tasks_done`, clears the rep's GPS dot).
+**Last commit:** `1ad5ee7` — "shift_events log + Live Feed merged & live; mobile breaks restored"
+**Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
+**Repo:** https://github.com/gazzad5565/morpheusta
 
-**You do NOT need to run any migration when you arrive on a new machine** — schema is on Supabase, code is on GitHub. Just clone + install + run.
+**Working end-to-end on real data (no mock fallbacks left in the rep flow):**
+- **Auth** (signup / login / logout) — both apps. Profile auto-created via `handle_new_user()` trigger on signup.
+- **Admin** — customers (create / edit / soft-delete + tabbed detail page with Address+geofence map / Reps editor / Tasks / Library / Today's shifts / Custom fields), reps roster + per-rep page (with Assigned customers editor), `/schedule` week-planner grid (real reps × 7 days), `/schedule/new` (multi-customer × recurring weekly = N shifts in one save), Live Ops home (realtime KPIs + shifts table + field map with live customer pins + green rep dots), Requests inbox (rep requests → Schedule pre-fills `/schedule/new` → on save deletes the request), Tasks library (Universal / Specific / Multi-customer at create time, edit + delete), Library storage (categories + multi-customer + edit + delete + signed-URL download), `/settings` Custom Fields CRUD (per-entity, 6 field types, required flag), clickable breadcrumbs everywhere.
+- **Mobile** — dashboard (real shifts / today's date / library count + MapLibre route preview with today's customer pins + rep GPS dot), shifts list (state badges: scheduled / in-progress / complete; complete dimmed + struck-through, sinks to bottom; "Resume shift" CTA on the active one), check-in (writes `state='in-progress'` + `check_in_at`), active shift (real customer info, real per-customer + universal tasks, timer anchored to real check-in time, standard 15/30/60-min break options), check-out (writes `state='complete'` + `tasks_done`; clears rep's GPS dot via Realtime).
+- **Realtime everywhere it matters:** KPIs + shifts table + field map rep dots + Live Feed (both tabs) all flip without a refresh. The Live Feed is just two tabs now: **Needs action** (pending requests) and **All activity** (the `shift_events` log).
+- **Activity log:** every CRUD action across both apps writes a row to `shift_events`. Reps tap "Request a customer" → admin sees it land in real time. Admin schedules → rep's `/shifts` updates and the event appears in the feed. And so on.
 
-**The migrations Gary already ran (do NOT re-run on the new machine — they're already applied to the shared Supabase project):**
-- All files in `db/migrations/` dated `2026_05_05_*.sql`. They're kept in the repo for posterity / fresh-environment setup. The shared cloud DB already has them.
+**You do NOT need to run any migration on the new machine** — schema lives on the shared Supabase project, code lives on GitHub. Just clone + `npm install` + `npm run dev`.
+
+**Migrations applied to the shared Supabase project (already in the cloud — DO NOT re-run on a new machine; only relevant for spinning up a brand-new Supabase environment):**
+| File in `db/migrations/` | What it does |
+|---|---|
+| `2026_05_05_customers_address_geo.sql` | `customers` gains `address`, `latitude`, `longitude` |
+| `2026_05_05_customers_active_flag.sql` | `customers.active` boolean (soft-delete) |
+| `2026_05_05_rep_locations.sql` | `rep_locations` table + RLS + Realtime publication |
+| `2026_05_05_rep_locations_self_delete.sql` | DELETE policy so check-out clears the dot |
+| `2026_05_05_requested_shifts_admin_access.sql` | open SELECT/UPDATE/DELETE on `requested_shifts` so admin can see + handle |
+| `2026_05_05_shifts_realtime.sql` | adds `shifts` to the `supabase_realtime` publication |
+| `2026_05_05_customer_tasks.sql` | `customer_tasks` table |
+| `2026_05_05_customer_tasks_nullable.sql` | makes `customer_tasks.customer_id` nullable (universal tasks) |
+| `2026_05_05_library.sql` | `library_files` table + Storage bucket "library" + RLS |
+| `2026_05_05_library_files_category.sql` | `library_files.category` + UPDATE policy |
+| `2026_05_05_library_multi_customer.sql` | swaps `library_files.customer_id` for `customer_ids text[]` |
+| `2026_05_05_rep_customer_assignments.sql` | rep ↔ customer many-to-many |
+| `2026_05_05_requested_shifts_realtime.sql` | adds `requested_shifts` to Realtime |
+| `2026_05_05_custom_fields.sql` | `custom_fields` definitions + `custom_field_values` polymorphic store |
+| `2026_05_05_customers_geofence_radius.sql` | `customers.geofence_radius_m` |
+| `2026_05_05_shift_events.sql` | central activity log + RLS + Realtime |
 
 **Top of the deferred list when you sit down tomorrow:**
-1. Phase 4 RLS by role (manager-only writes)
-2. Background location tracking (needs Capacitor)
-3. `shift_events` log table → real "Needs action" / "All activity" Live Feed tabs + KPI sparklines
-4. Per-shift task completion log (which tasks were done on which shift, not just a count)
+1. **Phase 4: tighten RLS by role.** Use `profiles.role = 'manager'` to gate INSERT/UPDATE/DELETE on `customers` / `shifts` / `customer_tasks` / `library_files` / `custom_fields`. Mobile reps wouldn't be able to write to these even if they tried.
+2. **Off-site / late event types.** Detect at write time in mobile `checkInToShift` (we already get `start_time` from the row + `Date.now()` at check-in + GPS distance from the customer) and log dedicated `shift.checked_in_late` / `shift.checked_in_offsite` event types with the deltas in `meta`.
+3. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Easy now that we have `shift_events` — daily aggregation query, render real lines.
+4. **Per-shift task completion log.** Currently only `shifts.tasks_done` (a count). A `shift_task_completions` join would record exactly which tasks the rep ticked off on a given shift.
+5. **Background location tracking.** GPS only updates while `/active` is foregrounded (browser limit). Needs Capacitor wrap or a service worker with `periodicSync`.
 
 See the full **Done vs Deferred** sections further down for detail.
 
@@ -588,7 +612,7 @@ These are the next obvious chunks of work, roughly in order of impact:
 3. **Off-site / late event types** — currently we log shift.checked_in/out/etc but don't yet emit dedicated "off-site check-in" or "late check-in" event types. Easy add: detect at write time in mobile/check-in and emit alongside the regular check-in event with the distance/lateness in `meta`.
 4. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Needs the event log above + a daily aggregation query.
 5. **Per-shift task completion log.** Customer tasks now flow rep ↔ admin, but *which tasks were done on which shift* is only counted (`shifts.tasks_done`), not stored row-by-row. A `shift_task_completions` join table would let the admin see exactly which tasks the rep ticked off on a given shift.
-6. **Edit existing tasks/library files.** v1 supports create + delete only. Add edit pages so admins can rename tasks, change duration, swap a customer association on a library file, etc.
+6. **Render custom fields on every entity's detail page.** The data model is universal — `applies_to` ∈ {`customer`, `rep`, `shift`, `task`, `library_file`} — but only `/customers/[id]` currently renders the `<CustomFieldsCard />`. Drop it into the rep / shift / task / library-file detail pages too.
 7. **Email confirmation** turned back on for production.
 8. **Promote `db/migrations/` to the Supabase CLI** so migrations apply automatically per environment instead of being pasted into the SQL Editor by hand.
 9. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.

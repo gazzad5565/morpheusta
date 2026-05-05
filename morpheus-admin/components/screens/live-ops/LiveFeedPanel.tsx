@@ -85,9 +85,14 @@ export function LiveFeedPanel() {
       setEvents(rows);
       setEventsLoaded(true);
     });
-    // Realtime: prepend new events as they arrive.
+    // Realtime: prepend new events as they arrive. Dedup by id so a
+    // race between the initial fetch and the realtime delivery can't
+    // cause a duplicate row.
     const unsub = subscribeEvents((newEvent) => {
-      setEvents((prev) => [newEvent, ...prev].slice(0, 50));
+      setEvents((prev) => {
+        if (prev.some((e) => e.id === newEvent.id)) return prev;
+        return [newEvent, ...prev].slice(0, 50);
+      });
     });
     return () => {
       cancelled = true;
