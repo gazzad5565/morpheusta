@@ -82,44 +82,117 @@ No tests yet. No CI beyond Vercel auto-deploy on push to `main`.
 
 ---
 
-## Local development
+## Working from another machine
 
-### Prereqs
-- Node.js 20+
-- npm
-- A copy of the Supabase env vars (URL + anon key)
+If you switch computers (or hand this project to a developer), this section is the complete onboarding. You shouldn't need anything that isn't here.
 
-### Setup
+### What's already in the cloud (no setup needed)
+
+| What | Where |
+|---|---|
+| Source code | https://github.com/gazzad5565/morpheusta |
+| Live admin app | https://morpheus-admin.vercel.app |
+| Live mobile app | https://morpheusta-khaki-omega.vercel.app |
+| Database + auth | https://supabase.com/dashboard/project/otweltzwwhrvhtvaqsci |
+| Hosting dashboard | https://vercel.com/gazzad-5313s-projects |
+
+If you just want to **use** the apps from another device, open the URLs above in any browser. Nothing to install.
+
+The rest of this section is only for when you want to **edit code or run a local dev server** from a new machine.
+
+### One-time tools to install
+
+1. **Node.js 20+** — https://nodejs.org/ (download the LTS version, install with defaults)
+2. **Git** — https://git-scm.com/ (preinstalled on Mac if you've ever opened Terminal)
+3. **A code editor** (optional but easier than nothing) — https://code.visualstudio.com/ or https://cursor.sh/
+
+To check it all worked, open Terminal and run:
+```bash
+node --version    # should print v20.x or higher
+git --version     # should print git version 2.x
+```
+
+### One-time account auth on the new machine
+
+You'll only do each of these once per machine:
+
+**GitHub** (so you can push code changes):
+- Easiest path: install GitHub CLI from https://cli.github.com/ then run `gh auth login` and follow the browser prompts.
+- Alternative: generate a Personal Access Token (classic) at github.com → Settings → Developer settings → Personal access tokens, tick the `repo` scope, and paste it when git asks for a password on first push.
+
+**Vercel** (so you can deploy from the command line):
+```bash
+npx vercel login
+```
+Opens a browser for auth. You'll need access to the email on the Vercel account.
+
+**Supabase** — just sign in at https://supabase.com/dashboard. No CLI needed for our day-to-day work; everything's done via the SQL Editor or auto from the apps.
+
+### Clone + first run
+
+Copy-paste this whole block into Terminal (it sets up both apps):
 
 ```bash
+# Pick a folder for the project — adjust if you want it elsewhere
+cd ~                                              # your home folder
 git clone https://github.com/gazzad5565/morpheusta.git
 cd morpheusta
 
-# Mobile app
+# --- Mobile app ---
 cd morpheus-mobile
+cat > .env.local <<'EOF'
+NEXT_PUBLIC_SUPABASE_URL=https://otweltzwwhrvhtvaqsci.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_w5trpMP3bFT4oCkFssbfIg_3W7W6oVd
+EOF
 npm install
-cp ../docs/.env.local.template .env.local   # then paste in your Supabase values
-npm run dev                                  # http://localhost:3000
 
-# In a separate terminal:
-cd morpheus-admin
+# --- Admin app ---
+cd ../morpheus-admin
+cat > .env.local <<'EOF'
+NEXT_PUBLIC_SUPABASE_URL=https://otweltzwwhrvhtvaqsci.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_w5trpMP3bFT4oCkFssbfIg_3W7W6oVd
+EOF
 npm install
-cp ../docs/.env.local.template .env.local
-npm run dev                                  # http://localhost:3001 (likely)
+
+cd ..
+echo "Done. To run:"
+echo "  cd morpheus-mobile && npm run dev    # http://localhost:3000"
+echo "  cd morpheus-admin && npm run dev     # http://localhost:3001 (likely)"
 ```
 
-### Required env vars (both apps)
+That's it — both apps are ready to run.
 
-Each app's `.env.local` needs:
+> ⚠️ The Supabase URL + anon key are designed to be public (the anon key is meant to be embedded in browser code). Security comes from the Row Level Security policies in Supabase, not from key secrecy. Don't commit the `.env.local` files regardless — they're gitignored.
+
+### Starting a fresh AI chat for help
+
+AI conversations (Claude, ChatGPT, etc.) don't follow you across devices or sessions. When you start a fresh chat to keep working on this project, give the AI context like this:
+
+1. Paste the GitHub URL: `https://github.com/gazzad5565/morpheusta` and ask the AI to read the README.
+2. **Or** paste this README's full content into the first message.
+3. Then tell it what you want to do today, e.g. *"I want to add a check-out button to the mobile app"*.
+
+This README is designed to be a **complete handover** — read it cold and you should know what the project is, how it's structured, what works, and what's left. If anything's unclear or out of date, fix the README and push.
+
+### Account access checklist (for handing off to a developer)
+
+If you onboard a dev, they'll need:
+
+| Service | What to do |
+|---|---|
+| GitHub repo | Add them as a collaborator: Settings → Collaborators → Add people |
+| Vercel projects | Vercel team → Settings → Members → Invite (both `morpheus-admin` and `morpheusta` projects) |
+| Supabase project | Supabase → Project Settings → Team → Invite |
+| Env vars | They're in Vercel already; no need to share |
+
+### Required env vars (both apps), reference
 
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://otweltzwwhrvhtvaqsci.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_w5trpMP3bFT4oCkFssbfIg_3W7W6oVd
 ```
 
-**These values are also stored in Vercel** (Settings → Environment Variables for each project). Local + Vercel must stay in sync — if you rotate the anon key on Supabase, update both places.
-
-> ⚠️ Both values are designed to be public (the anon key is meant to be embedded in browser code). Security comes from the Row Level Security policies in Supabase, not from key secrecy. Never commit the `.env.local` file regardless — it's gitignored.
+These are also stored in Vercel (Settings → Environment Variables for each project). Local + Vercel must stay in sync — if you rotate the anon key in Supabase, update both places.
 
 ---
 
