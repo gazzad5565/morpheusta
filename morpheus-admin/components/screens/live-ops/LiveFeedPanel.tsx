@@ -9,6 +9,7 @@ import { Btn } from "@/components/ui/Btn";
 import {
   listPendingRequests,
   deleteRequest,
+  subscribeRequests,
   type PendingRequest,
 } from "@/lib/requests-store";
 
@@ -34,16 +35,22 @@ export function LiveFeedPanel() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   // Always fetch the request count so we can show it on the tab badge,
-  // not only when the tab is active.
+  // not only when the tab is active. Subscribes to realtime changes so
+  // the count + list flip the moment a rep submits / admin schedules /
+  // admin declines.
   useEffect(() => {
     let cancelled = false;
-    listPendingRequests().then((rows) => {
+    const load = async () => {
+      const rows = await listPendingRequests();
       if (cancelled) return;
       setRequests(rows);
       setRequestsLoaded(true);
-    });
+    };
+    load();
+    const unsub = subscribeRequests(load);
     return () => {
       cancelled = true;
+      unsub();
     };
   }, []);
 

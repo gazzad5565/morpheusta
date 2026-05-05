@@ -105,6 +105,45 @@ export async function listPendingRequests(): Promise<PendingRequest[]> {
   });
 }
 
+/**
+ * Subscribe to realtime changes on the requested_shifts table. Caller's
+ * onChange runs on every insert/update/delete. Returns an unsubscribe
+ * function. Requires the table to be in the supabase_realtime
+ * publication (see db/migrations/2026_05_05_requested_shifts_realtime.sql).
+ *
+ * Each call gets a unique channel name to avoid the supabase-js
+ * collision when two components subscribe at the same time.
+ */
+let _requestsChannelCounter = 0;
+
+export function subscribeRequests(onChange: () => void): () => void {
+  if (!isSupabaseConfigured() || !supabase) return () => {};
+  try {
+    _requestsChannelCounter += 1;
+    const channelName = `requested_shifts_live_${Date.now()}_${_requestsChannelCounter}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "requested_shifts" },
+        () => onChange()
+      )
+      .subscribe();
+    return () => {
+      try {
+        supabase!.removeChannel(channel);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[requests] removeChannel failed:", err);
+      }
+    };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[requests] subscribe failed:", err);
+    return () => {};
+  }
+}
+
 /** Delete a single request by composite id (used after approving + scheduling, or on decline). */
 export async function deleteRequest(
   id: string

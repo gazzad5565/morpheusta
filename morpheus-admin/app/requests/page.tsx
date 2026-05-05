@@ -23,6 +23,7 @@ import { AC } from "@/lib/tokens";
 import {
   listPendingRequests,
   deleteRequest,
+  subscribeRequests,
   type PendingRequest,
 } from "@/lib/requests-store";
 
@@ -55,6 +56,10 @@ export default function RequestsPage() {
 
   useEffect(() => {
     reload();
+    // Realtime: refetch on any insert/update/delete so the inbox flips
+    // the moment a rep submits or another admin handles a row.
+    const unsub = subscribeRequests(reload);
+    return () => unsub();
   }, []);
 
   const onApprove = (r: PendingRequest) => {
