@@ -91,3 +91,26 @@ export function startLocationTracking(): TrackerHandle {
     },
   };
 }
+
+/**
+ * Delete the current user's rep_locations row.
+ *
+ * Called on check-out so the admin map's green dot disappears immediately
+ * instead of lingering as a "stale" pin until the 5-min timeout. Safe to
+ * call when no row exists — Supabase will simply affect zero rows.
+ */
+export async function clearRepLocation(): Promise<void> {
+  if (typeof window === "undefined") return;
+  if (!isSupabaseConfigured() || !supabase) return;
+  const { data } = await supabase.auth.getUser();
+  const userId = data.user?.id;
+  if (!userId) return;
+  const { error } = await supabase
+    .from("rep_locations")
+    .delete()
+    .eq("rep_id", userId);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[location] clear error:", error.message);
+  }
+}

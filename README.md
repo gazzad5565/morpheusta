@@ -323,7 +323,7 @@ Every table has RLS on. The current policies:
 | `requested_shifts` | `rep_id = auth.uid()` (own rows only) | `rep_id = auth.uid()` | (none — not allowed) | `rep_id = auth.uid()` |
 | `shifts` | any authenticated (admin needs to see all) | any authenticated | `rep_id = auth.uid()` OR `rep_id IS NULL` (rep updates own + claims unassigned) | any authenticated |
 | `profiles` | any authenticated | (trigger only) | `id = auth.uid()` (own row only) | (none) |
-| `rep_locations` | any authenticated (admin map reads all) | `rep_id = auth.uid()` (own row only) | `rep_id = auth.uid()` (own row only) | (none) |
+| `rep_locations` | any authenticated (admin map reads all) | `rep_id = auth.uid()` (own row only) | `rep_id = auth.uid()` (own row only) | `rep_id = auth.uid()` (own row only — used on check-out to clear the dot) |
 
 > ⚠️ Most policies are **temporary Phase 3** — they let any logged-in user perform most actions. In production, these would be tightened to "manager role only" for customers/shifts insert+delete once we add role-based access control. See "Deferred work" below.
 
@@ -536,7 +536,7 @@ db/migrations/                                 ← canonical SQL for every schem
 morpheus-mobile/lib/shift-store.ts             ← requested_shifts CRUD
 morpheus-mobile/lib/shifts-store.ts            ← shifts list/claim/check-in/check-out
 morpheus-mobile/lib/profiles-store.ts          ← own profile read/update
-morpheus-mobile/lib/location-tracker.ts        ← startLocationTracking() — upserts GPS to rep_locations every 30s while active
+morpheus-mobile/lib/location-tracker.ts        ← startLocationTracking() (upserts every 30s) + clearRepLocation() (delete on check-out)
 morpheus-mobile/components/MenuShell.tsx       ← side menu state provider
 morpheus-mobile/components/SideMenu.tsx        ← the slide-in menu
 morpheus-mobile/app/active/page.tsx            ← active shift screen; mounts location tracker
@@ -582,6 +582,10 @@ These are calls we made along the way that future-you should understand:
 8. **`rep_locations` uses upsert with `onConflict: "rep_id"`.** One row per rep. We don't keep a history table — only "where are they right now." If we ever need a breadcrumb trail, that's a separate `rep_location_history` table, not a schema change here.
 
 9. **Mock customer fallback was removed.** Both apps now require Supabase to be configured for customers. Mocks remain for shifts/profiles fallback in dev, but customers is DB-only.
+
+10. **`rep_locations` joins to `profiles` are done in two queries, not one.** PostgREST can't auto-resolve a join between `rep_locations` and `profiles` because both tables FK to `auth.users` (in another schema), not to each other. The admin's `listRepLocations` does two simple queries and merges in JS — see `lib/rep-locations-store.ts`. If you ever try to use an embedded resource like `profiles(name, email)` here, it'll silently return `[]`.
+
+11. **Check-out deletes the rep_locations row.** When a rep confirms check-out, the mobile app calls `clearRepLocation()` so the admin map's green dot disappears instantly via Realtime, instead of dimming to "stale" for 5 minutes. Requires the DELETE RLS policy in `db/migrations/2026_05_05_rep_locations_self_delete.sql`.
 
 ---
 

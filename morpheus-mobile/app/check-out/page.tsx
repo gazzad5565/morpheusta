@@ -13,6 +13,7 @@ import {
   SectionLabel,
 } from "@/components/Chrome";
 import { Glyph, type GlyphName } from "@/components/Glyph";
+import { clearRepLocation } from "@/lib/location-tracker";
 
 const OFFSITE_REASONS = [
   "Wrong location pinned",
@@ -63,7 +64,10 @@ function CheckOutPage() {
   const earlyResolved = !!earlyReason;
   const canProceed = compulsoryDone && offsiteResolved && earlyResolved;
 
-  const onProceed = () => {
+  const onProceed = async () => {
+    // Drop our pin from the admin map. Awaited so the realtime broadcast
+    // fires before the user navigates away.
+    await clearRepLocation();
     const params = new URLSearchParams({
       offsiteReason: offsiteReason!,
       offsiteNote,

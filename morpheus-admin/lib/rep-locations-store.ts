@@ -1,6 +1,13 @@
 /**
  * Rep locations store (admin) — reads the live GPS position of each rep,
  * joined with their profile for display.
+ *
+ * Implementation note: we do two queries instead of an embedded PostgREST
+ * join. The FK on `rep_locations.rep_id` points at `auth.users(id)`, not
+ * `profiles(id)`. Both tables share auth.users as a parent, but PostgREST
+ * can't resolve a multi-hop relationship through a table in another schema,
+ * so `profiles(name, email)` as an embedded resource silently errors and
+ * the whole call returns []. Two small queries + JS merge sidesteps that.
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
@@ -15,13 +22,18 @@ export interface RepLocation {
   recordedAt: string; // ISO
 }
 
-interface DbRow {
+interface LocationRow {
   rep_id: string;
   latitude: number;
   longitude: number;
   accuracy_m: number | null;
   recorded_at: string;
-  profiles: { name: string | null; email: string } | null;
+}
+
+interface ProfileRow {
+  id: string;
+  name: string | null;
+  email: string;
 }
 
 function deriveInitials(name: string, email: string): string {
@@ -32,31 +44,52 @@ function deriveInitials(name: string, email: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-function rowToRepLocation(row: DbRow): RepLocation {
-  const email = row.profiles?.email || "";
-  const name = row.profiles?.name?.trim() || email.split("@")[0] || "Unknown";
-  return {
-    repId: row.rep_id,
-    name,
-    initials: deriveInitials(row.profiles?.name || "", email),
-    latitude: row.latitude,
-    longitude: row.longitude,
-    accuracyM: row.accuracy_m,
-    recordedAt: row.recorded_at,
-  };
-}
-
 export async function listRepLocations(): Promise<RepLocation[]> {
   if (!isSupabaseConfigured() || !supabase) return [];
-  const { data, error } = await supabase
+
+  // 1. Fetch rep_locations rows.
+  const { data: locs, error: locsErr } = await supabase
     .from("rep_locations")
-    .select("rep_id, latitude, longitude, accuracy_m, recorded_at, profiles(name, email)");
-  if (error) {
+    .select("rep_id, latitude, longitude, accuracy_m, recorded_at");
+  if (locsErr) {
     // eslint-disable-next-line no-console
-    console.warn("[rep-locations] list:", error.message);
+    console.warn("[rep-locations] list locs:", locsErr.message);
     return [];
   }
-  return (data as unknown as DbRow[]).map(rowToRepLocation);
+  if (!locs || locs.length === 0) return [];
+
+  // 2. Fetch matching profiles (one query, IN list).
+  const repIds = (locs as LocationRow[]).map((l) => l.rep_id);
+  const { data: profiles, error: profErr } = await supabase
+    .from("profiles")
+    .select("id, name, email")
+    .in("id", repIds);
+  if (profErr) {
+    // eslint-disable-next-line no-console
+    console.warn("[rep-locations] list profiles:", profErr.message);
+    // Carry on — we'll fall back to "Unknown" labels rather than dropping the dots.
+  }
+
+  const profileMap = new Map<string, { name: string | null; email: string }>();
+  for (const p of (profiles as ProfileRow[] | null) || []) {
+    profileMap.set(p.id, { name: p.name, email: p.email });
+  }
+
+  // 3. Merge.
+  return (locs as LocationRow[]).map((l) => {
+    const profile = profileMap.get(l.rep_id) || { name: null, email: "" };
+    const email = profile.email || "";
+    const name = profile.name?.trim() || email.split("@")[0] || "Unknown";
+    return {
+      repId: l.rep_id,
+      name,
+      initials: deriveInitials(profile.name || "", email),
+      latitude: l.latitude,
+      longitude: l.longitude,
+      accuracyM: l.accuracy_m,
+      recordedAt: l.recorded_at,
+    };
+  });
 }
 
 /**
