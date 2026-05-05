@@ -48,6 +48,30 @@ export async function listShifts(opts?: {
   return data as ShiftRow[];
 }
 
+/**
+ * Shifts whose `shift_date` falls in [startISO, endISO] (inclusive).
+ * Used by the /schedule week-planner.
+ */
+export async function listShiftsInRange(
+  startISO: string,
+  endISO: string
+): Promise<ShiftRow[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const { data, error } = await supabase
+    .from("shifts")
+    .select("*, customers(id,name,initials,color,code)")
+    .gte("shift_date", startISO)
+    .lte("shift_date", endISO)
+    .order("shift_date", { ascending: true })
+    .order("start_time", { ascending: true });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] listInRange:", error.message);
+    return [];
+  }
+  return data as ShiftRow[];
+}
+
 export interface NewShift {
   customer_id: string;
   shift_date: string; // YYYY-MM-DD

@@ -35,13 +35,15 @@ function NewShiftPage() {
   const fromRep = params.get("rep") || "";
   const fromCustomer = params.get("customer") || "";
   const fromRequest = params.get("request") || "";
+  const fromDate = params.get("date") || "";
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [reps, setReps] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [customerId, setCustomerId] = useState<string>("");
   const [repId, setRepId] = useState<string>(""); // "" = unassigned (claimable)
-  const [shiftDate, setShiftDate] = useState<string>(todayISO());
+  // If the user came in from /schedule with a specific cell, pre-fill that date.
+  const [shiftDate, setShiftDate] = useState<string>(fromDate || todayISO());
   const [startTime, setStartTime] = useState<string>("08:00");
   const [endTime, setEndTime] = useState<string>("17:00");
   const [distance, setDistance] = useState<string>("");
