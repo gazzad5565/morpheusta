@@ -1,12 +1,49 @@
 import * as React from "react";
+import Link from "next/link";
 import { AC } from "@/lib/tokens";
 import { AGlyph } from "@/components/ui/AGlyph";
 
+/**
+ * Each breadcrumb segment can be either a plain string (which gets a
+ * default href looked up from CRUMB_HREF) or an explicit { label, href }
+ * tuple. The last segment never links — it's the current page.
+ *
+ * Pass `{ label: "Some Name" }` (no href) for a non-clickable segment
+ * even if it's not last (e.g. the rep's name in "Home > Reps > Jane Smith").
+ */
+export type Crumb = string | { label: string; href?: string };
+
 interface Props {
   title?: string;
-  breadcrumbs?: string[];
+  breadcrumbs?: Crumb[];
   actions?: React.ReactNode;
   search?: boolean;
+}
+
+// Default href for known crumb labels. Add new ones here if a route is
+// missing — keeps page-level call sites short.
+const CRUMB_HREF: Record<string, string> = {
+  Home: "/",
+  "Live Ops": "/",
+  Reps: "/reps",
+  Customers: "/customers",
+  Schedule: "/schedule",
+  "New shift": "/schedule/new",
+  Requests: "/requests",
+  Tasks: "/tasks",
+  "New task": "/tasks/new",
+  Reports: "/reports",
+  Library: "/library",
+  Notifications: "/notify",
+  "Audit log": "/audit",
+  Settings: "/settings",
+};
+
+function resolveCrumb(c: Crumb): { label: string; href: string | null } {
+  if (typeof c === "string") {
+    return { label: c, href: CRUMB_HREF[c] ?? null };
+  }
+  return { label: c.label, href: c.href ?? null };
 }
 
 export function TopBar({ title, breadcrumbs, actions, search = true }: Props) {
@@ -35,19 +72,34 @@ export function TopBar({ title, breadcrumbs, actions, search = true }: Props) {
               color: AC.mute,
             }}
           >
-            {breadcrumbs.map((b, i) => (
-              <React.Fragment key={i}>
-                {i > 0 && <AGlyph name="chev-r" size={11} color={AC.faint} />}
+            {breadcrumbs.map((raw, i) => {
+              const { label, href } = resolveCrumb(raw);
+              const isLast = i === breadcrumbs.length - 1;
+              const linkable = !isLast && href !== null;
+              const content = (
                 <span
                   style={{
-                    color: i === breadcrumbs.length - 1 ? AC.ink : AC.mute,
-                    fontWeight: i === breadcrumbs.length - 1 ? 600 : 500,
+                    color: isLast ? AC.ink : linkable ? AC.brandDeep : AC.mute,
+                    fontWeight: isLast ? 600 : 500,
+                    cursor: linkable ? "pointer" : "default",
                   }}
                 >
-                  {b}
+                  {label}
                 </span>
-              </React.Fragment>
-            ))}
+              );
+              return (
+                <React.Fragment key={i}>
+                  {i > 0 && <AGlyph name="chev-r" size={11} color={AC.faint} />}
+                  {linkable ? (
+                    <Link href={href!} style={{ textDecoration: "none" }}>
+                      {content}
+                    </Link>
+                  ) : (
+                    content
+                  )}
+                </React.Fragment>
+              );
+            })}
           </div>
         ) : (
           <div

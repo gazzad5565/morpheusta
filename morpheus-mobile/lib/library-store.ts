@@ -10,12 +10,23 @@ import { supabase, isSupabaseConfigured } from "./supabase";
 const BUCKET = "library";
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
 
+export const LIBRARY_CATEGORIES = [
+  "Documents",
+  "Photos",
+  "Training",
+  "Forms",
+  "Reference",
+  "Other",
+] as const;
+export const DEFAULT_CATEGORY = "Documents";
+
 export interface LibraryFile {
   id: string;
   name: string;
   storagePath: string;
   sizeBytes: number | null;
   mimeType: string | null;
+  category: string | null;
   customerId: string | null;
   customerName: string | null;
   customerInitials: string | null;
@@ -29,6 +40,7 @@ interface FileRow {
   storage_path: string;
   size_bytes: number | null;
   mime_type: string | null;
+  category: string | null;
   customer_id: string | null;
   uploaded_at: string;
   customers: {
@@ -44,7 +56,7 @@ export async function listLibraryFiles(): Promise<LibraryFile[]> {
   const { data, error } = await supabase
     .from("library_files")
     .select(
-      "id, name, storage_path, size_bytes, mime_type, customer_id, uploaded_at, customers(id,name,initials,color)"
+      "id, name, storage_path, size_bytes, mime_type, category, customer_id, uploaded_at, customers(id,name,initials,color)"
     )
     .order("uploaded_at", { ascending: false });
   if (error) {
@@ -58,6 +70,7 @@ export async function listLibraryFiles(): Promise<LibraryFile[]> {
     storagePath: r.storage_path,
     sizeBytes: r.size_bytes,
     mimeType: r.mime_type,
+    category: r.category,
     customerId: r.customer_id,
     customerName: r.customers?.name ?? null,
     customerInitials: r.customers?.initials ?? null,

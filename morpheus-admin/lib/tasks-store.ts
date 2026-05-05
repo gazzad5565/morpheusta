@@ -119,3 +119,56 @@ export async function deleteTask(
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+/** Fetch a single task by id (admin edit page). */
+export async function getTask(id: string): Promise<TaskRow | null> {
+  if (!isSupabaseConfigured() || !supabase) return null;
+  const { data, error } = await supabase
+    .from("customer_tasks")
+    .select(
+      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, customers(id,name,initials,color,code)"
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.warn("[tasks] get:", error.message);
+    return null;
+  }
+  return data as unknown as TaskRow;
+}
+
+export interface TaskUpdate {
+  /** undefined = leave unchanged. null = make universal (applies to all). */
+  customer_id?: string | null;
+  name?: string;
+  description?: string | null;
+  duration_min?: number;
+  compulsory?: boolean;
+  sort_order?: number;
+}
+
+export async function updateTask(
+  id: string,
+  patch: TaskUpdate
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  // Strip undefined fields so we don't accidentally null them.
+  const dbPatch: Record<string, unknown> = {};
+  if (patch.customer_id !== undefined) dbPatch.customer_id = patch.customer_id;
+  if (patch.name !== undefined) dbPatch.name = patch.name.trim();
+  if (patch.description !== undefined) {
+    dbPatch.description = patch.description?.trim() || null;
+  }
+  if (patch.duration_min !== undefined) dbPatch.duration_min = patch.duration_min;
+  if (patch.compulsory !== undefined) dbPatch.compulsory = patch.compulsory;
+  if (patch.sort_order !== undefined) dbPatch.sort_order = patch.sort_order;
+
+  const { error } = await supabase
+    .from("customer_tasks")
+    .update(dbPatch)
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

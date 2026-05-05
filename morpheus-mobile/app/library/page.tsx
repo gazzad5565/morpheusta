@@ -16,6 +16,8 @@ import {
   listLibraryFiles,
   getLibraryDownloadUrl,
   formatFileSize,
+  LIBRARY_CATEGORIES,
+  DEFAULT_CATEGORY,
   type LibraryFile,
 } from "@/lib/library-store";
 
@@ -35,6 +37,7 @@ export default function LibraryPage() {
   const [files, setFiles] = useState<LibraryFile[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string>("All");
   const [opening, setOpening] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,9 +47,20 @@ export default function LibraryPage() {
     });
   }, []);
 
+  const byCategory =
+    activeCategory === "All"
+      ? files
+      : files.filter((f) => (f.category || DEFAULT_CATEGORY) === activeCategory);
   const filtered = query
-    ? files.filter((f) => f.name.toLowerCase().includes(query.toLowerCase()))
-    : files;
+    ? byCategory.filter((f) => f.name.toLowerCase().includes(query.toLowerCase()))
+    : byCategory;
+
+  // Categories with at least one file (so we don't show empty chips for
+  // categories nobody has uploaded to).
+  const categoryCounts = LIBRARY_CATEGORIES.map((c) => ({
+    name: c,
+    count: files.filter((f) => (f.category || DEFAULT_CATEGORY) === c).length,
+  })).filter((c) => c.count > 0);
 
   const onOpen = async (f: LibraryFile) => {
     if (opening) return;
@@ -86,6 +100,34 @@ export default function LibraryPage() {
       <div style={{ padding: "14px 16px 0" }}>
         <SearchField value={query} onChange={setQuery} placeholder="Search files" />
       </div>
+
+      {categoryCounts.length > 0 && (
+        <div
+          style={{
+            padding: "12px 16px 0",
+            display: "flex",
+            gap: 6,
+            overflowX: "auto",
+            scrollbarWidth: "none",
+          }}
+        >
+          <CategoryChip
+            label="All"
+            count={files.length}
+            active={activeCategory === "All"}
+            onClick={() => setActiveCategory("All")}
+          />
+          {categoryCounts.map((c) => (
+            <CategoryChip
+              key={c.name}
+              label={c.name}
+              count={c.count}
+              active={activeCategory === c.name}
+              onClick={() => setActiveCategory(c.name)}
+            />
+          ))}
+        </div>
+      )}
 
       <div
         style={{
@@ -230,7 +272,8 @@ function FileRow({
           {file.name}
         </div>
         <div style={{ fontFamily: MC.font, fontSize: 12, color: MC.mute, marginTop: 2 }}>
-          {shortDate(file.uploadedAt)} · {formatFileSize(file.sizeBytes)}
+          {file.category || DEFAULT_CATEGORY} · {shortDate(file.uploadedAt)} ·{" "}
+          {formatFileSize(file.sizeBytes)}
           {file.customerName && (
             <>
               {" · "}
@@ -255,6 +298,56 @@ function FileRow({
       >
         <Glyph name="log" size={16} color={MC.brandDeep} />
       </div>
+    </button>
+  );
+}
+
+function CategoryChip({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "6px 12px",
+        borderRadius: 999,
+        background: active ? MC.ink : "#fff",
+        color: active ? "#fff" : MC.ink2,
+        border: `1px solid ${active ? MC.ink : MC.line}`,
+        fontFamily: MC.font,
+        fontSize: 12,
+        fontWeight: 600,
+        letterSpacing: -0.1,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        flexShrink: 0,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      {label}
+      <span
+        style={{
+          padding: "1px 6px",
+          borderRadius: 999,
+          fontSize: 10.5,
+          fontWeight: 700,
+          background: active ? "rgba(255,255,255,.18)" : MC.bg,
+          color: active ? "#fff" : MC.mute,
+        }}
+      >
+        {count}
+      </span>
     </button>
   );
 }

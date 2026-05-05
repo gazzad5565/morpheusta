@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
@@ -22,6 +23,8 @@ import {
   deleteLibraryFile,
   getLibraryDownloadUrl,
   formatFileSize,
+  LIBRARY_CATEGORIES,
+  DEFAULT_CATEGORY,
   type LibraryFile,
 } from "@/lib/library-store";
 import type { Customer } from "@/lib/types";
@@ -47,6 +50,8 @@ export default function LibraryPage() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingCustomer, setPendingCustomer] = useState<string>("");
+  const [pendingCategory, setPendingCategory] = useState<string>(DEFAULT_CATEGORY);
+  const [filterCategory, setFilterCategory] = useState<string>("All");
 
   const reload = () => {
     listLibraryFiles().then((rows) => {
@@ -72,6 +77,7 @@ export default function LibraryPage() {
     setUploading(true);
     const result = await uploadLibraryFile(file, {
       customerId: pendingCustomer || null,
+      category: pendingCategory || DEFAULT_CATEGORY,
     });
     setUploading(false);
     if (!result.ok) {
@@ -79,6 +85,7 @@ export default function LibraryPage() {
       return;
     }
     setPendingCustomer("");
+    setPendingCategory(DEFAULT_CATEGORY);
     reload();
   };
 
@@ -105,12 +112,16 @@ export default function LibraryPage() {
     setFiles((arr) => arr.filter((x) => x.id !== f.id));
   };
 
-  const filtered =
+  const byCustomer =
     filterCustomer === "All"
       ? files
       : filterCustomer === "Shared"
       ? files.filter((f) => !f.customerId)
       : files.filter((f) => f.customerId === filterCustomer);
+  const filtered =
+    filterCategory === "All"
+      ? byCustomer
+      : byCustomer.filter((f) => (f.category || DEFAULT_CATEGORY) === filterCategory);
 
   return (
     <AdminShell
@@ -118,19 +129,23 @@ export default function LibraryPage() {
       actions={
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <select
+            value={pendingCategory}
+            onChange={(e) => setPendingCategory(e.target.value)}
+            disabled={uploading}
+            style={uploadSelectStyle}
+            title="Category for uploads"
+          >
+            {LIBRARY_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          <select
             value={pendingCustomer}
             onChange={(e) => setPendingCustomer(e.target.value)}
             disabled={uploading}
-            style={{
-              padding: "6px 10px",
-              borderRadius: 8,
-              border: `1px solid ${AC.line}`,
-              background: "#fff",
-              fontFamily: AC.font,
-              fontSize: 12,
-              color: AC.ink,
-              cursor: "pointer",
-            }}
+            style={uploadSelectStyle}
             title="Optionally tag uploads to a customer"
           >
             <option value="">Shared with all</option>
@@ -206,6 +221,42 @@ export default function LibraryPage() {
               textTransform: "uppercase",
             }}
           >
+            By category
+          </div>
+          <SidebarItem
+            icon="lib"
+            name="All categories"
+            count={files.length}
+            active={filterCategory === "All"}
+            onClick={() => setFilterCategory("All")}
+          />
+          {LIBRARY_CATEGORIES.map((cat) => {
+            const count = files.filter(
+              (f) => (f.category || DEFAULT_CATEGORY) === cat
+            ).length;
+            if (count === 0) return null;
+            return (
+              <SidebarItem
+                key={cat}
+                icon="tasks"
+                name={cat}
+                count={count}
+                active={filterCategory === cat}
+                onClick={() => setFilterCategory(cat)}
+              />
+            );
+          })}
+          <div
+            style={{
+              padding: "10px 8px 4px",
+              fontFamily: AC.font,
+              fontSize: 10.5,
+              color: AC.mute,
+              fontWeight: 700,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+            }}
+          >
             By customer
           </div>
           {customers.map((c) => {
@@ -229,7 +280,7 @@ export default function LibraryPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2.4fr 1.4fr 100px 100px 60px",
+              gridTemplateColumns: "2.2fr 1.2fr 110px 90px 90px 90px",
               gap: 14,
               padding: "10px 16px",
               background: AC.bg,
@@ -244,6 +295,7 @@ export default function LibraryPage() {
           >
             <div>Name</div>
             <div>Customer</div>
+            <div>Category</div>
             <div>Size</div>
             <div>Uploaded</div>
             <div></div>
@@ -289,7 +341,7 @@ export default function LibraryPage() {
                 key={f.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "2.4fr 1.4fr 100px 100px 60px",
+                  gridTemplateColumns: "2.2fr 1.2fr 110px 90px 90px 90px",
                   gap: 14,
                   alignItems: "center",
                   padding: "12px 16px",
@@ -391,6 +443,23 @@ export default function LibraryPage() {
                     </span>
                   )}
                 </div>
+                <div>
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 99,
+                      fontFamily: AC.font,
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: 0.3,
+                      background: AC.bg,
+                      border: `1px solid ${AC.line}`,
+                      color: AC.ink2,
+                    }}
+                  >
+                    {f.category || DEFAULT_CATEGORY}
+                  </span>
+                </div>
                 <div
                   style={{
                     fontFamily: AC.fontMono,
@@ -411,7 +480,25 @@ export default function LibraryPage() {
                 >
                   {shortDate(f.uploadedAt)}
                 </div>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
+                  <Link
+                    href={`/library/${f.id}/edit`}
+                    onClick={(e) => e.stopPropagation()}
+                    title="Edit file metadata"
+                    aria-label="Edit file metadata"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      background: "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <AGlyph name="edit" size={14} color={AC.mute} />
+                  </Link>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -445,6 +532,17 @@ export default function LibraryPage() {
     </AdminShell>
   );
 }
+
+const uploadSelectStyle: React.CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: 8,
+  border: `1px solid ${AC.line}`,
+  background: "#fff",
+  fontFamily: AC.font,
+  fontSize: 12,
+  color: AC.ink,
+  cursor: "pointer",
+};
 
 function SidebarItem({
   icon,

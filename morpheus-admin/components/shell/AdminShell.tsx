@@ -1,11 +1,11 @@
 import * as React from "react";
 import { AC } from "@/lib/tokens";
 import { Sidebar } from "./Sidebar";
-import { TopBar } from "./TopBar";
+import { TopBar, type Crumb } from "./TopBar";
 
 interface Props {
   title?: string;
-  breadcrumbs?: string[];
+  breadcrumbs?: Crumb[];
   actions?: React.ReactNode;
   search?: boolean;
   children: React.ReactNode;

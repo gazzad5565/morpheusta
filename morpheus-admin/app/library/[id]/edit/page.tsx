@@ -1,0 +1,315 @@
+"use client";
+
+/**
+ * /library/[id]/edit — edit a single library file's metadata.
+ *
+ * The file binary in Storage is untouched. Only name / category /
+ * customer association change here.
+ */
+
+import { use, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { AdminShell } from "@/components/shell/AdminShell";
+import { Btn } from "@/components/ui/Btn";
+import { Card, SectionTitle } from "@/components/ui/Card";
+import { AGlyph } from "@/components/ui/AGlyph";
+import { inputStyle } from "@/components/ui/Filters";
+import { AC } from "@/lib/tokens";
+import { listCustomers } from "@/lib/customers-store";
+import {
+  getLibraryFile,
+  updateLibraryFile,
+  deleteLibraryFile,
+  formatFileSize,
+  LIBRARY_CATEGORIES,
+  DEFAULT_CATEGORY,
+  type LibraryFile,
+} from "@/lib/library-store";
+import type { Customer } from "@/lib/types";
+
+export default function EditLibraryFilePage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const router = useRouter();
+  const { id } = use(params);
+
+  const [file, setFile] = useState<LibraryFile | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
+  const [customerId, setCustomerId] = useState<string>("");
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listCustomers(), getLibraryFile(id)]).then(([cs, f]) => {
+      if (cancelled) return;
+      setCustomers(cs);
+      if (!f) {
+        setNotFound(true);
+        setLoading(false);
+        return;
+      }
+      setFile(f);
+      setName(f.name);
+      setCategory(f.category || DEFAULT_CATEGORY);
+      setCustomerId(f.customerId ?? "");
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const onSave = async () => {
+    if (busy) return;
+    setError(null);
+    if (!name.trim()) return setError("Give the file a name.");
+
+    setBusy(true);
+    const r = await updateLibraryFile(id, {
+      name: name.trim(),
+      category,
+      customerId: customerId === "" ? null : customerId,
+    });
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't save.");
+      return;
+    }
+    router.push("/library");
+  };
+
+  const onDelete = async () => {
+    if (!file) return;
+    if (!confirm(`Delete "${file.name}"? This removes the file from storage.`)) return;
+    setBusy(true);
+    const r = await deleteLibraryFile(file);
+    setBusy(false);
+    if (!r.ok) {
+      alert(`Couldn't delete: ${r.error}`);
+      return;
+    }
+    router.push("/library");
+  };
+
+  if (loading) {
+    return (
+      <AdminShell breadcrumbs={["Home", "Library", "…"]}>
+        <div style={{ padding: 32, fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
+          Loading file…
+        </div>
+      </AdminShell>
+    );
+  }
+
+  if (notFound || !file) {
+    return (
+      <AdminShell breadcrumbs={["Home", "Library", "Not found"]}>
+        <div style={{ padding: 32 }}>
+          <Card padding={24}>
+            <div style={{ fontFamily: AC.font, fontSize: 14, color: AC.ink, marginBottom: 8 }}>
+              No file found with this ID.
+            </div>
+            <Btn onClick={() => router.push("/library")}>Back to Library</Btn>
+          </Card>
+        </div>
+      </AdminShell>
+    );
+  }
+
+  return (
+    <AdminShell
+      breadcrumbs={["Home", "Library", { label: name || "Edit file" }]}
+    >
+      <div
+        style={{
+          padding: 20,
+          display: "grid",
+          gridTemplateColumns: "1fr 320px",
+          gap: 16,
+          alignItems: "start",
+        }}
+      >
+        <Card padding={20}>
+          <SectionTitle>Edit file</SectionTitle>
+
+          <Field label="Display name" required>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={inputStyle}
+            />
+          </Field>
+
+          <Field label="Category" required>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              style={inputStyle}
+            >
+              {LIBRARY_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Customer" hint="Leave on 'Shared with all' for a universal file.">
+            <select
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">Shared with all</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {error && (
+            <div
+              style={{
+                padding: "10px 12px",
+                background: AC.dangerTint,
+                color: "#9c1a3c",
+                borderRadius: 10,
+                fontSize: 13,
+                fontWeight: 500,
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-start",
+                marginBottom: 12,
+              }}
+            >
+              <AGlyph name="warn" size={14} color="#9c1a3c" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <Btn kind="danger" onClick={onDelete} disabled={busy}>
+              Delete
+            </Btn>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn onClick={() => router.push("/library")}>Cancel</Btn>
+              <Btn kind="primary" icon="check" onClick={onSave} disabled={busy}>
+                {busy ? "Saving…" : "Save changes"}
+              </Btn>
+            </div>
+          </div>
+        </Card>
+
+        <Card padding={16}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              fontWeight: 600,
+              color: AC.mute,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              marginBottom: 8,
+            }}
+          >
+            File details
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12.5,
+              color: AC.ink2,
+              lineHeight: 1.7,
+            }}
+          >
+            <div>
+              <b>Type:</b> {file.mimeType || "—"}
+            </div>
+            <div>
+              <b>Size:</b> {formatFileSize(file.sizeBytes)}
+            </div>
+            <div>
+              <b>Uploaded:</b>{" "}
+              {new Date(file.uploadedAt).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 12,
+              padding: "9px 11px",
+              borderRadius: 8,
+              background: AC.bg,
+              fontFamily: AC.font,
+              fontSize: 11.5,
+              color: AC.mute,
+              lineHeight: 1.4,
+            }}
+          >
+            To replace the file content, delete this entry and re-upload from the Library page.
+          </div>
+        </Card>
+      </div>
+    </AdminShell>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  required,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          color: AC.mute,
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+        {required && <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>}
+      </div>
+      {children}
+      {hint && (
+        <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, marginTop: 4 }}>
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+}

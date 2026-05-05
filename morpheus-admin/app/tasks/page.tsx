@@ -4,9 +4,9 @@
  * Admin Tasks page — real data.
  *
  * Lists every task across all customers (joined with customer info).
- * Filters: All / By customer (dropdown). Each row has a delete action
- * via a "more" menu placeholder — kept inline for v1 with a confirm
- * dialog. New tasks come from /tasks/new.
+ * Filters: All / Universal / By customer (dropdown). Each row has Edit
+ * (→ /tasks/[id]/edit) and Delete (inline confirm). New tasks come
+ * from /tasks/new.
  *
  * Mobile uses these tasks on /active during a shift at a given customer.
  */
@@ -17,7 +17,7 @@ import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
-import { FilterChip, FilterDropdown } from "@/components/ui/Filters";
+import { FilterChip } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
 import { listAllTasks, deleteTask, type TaskRow } from "@/lib/tasks-store";
 
@@ -141,7 +141,7 @@ export default function TasksPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2.4fr 1.6fr 100px 100px 100px 60px",
+              gridTemplateColumns: "2.4fr 1.6fr 100px 100px 80px 90px",
               gap: 14,
               padding: "10px 16px",
               background: AC.bg,
@@ -202,7 +202,7 @@ export default function TasksPage() {
                 key={t.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "2.4fr 1.6fr 100px 100px 100px 60px",
+                  gridTemplateColumns: "2.4fr 1.6fr 100px 100px 80px 90px",
                   gap: 14,
                   alignItems: "center",
                   padding: "12px 16px",
@@ -353,7 +353,24 @@ export default function TasksPage() {
                 >
                   {t.sort_order}
                 </div>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
+                  <Link
+                    href={`/tasks/${t.id}/edit`}
+                    title="Edit task"
+                    aria-label="Edit task"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      background: "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <AGlyph name="edit" size={14} color={AC.mute} />
+                  </Link>
                   <button
                     type="button"
                     onClick={() => onDelete(t)}

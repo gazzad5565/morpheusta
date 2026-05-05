@@ -94,6 +94,28 @@ No tests yet. No CI beyond Vercel auto-deploy on push to `main`.
 
 If you switch computers (or hand this project to a developer), this section is the complete onboarding. You shouldn't need anything that isn't here.
 
+### Where things stand right now (last session, 2026-05-05)
+
+**Working end-to-end on real data:**
+- Auth (signup/login/logout) — both apps
+- Admin: customers (create/edit/soft-delete), reps roster + per-rep page, schedule shifts (with optional rep assignment), Live Ops home (real-data KPIs + shifts table + field map with live customer/rep dots), Requests inbox (rep-requested shifts → admin approve/decline → schedule), Tasks library (universal or per-customer, edit + delete), Library file storage (categories + edit + delete), clickable breadcrumbs.
+- Mobile: dashboard (real shifts/date/library count + MapLibre route preview with today's customer pins + GPS dot), shifts list (state badges: scheduled / in-progress / complete; complete sinks to bottom dimmed; "Resume shift" CTA), check-in (writes `state='in-progress'` + `check_in_at`), active shift (real customer info + real per-customer + universal tasks + timer anchored to real check-in time), check-out (writes `state='complete'` + `tasks_done`, clears the rep's GPS dot).
+
+**You do NOT need to run any migration when you arrive on a new machine** — schema is on Supabase, code is on GitHub. Just clone + install + run.
+
+**The migrations Gary already ran (do NOT re-run on the new machine — they're already applied to the shared Supabase project):**
+- All files in `db/migrations/` dated `2026_05_05_*.sql`. They're kept in the repo for posterity / fresh-environment setup. The shared cloud DB already has them.
+
+**Top of the deferred list when you sit down tomorrow:**
+1. Phase 4 RLS by role (manager-only writes)
+2. Background location tracking (needs Capacitor)
+3. `shift_events` log table → real "Needs action" / "All activity" Live Feed tabs + KPI sparklines
+4. Per-shift task completion log (which tasks were done on which shift, not just a count)
+
+See the full **Done vs Deferred** sections further down for detail.
+
+
+
 ### What's already in the cloud (no setup needed)
 
 | What | Where |
@@ -308,13 +330,15 @@ customer_tasks {
 
 -- library_files (Phase 3h, shared file storage metadata)
 -- Pairs with the "library" Supabase Storage bucket — the file binary lives
--- in storage, this table holds the friendly name, size, and customer link.
+-- in storage, this table holds the friendly name, size, customer link,
+-- and a free-form category (UI sticks to a fixed list of values).
 library_files {
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid()
   name         text NOT NULL
   storage_path text NOT NULL UNIQUE  -- key inside the "library" bucket
   size_bytes   bigint NULL
   mime_type    text NULL
+  category     text NULL              -- e.g. 'Documents','Photos','Training'
   customer_id  text NULL → customers (NULL = "shared with all")
   uploaded_by  uuid → auth.users
   uploaded_at  timestamptz
@@ -355,7 +379,7 @@ Every table has RLS on. The current policies:
 | `profiles` | any authenticated | (trigger only) | `id = auth.uid()` (own row only) | (none) |
 | `rep_locations` | any authenticated (admin map reads all) | `rep_id = auth.uid()` (own row only) | `rep_id = auth.uid()` (own row only) | `rep_id = auth.uid()` (own row only — used on check-out to clear the dot) |
 | `customer_tasks` | any authenticated | any authenticated | any authenticated | any authenticated |
-| `library_files` | any authenticated | any authenticated | (none — name/path are immutable) | any authenticated |
+| `library_files` | any authenticated | any authenticated | any authenticated (used by `/library/[id]/edit` to change name / category / customer) | any authenticated |
 | Storage `library/*` | any authenticated | any authenticated | (n/a) | any authenticated |
 
 > ⚠️ Most policies are **temporary Phase 3** — they let any logged-in user perform most actions. In production, these would be tightened to "manager role only" for customers/shifts insert+delete once we add role-based access control. See "Deferred work" below.
@@ -463,7 +487,9 @@ Or via CLI: `npx vercel rollback`.
 - **Mobile check-out writes to DB** — "Confirm check-out" calls `checkOutOfShift()` (state→`complete`, stores tasks_done) and `clearRepLocation()` (drops the green dot from the admin map via Realtime)
 - **Admin Requests inbox** — `/requests` page lists pending rep-requested shifts; manager taps "Schedule" to open `/schedule/new` pre-filled with rep + customer (and the request id), which on save creates the shift and deletes the request so the inbox stays clean. "Decline" deletes the request directly. Same inbox is also surfaced as a "Requests" tab on the home page Live Feed.
 - **Realtime Live Ops board** — KpiStrip and ShiftsList both subscribe to `shifts` table changes via Supabase Realtime. When a rep checks in / claims / completes, or a manager schedules, the dashboard updates without a refresh.
-- **Customer tasks** — admin manages a task library at `/tasks`. When creating, a task can be **universal** (applies to ALL customers, one row with `customer_id = NULL`), **specific** (one customer), or **multiple** (sprays one row per selected customer). Mobile `/active` fetches the customer's specific tasks PLUS any universal ones and renders them under the timer. Compulsory tasks block check-out until done; `tasks_done` count goes back to the DB on check-out.
+- **Customer tasks** — admin manages a task library at `/tasks` with full CRUD: create at `/tasks/new` (scope to **all customers** = universal, **specific** = one, or **multiple** = sprays one row per ticked customer), edit individual rows at `/tasks/[id]/edit`, or delete inline. Mobile `/active` fetches the customer's specific tasks PLUS any universal ones and renders them under the timer. Compulsory tasks block check-out until done; `tasks_done` count goes back to the DB on check-out.
+- **Library categories + edit** — every uploaded file carries a category (`Documents` / `Photos` / `Training` / `Forms` / `Reference` / `Other`). Admin picks a category at upload time and can change it (or the customer association, or the display name) via `/library/[id]/edit`. Mobile `/library` shows category-filter chips above the file list.
+- **Clickable admin breadcrumbs** — every breadcrumb segment except the current page now links back via a label-to-href map in `TopBar.tsx`. Pages can opt a segment out of linking by passing `{ label: "Some Name" }` (no href) — used for things like the rep's name on `/reps/[id]`.
 - **Mobile shifts list shows state** — `/shifts` "Scheduled for me" sorts in-progress → scheduled → complete (so finished shifts sink to the bottom), with a green "Complete" badge on done shifts (dimmed, struck-through times) and a brand "In progress" badge with a "Resume shift" button on the active one.
 - **Mobile dashboard is fully real-data** — date is today's actual date, "last sync" is real now, shift count + progress bar reflect today's DB shifts (green segment for complete, brand for in-progress, grey for scheduled), Library shortcut shows real file count, "Up next" picks the in-progress shift first (with "Resume shift") then the next scheduled (with "Check in"), and the route-preview card is a real MapLibre map plotting today's customer pins + the rep's GPS dot.
 - **Library** — admin uploads files at `/library` (with optional customer association) into Supabase Storage bucket `library` + metadata in `library_files`. Mobile `/library` lists everything reps can see; tap any file to open it via a short-lived signed URL.
@@ -586,11 +612,13 @@ morpheus-admin/lib/profiles-store.ts           ← list reps for assignment drop
 morpheus-admin/lib/rep-locations-store.ts      ← read live rep GPS + Supabase Realtime subscription helper
 morpheus-admin/lib/requests-store.ts           ← list pending rep requests + delete on approve/decline
 morpheus-admin/app/requests/page.tsx           ← admin Requests inbox (also surfaced as a tab on Live Ops home)
-morpheus-admin/lib/tasks-store.ts              ← customer_tasks CRUD (admin defines task templates)
-morpheus-admin/app/tasks/page.tsx              ← list+filter+delete; "New task" → /tasks/new
-morpheus-admin/app/tasks/new/page.tsx          ← create-task form (?customer= pre-fills)
-morpheus-admin/lib/library-store.ts            ← library_files + Supabase Storage CRUD (signed download URLs)
-morpheus-admin/app/library/page.tsx            ← upload + list + delete + open
+morpheus-admin/lib/tasks-store.ts              ← customer_tasks CRUD (list, get, create, update, delete) — supports universal/multi-customer at create time
+morpheus-admin/app/tasks/page.tsx              ← list + filter (incl. Universal) + edit/delete inline; "New task" → /tasks/new
+morpheus-admin/app/tasks/new/page.tsx          ← create-task form: All / Specific (single or multi) scope picker
+morpheus-admin/app/tasks/[id]/edit/page.tsx    ← edit one row (rename, change scope to a single customer or universal, etc)
+morpheus-admin/lib/library-store.ts            ← library_files + Supabase Storage CRUD (list, get, upload, update, delete, signed URL); LIBRARY_CATEGORIES list
+morpheus-admin/app/library/page.tsx            ← upload (with category + customer) + list + filter (sidebar by customer AND by category) + edit/delete inline
+morpheus-admin/app/library/[id]/edit/page.tsx  ← edit name/category/customer association on a single file
 morpheus-mobile/lib/library-store.ts           ← read-only library list + signed-URL fetcher
 morpheus-mobile/lib/shifts-store.ts            ← also exports getTasksForCustomer for /active
 morpheus-admin/app/api/geocode/route.ts        ← Nominatim geocode proxy (address → lat/lng)

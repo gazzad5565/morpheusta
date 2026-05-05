@@ -14,12 +14,26 @@ import { supabase, isSupabaseConfigured } from "./supabase";
 const BUCKET = "library";
 const SIGNED_URL_TTL_SECONDS = 60 * 60; // 1 hour
 
+/** Predefined categories. Free-form is allowed at the DB level, but the
+ * UI sticks to this list for consistency. */
+export const LIBRARY_CATEGORIES = [
+  "Documents",
+  "Photos",
+  "Training",
+  "Forms",
+  "Reference",
+  "Other",
+] as const;
+export type LibraryCategory = (typeof LIBRARY_CATEGORIES)[number];
+export const DEFAULT_CATEGORY: LibraryCategory = "Documents";
+
 export interface LibraryFile {
   id: string;
   name: string;
   storagePath: string;
   sizeBytes: number | null;
   mimeType: string | null;
+  category: string | null;
   customerId: string | null;
   customerName: string | null;
   customerInitials: string | null;
@@ -34,6 +48,7 @@ interface FileRow {
   storage_path: string;
   size_bytes: number | null;
   mime_type: string | null;
+  category: string | null;
   customer_id: string | null;
   uploaded_by: string | null;
   uploaded_at: string;
@@ -45,37 +60,57 @@ interface FileRow {
   } | null;
 }
 
-export async function listLibraryFiles(): Promise<LibraryFile[]> {
-  if (!isSupabaseConfigured() || !supabase) return [];
-  const { data, error } = await supabase
-    .from("library_files")
-    .select(
-      "id, name, storage_path, size_bytes, mime_type, customer_id, uploaded_by, uploaded_at, customers(id,name,initials,color)"
-    )
-    .order("uploaded_at", { ascending: false });
-  if (error) {
-    // eslint-disable-next-line no-console
-    console.warn("[library] list:", error.message);
-    return [];
-  }
-  return ((data as unknown as FileRow[]) || []).map((r) => ({
+function rowToFile(r: FileRow): LibraryFile {
+  return {
     id: r.id,
     name: r.name,
     storagePath: r.storage_path,
     sizeBytes: r.size_bytes,
     mimeType: r.mime_type,
+    category: r.category,
     customerId: r.customer_id,
     customerName: r.customers?.name ?? null,
     customerInitials: r.customers?.initials ?? null,
     customerColor: r.customers?.color ?? null,
     uploadedBy: r.uploaded_by,
     uploadedAt: r.uploaded_at,
-  }));
+  };
+}
+
+const SELECT_COLS =
+  "id, name, storage_path, size_bytes, mime_type, category, customer_id, uploaded_by, uploaded_at, customers(id,name,initials,color)";
+
+export async function listLibraryFiles(): Promise<LibraryFile[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const { data, error } = await supabase
+    .from("library_files")
+    .select(SELECT_COLS)
+    .order("uploaded_at", { ascending: false });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[library] list:", error.message);
+    return [];
+  }
+  return ((data as unknown as FileRow[]) || []).map(rowToFile);
+}
+
+export async function getLibraryFile(id: string): Promise<LibraryFile | null> {
+  if (!isSupabaseConfigured() || !supabase) return null;
+  const { data, error } = await supabase
+    .from("library_files")
+    .select(SELECT_COLS)
+    .eq("id", id)
+    .maybeSingle();
+  if (error || !data) {
+    if (error) console.warn("[library] get:", error.message);
+    return null;
+  }
+  return rowToFile(data as unknown as FileRow);
 }
 
 export async function uploadLibraryFile(
   file: File,
-  opts?: { customerId?: string | null }
+  opts?: { customerId?: string | null; category?: string | null }
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
@@ -103,6 +138,7 @@ export async function uploadLibraryFile(
       storage_path: storagePath,
       size_bytes: file.size,
       mime_type: file.type || null,
+      category: opts?.category || DEFAULT_CATEGORY,
       customer_id: opts?.customerId || null,
       uploaded_by: userId,
     })
@@ -115,6 +151,34 @@ export async function uploadLibraryFile(
     return { ok: false, error: insErr.message };
   }
   return { ok: true, id: data?.id };
+}
+
+export interface LibraryFileUpdate {
+  name?: string;
+  category?: string | null;
+  customerId?: string | null;
+}
+
+export async function updateLibraryFile(
+  id: string,
+  patch: LibraryFileUpdate
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const dbPatch: Record<string, unknown> = {};
+  if (patch.name !== undefined) dbPatch.name = patch.name.trim();
+  if (patch.category !== undefined) dbPatch.category = patch.category;
+  if (patch.customerId !== undefined) dbPatch.customer_id = patch.customerId;
+  // Note: we deliberately leave the metadata UPDATE policy off (per the
+  // README RLS table). If you re-enable it in Phase 4, remember to widen
+  // it for managers only.
+  const { error } = await supabase
+    .from("library_files")
+    .update(dbPatch)
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
 
 export async function deleteLibraryFile(
