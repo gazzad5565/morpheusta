@@ -79,10 +79,20 @@ export function LiveFeedPanel() {
       setRequestsLoaded(true);
     };
     load();
+    // Same defence-in-depth as the sidebar — realtime is the happy
+    // path but websockets drop and there's a connect-window where
+    // freshly-mounted channels can miss the first INSERT.
     const unsub = subscribeRequests(load);
+    const onVis = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    const poll = window.setInterval(load, 60_000);
     return () => {
       cancelled = true;
       unsub();
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(poll);
     };
   }, []);
 

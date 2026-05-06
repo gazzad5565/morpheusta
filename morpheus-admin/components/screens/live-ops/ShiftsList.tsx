@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import { AC } from "@/lib/tokens";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
@@ -20,6 +21,11 @@ import { RepAvatar } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { listShifts, subscribeShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import {
+  listPendingRequests,
+  subscribeRequests,
+  type PendingRequest,
+} from "@/lib/requests-store";
 
 const STATE_MAP: Record<string, { label: string; bg: string; ink: string; dot: string }> = {
   "in-progress": { label: "In progress", bg: AC.okTint, ink: "#0F5A38", dot: AC.ok },
@@ -63,10 +69,27 @@ interface RepLite {
   initials: string;
 }
 
-const TABS = ["All", "In progress", "Travelling", "On break", "Issues", "Unassigned"] as const;
+const TABS = [
+  "All",
+  "In progress",
+  "Travelling",
+  "On break",
+  "Issues",
+  "Unassigned",
+  "Requested",
+] as const;
+
+// Discriminated union — request rows are real DB rows from
+// requested_shifts (separate table from shifts) but they live in this
+// list visually so the manager can see them next to the day's actual
+// shifts.
+type ListRow =
+  | { kind: "shift"; shift: ShiftRow }
+  | { kind: "request"; request: PendingRequest };
 
 export function ShiftsList() {
   const [rows, setRows] = useState<ShiftRow[]>([]);
+  const [requests, setRequests] = useState<PendingRequest[]>([]);
   const [reps, setReps] = useState<Record<string, RepLite>>({});
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<string>("All");
@@ -79,9 +102,10 @@ export function ShiftsList() {
       // in on the mobile app while testing would silently render as
       // "Unassigned" otherwise. Use role='rep' only when picking a rep
       // for a NEW shift / assignment.
-      const [shiftRows, profileRows] = await Promise.all([
+      const [shiftRows, profileRows, requestRows] = await Promise.all([
         listShifts(),
         listProfiles(),
+        listPendingRequests(),
       ]);
       if (cancelled) return;
       const repMap: Record<string, RepLite> = {};
@@ -94,23 +118,23 @@ export function ShiftsList() {
       }
       setReps(repMap);
       setRows(shiftRows);
+      setRequests(requestRows);
       setLoading(false);
     };
     load();
-    // Refetch on any shifts change (rep checks in/out, claims, manager
-    // schedules, etc) so the table updates without a manual refresh.
-    const unsub = subscribeShifts(load);
-    // Refetch when the tab comes back into focus — covers the case
-    // where the admin opened the dashboard yesterday, left it idle
-    // overnight, and is now looking at it again. listShifts() reads
-    // "today" at call time so this picks up the new day's window.
+    // Realtime + visibility refetch on BOTH shifts and requested_shifts
+    // so the today's-shifts list (which now includes pending requests)
+    // stays current without a manual refresh.
+    const unsubShifts = subscribeShifts(load);
+    const unsubRequests = subscribeRequests(load);
     const onVis = () => {
       if (document.visibilityState === "visible") load();
     };
     document.addEventListener("visibilitychange", onVis);
     return () => {
       cancelled = true;
-      unsub();
+      unsubShifts();
+      unsubRequests();
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
@@ -119,14 +143,25 @@ export function ShiftsList() {
   // If rep_id is null we treat it as "unassigned" regardless of stored state.
   const effectiveState = (s: ShiftRow): string => (s.rep_id ? s.state : "unassigned");
 
-  const filtered = useMemo(() => {
-    if (active === "All") return rows;
-    if (active === "Unassigned") return rows.filter((s) => !s.rep_id);
+  // Combined list: real shifts AND pending requests, in one array. Each
+  // is wrapped with a `kind` so the renderer can branch.
+  const filtered = useMemo<ListRow[]>(() => {
+    const shiftRows: ListRow[] = rows.map((s) => ({ kind: "shift", shift: s }));
+    const reqRows: ListRow[] = requests.map((r) => ({ kind: "request", request: r }));
+
+    if (active === "All") return [...reqRows, ...shiftRows];
+    if (active === "Requested") return reqRows;
+    if (active === "Unassigned")
+      return shiftRows.filter((r) => r.kind === "shift" && !r.shift.rep_id);
     if (active === "Issues")
-      return rows.filter((s) => effectiveState(s) === "late");
+      return shiftRows.filter(
+        (r) => r.kind === "shift" && effectiveState(r.shift) === "late"
+      );
     const key = active.toLowerCase().replace(" ", "-");
-    return rows.filter((s) => effectiveState(s) === key);
-  }, [rows, active]);
+    return shiftRows.filter(
+      (r) => r.kind === "shift" && effectiveState(r.shift) === key
+    );
+  }, [rows, requests, active]);
 
   return (
     <Card padding={0}>
@@ -199,9 +234,17 @@ export function ShiftsList() {
             }
           />
         ) : (
-          filtered.map((s) => (
-            <ShiftRowView key={s.id} row={s} rep={s.rep_id ? reps[s.rep_id] : undefined} />
-          ))
+          filtered.map((r) =>
+            r.kind === "shift" ? (
+              <ShiftRowView
+                key={`s-${r.shift.id}`}
+                row={r.shift}
+                rep={r.shift.rep_id ? reps[r.shift.rep_id] : undefined}
+              />
+            ) : (
+              <RequestRowView key={`r-${r.request.id}`} request={r.request} />
+            )
+          )
         )}
       </div>
     </Card>
@@ -498,5 +541,165 @@ function TaskBar({ done, total }: { done: number; total: number }) {
         {done}/{total}
       </div>
     </div>
+  );
+}
+
+/**
+ * Request row variant — drawn in the same grid as ShiftRowView so it
+ * lines up cell-for-cell, but visually distinct (orange-tinted dashed
+ * left rail, "Requested" pill in the State column). Click → /requests
+ * for approve / decline.
+ */
+function RequestRowView({ request: r }: { request: PendingRequest }) {
+  return (
+    <Link
+      href="/requests"
+      style={{
+        ...shiftRowGrid(),
+        textDecoration: "none",
+        color: "inherit",
+        cursor: "pointer",
+        background: "#FFF8F1",
+      }}
+      title={`${r.repName} requested ${r.customerName} — click to approve / decline`}
+    >
+      <div
+        style={{
+          width: 3,
+          alignSelf: "stretch",
+          background: AC.warn,
+          borderRadius: 2,
+          margin: "4px 0",
+        }}
+      />
+
+      <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 99,
+            background: AC.warnTint,
+            color: AC.warn,
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          {r.repName.slice(0, 2).toUpperCase()}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: AC.ink,
+              letterSpacing: -0.1,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {r.repName}
+          </div>
+          <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, marginTop: 1 }}>
+            wants a shift
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+        <div
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 7,
+            background: r.customerColor,
+            color: "#fff",
+            fontFamily: AC.font,
+            fontSize: 10.5,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            letterSpacing: 0.2,
+            flexShrink: 0,
+          }}
+        >
+          {r.customerInitials}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12.5,
+              fontWeight: 600,
+              color: AC.ink,
+              letterSpacing: -0.1,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {r.customerName}
+          </div>
+          <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, marginTop: 1 }}>
+            #{r.customerCode}
+          </div>
+        </div>
+      </div>
+
+      {/* No window for a request — show a dash */}
+      <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute, fontWeight: 500 }}>—</div>
+
+      <div>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "3px 8px",
+            borderRadius: 99,
+            background: AC.warnTint,
+            color: "#7A560A",
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 700,
+          }}
+        >
+          <span style={{ width: 5, height: 5, borderRadius: 99, background: AC.warn }} />
+          Requested
+        </span>
+      </div>
+
+      {/* No tasks / check-in for an unscheduled request */}
+      <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute }}>—</div>
+      <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute }}>—</div>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        style={{
+          width: 26,
+          height: 26,
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <AGlyph name="more" size={16} color={AC.mute} />
+      </button>
+    </Link>
   );
 }

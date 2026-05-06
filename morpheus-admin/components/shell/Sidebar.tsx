@@ -48,7 +48,15 @@ export function Sidebar() {
     };
   }, []);
 
-  // Pending requests — initial fetch + realtime resubscribe.
+  // Pending requests — defence in depth so the sidebar badge can't
+  // silently drift to a stale count.
+  //   - initial fetch on mount
+  //   - realtime sub for live updates (best case, sub-second)
+  //   - visibilitychange refetch (covers backgrounded tabs / sleeping
+  //     phones where the websocket gets killed)
+  //   - 60-second poll (ultimate safety net for the case where
+  //     realtime silently drops without firing onError)
+  // The sidebar lives at layout level so this runs across every page.
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
@@ -57,11 +65,25 @@ export function Sidebar() {
     };
     refresh();
     const unsub = subscribeRequests(refresh);
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    const poll = window.setInterval(refresh, 60_000);
     return () => {
       cancelled = true;
       unsub();
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(poll);
     };
   }, []);
+
+  // Also refetch on every pathname change — covers the timing window
+  // where a request lands while a fresh realtime channel hasn't quite
+  // connected, or when the websocket dropped between page nav.
+  useEffect(() => {
+    listPendingRequests().then((rows) => setPendingCount(rows.length));
+  }, [pathname]);
 
   // Browser tab title alert — prepend "(N) " when something needs
   // attention so the manager notices on a different tab/window.
