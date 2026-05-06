@@ -252,7 +252,12 @@ export default function CustomersPage() {
 
 function GridView({ customers }: { customers: Customer[] }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+    // minmax(0, 1fr) instead of 1fr — `1fr` is `minmax(auto, 1fr)` which
+    // lets a cell grow past its share to fit min-content (e.g. an address
+    // with whiteSpace:nowrap). Result was the column with the longest
+    // address ballooning while the other two squashed. minmax(0, 1fr)
+    // forces equal widths regardless of content.
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
       {customers.map((c) => (
         <Link
           key={c.id}

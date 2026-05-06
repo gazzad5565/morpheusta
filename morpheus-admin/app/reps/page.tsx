@@ -308,7 +308,7 @@ function RolePill({ role }: { role: string }) {
 
 function GridView({ reps }: { reps: RepWithStats[] }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
       {reps.map((r) => (
         <Link key={r.id} href={`/reps/${r.id}`} style={{ textDecoration: "none", color: "inherit" }}>
           <Card padding={0} style={{ overflow: "hidden", height: "100%" }}>

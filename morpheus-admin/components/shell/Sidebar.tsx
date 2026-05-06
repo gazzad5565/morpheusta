@@ -11,6 +11,7 @@ import {
   getOrganisationName,
   getOrganisationLogoUrl,
 } from "@/lib/settings-store";
+import { listPendingRequests, subscribeRequests } from "@/lib/requests-store";
 import { nameFromEmail, initialsFromNameOrEmail } from "@/lib/format";
 
 function userDisplayBits(email: string | null | undefined): { name: string; initials: string } {
@@ -28,6 +29,10 @@ export function Sidebar() {
   // fall back to the built-in MORPHEUS / Field Operations Suite block.
   const [orgName, setOrgName] = useState<string>("");
   const [orgLogoUrl, setOrgLogoUrl] = useState<string>("");
+  // Pending-rep-request count, kept live across every page so the
+  // manager always sees a flashing badge on Live Ops when something
+  // needs their attention — even if they're elsewhere in the app.
+  const [pendingCount, setPendingCount] = useState<number>(0);
   useEffect(() => {
     let cancelled = false;
     getUser().then((u) => {
@@ -42,6 +47,33 @@ export function Sidebar() {
       cancelled = true;
     };
   }, []);
+
+  // Pending requests — initial fetch + realtime resubscribe.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const rows = await listPendingRequests();
+      if (!cancelled) setPendingCount(rows.length);
+    };
+    refresh();
+    const unsub = subscribeRequests(refresh);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  // Browser tab title alert — prepend "(N) " when something needs
+  // attention so the manager notices on a different tab/window.
+  // Reverts to the original title when count hits zero.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const original = document.title.replace(/^\(\d+\)\s+/, "");
+    document.title = pendingCount > 0 ? `(${pendingCount}) ${original}` : original;
+    return () => {
+      document.title = original;
+    };
+  }, [pendingCount]);
   const { name: userName, initials: userInitials } = userDisplayBits(userEmail);
   const userRole = userEmail ? "Field Ops Manager" : "";
   const handleLogout = () => {
@@ -254,9 +286,24 @@ export function Sidebar() {
             glyph={item.glyph as GlyphName}
             active={isActive(item.href)}
             comingSoon={"comingSoon" in item ? item.comingSoon : false}
+            // Live Ops gets a flashing red badge when there are pending
+            // rep requests — the dashboard's Live Feed is where you go
+            // to deal with them, so this tells the manager "you have
+            // something to handle" from anywhere in the admin.
+            badgeCount={item.id === "ops" ? pendingCount : 0}
           />
         ))}
       </div>
+      {/* Pulse animation for the nav badge — kept here so the keyframe
+          is mounted alongside the nav and torn down when the sidebar is. */}
+      <style>{`
+        @keyframes sb-pulse-kf {
+          0%   { box-shadow: 0 0 0 0   rgba(190, 24, 60, 0.55); }
+          70%  { box-shadow: 0 0 0 6px rgba(190, 24, 60, 0);    }
+          100% { box-shadow: 0 0 0 0   rgba(190, 24, 60, 0);    }
+        }
+        .sb-pulse { animation: sb-pulse-kf 1.4s ease-out infinite; }
+      `}</style>
 
       <div style={{ flex: 1 }} />
 
@@ -413,12 +460,15 @@ function NavItem({
   glyph,
   active,
   comingSoon = false,
+  badgeCount = 0,
 }: {
   href: string;
   label: string;
   glyph: GlyphName;
   active: boolean;
   comingSoon?: boolean;
+  /** When > 0 a flashing red pill renders on the right of the row. */
+  badgeCount?: number;
 }) {
   // Coming-soon items render as a non-clickable greyed row with a SOON
   // pill so the user knows the feature exists but isn't ready yet.
@@ -501,6 +551,7 @@ function NavItem({
       <AGlyph name={glyph} size={17} color={active ? AC.brand : AC.sideMute} />
       <span
         style={{
+          flex: 1,
           fontFamily: AC.font,
           fontSize: 13,
           fontWeight: active ? 600 : 500,
@@ -509,6 +560,26 @@ function NavItem({
       >
         {label}
       </span>
+      {badgeCount > 0 && (
+        <span
+          className="sb-pulse"
+          title={`${badgeCount} pending request${badgeCount === 1 ? "" : "s"}`}
+          style={{
+            fontFamily: AC.font,
+            fontSize: 10.5,
+            fontWeight: 700,
+            color: "#fff",
+            background: AC.danger,
+            padding: "1px 7px",
+            borderRadius: 99,
+            lineHeight: 1.4,
+            minWidth: 18,
+            textAlign: "center",
+          }}
+        >
+          {badgeCount}
+        </span>
+      )}
     </Link>
   );
 }

@@ -66,22 +66,9 @@ export function LiveFeedPanel() {
   const [events, setEvents] = useState<ShiftEvent[]>([]);
   const [eventsLoaded, setEventsLoaded] = useState(false);
 
-  // Tab-title alert: when there's something needing action, prefix the
-  // browser tab title with "(N)" so the manager notices on a different
-  // tab. Reverts to the original title when the count goes to zero.
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const original = document.title.replace(/^\(\d+\)\s+/, "");
-    if (requests.length > 0) {
-      document.title = `(${requests.length}) ${original}`;
-    } else {
-      document.title = original;
-    }
-    return () => {
-      // On unmount, leave the title clean.
-      document.title = original;
-    };
-  }, [requests.length]);
+  // Tab-title alert + sidebar badge are handled in the Sidebar so they
+  // work across every page, not just Live Ops. We don't duplicate the
+  // logic here.
 
   useEffect(() => {
     let cancelled = false;
