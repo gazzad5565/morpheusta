@@ -429,6 +429,7 @@ function UnassignedRow({
             shifts={list}
             // unassigned cells DON'T have a quick-add (use the global New shift CTA)
             addHref={null}
+            repLabel="Unassigned"
           />
         );
       })}
@@ -524,6 +525,7 @@ function RepRow({
             isToday={isToday}
             shifts={list}
             addHref={addHref}
+            repLabel={displayName(rep)}
           />
         );
       })}
@@ -536,11 +538,14 @@ function Cell({
   isToday,
   shifts,
   addHref,
+  repLabel,
 }: {
   iso: string;
   isToday: boolean;
   shifts: ShiftRow[];
   addHref: string | null;
+  /** Rep name to display on each shift card. "Unassigned" for the unassigned row. */
+  repLabel: string;
 }) {
   const isWeekend = (() => {
     const d = new Date(iso);
@@ -561,7 +566,7 @@ function Cell({
       }}
     >
       {shifts.map((s) => (
-        <ShiftCell key={s.id} shift={s} />
+        <ShiftCell key={s.id} shift={s} repLabel={repLabel} />
       ))}
       {shifts.length === 0 && addHref && (
         <Link
@@ -586,10 +591,10 @@ function Cell({
   );
 }
 
-function ShiftCell({ shift }: { shift: ShiftRow }) {
+function ShiftCell({ shift, repLabel }: { shift: ShiftRow; repLabel: string }) {
   const c = shift.customers;
   const color = c?.color || "#888";
-  const name = c?.name || "Unknown customer";
+  const customerName = c?.name || "Unknown customer";
   const stateColors: Record<string, string> = {
     "in-progress": AC.brand,
     complete: AC.ok,
@@ -601,8 +606,8 @@ function ShiftCell({ shift }: { shift: ShiftRow }) {
 
   return (
     <Link
-      href={c ? `/customers/${c.id}` : "#"}
-      title={`${name} · ${shift.state}`}
+      href={`/shifts/${shift.id}`}
+      title={`${repLabel} · ${customerName} · ${shift.state}`}
       style={{
         background: `${color}15`,
         borderLeft: `3px solid ${accent}`,
@@ -613,12 +618,14 @@ function ShiftCell({ shift }: { shift: ShiftRow }) {
         opacity: isComplete ? 0.7 : 1,
       }}
     >
+      {/* Rep name — top line so the card is identifiable when the
+          row's left rep column is hidden / the table is scrolled. */}
       <div
         style={{
           fontFamily: AC.font,
-          fontSize: 11,
+          fontSize: 10.5,
           fontWeight: 700,
-          color: color,
+          color: AC.ink,
           letterSpacing: -0.1,
           whiteSpace: "nowrap",
           overflow: "hidden",
@@ -626,18 +633,36 @@ function ShiftCell({ shift }: { shift: ShiftRow }) {
           textDecoration: isComplete ? "line-through" : "none",
         }}
       >
-        {name}
+        {repLabel}
       </div>
+      {/* Customer name — second line in the customer's brand colour. */}
       <div
         style={{
           fontFamily: AC.font,
           fontSize: 10.5,
+          fontWeight: 600,
+          color: color,
+          letterSpacing: -0.1,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          marginTop: 1,
+          textDecoration: isComplete ? "line-through" : "none",
+        }}
+      >
+        {customerName}
+      </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 10,
           color: AC.ink2,
           fontWeight: 500,
-          marginTop: 1,
+          marginTop: 2,
           display: "flex",
           alignItems: "center",
           gap: 4,
+          flexWrap: "wrap",
         }}
       >
         {formatTime(shift.start_time)}–{formatTime(shift.end_time)}

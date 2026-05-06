@@ -273,6 +273,7 @@ export function Sidebar() {
             label={item.label}
             glyph={item.glyph as GlyphName}
             active={isActive(item.href)}
+            comingSoon={"comingSoon" in item ? item.comingSoon : false}
           />
         ))}
       </div>
@@ -431,12 +432,62 @@ function NavItem({
   label,
   glyph,
   active,
+  comingSoon = false,
 }: {
   href: string;
   label: string;
   glyph: GlyphName;
   active: boolean;
+  comingSoon?: boolean;
 }) {
+  // Coming-soon items render as a non-clickable greyed row with a SOON
+  // pill so the user knows the feature exists but isn't ready yet.
+  if (comingSoon) {
+    return (
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 11,
+          padding: "8px 12px",
+          borderRadius: 8,
+          color: "#5C6571",
+          opacity: 0.75,
+          cursor: "not-allowed",
+        }}
+        title={`${label} — coming soon`}
+      >
+        <AGlyph name={glyph} size={17} color="#5C6571" />
+        <span
+          style={{
+            flex: 1,
+            fontFamily: AC.font,
+            fontSize: 13,
+            fontWeight: 500,
+            letterSpacing: -0.1,
+          }}
+        >
+          {label}
+        </span>
+        <span
+          style={{
+            fontFamily: AC.font,
+            fontSize: 9.5,
+            color: "#5C6571",
+            fontWeight: 700,
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+            padding: "1px 5px",
+            border: "1px solid #232932",
+            borderRadius: 4,
+          }}
+        >
+          Soon
+        </span>
+      </div>
+    );
+  }
   return (
     <Link
       href={href}
