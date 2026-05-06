@@ -110,16 +110,18 @@ export default function CheckInRulesPage() {
             } min of the shift's start time see no exception. After that, the late-check-in card appears and a reason is required.`}
           />
           <NumberSetting
-            label="Early check-out grace"
+            label="Early grace (check-in & check-out)"
             unit="min"
             value={earlyMin}
             onChange={setEarlyMin}
             onSave={saveEarly}
             saving={savingKey === "early"}
             disabled={!loaded}
-            hint={`Reps checking out within ${
+            hint={`Symmetric: reps checking IN within ${
               earlyMin || 0
-            } min of the scheduled end see no exception. Earlier than that, the early-check-out card appears and a reason is required.`}
+            } min of the scheduled start, OR checking OUT within ${
+              earlyMin || 0
+            } min of the scheduled end, see no exception. Outside that window the early card appears and a reason is required.`}
           />
         </div>
 

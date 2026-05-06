@@ -13,6 +13,7 @@ export type EventType =
   | "shift.checked_in"
   | "shift.checked_in_offsite"
   | "shift.checked_in_late"
+  | "shift.checked_in_early"
   | "shift.checked_out"
   | "shift.checked_out_offsite"
   | "shift.checked_out_early"

@@ -7,7 +7,7 @@ import { AppHeader, CustomerTile, ReasonChip, PrimaryButton } from "@/components
 import { Glyph, type GlyphName } from "@/components/Glyph";
 import { getShiftById, checkInToShift } from "@/lib/shifts-store";
 import { getCustomerById } from "@/lib/customers-store";
-import { getLateGraceMinutes } from "@/lib/settings-store";
+import { getLateGraceMinutes, getEarlyGraceMinutes } from "@/lib/settings-store";
 import { logEvent } from "@/lib/events-store";
 import type { Shift, Customer } from "@/lib/mock-data";
 
@@ -58,6 +58,14 @@ const LOCATION_REASONS = [
   "Manager approved",
   "Other",
 ];
+const EARLY_REASONS = [
+  "Traffic was light",
+  "Customer asked me to come early",
+  "Manager approved",
+  "Mistake — wrong shift",
+  "Other",
+];
+
 const LATE_REASONS = [
   "Traffic",
   "Previous shift overrun",
@@ -84,6 +92,10 @@ function CheckInPage() {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [shiftError, setShiftError] = useState<string | null>(null);
   const [graceMinutes, setGraceMinutes] = useState<number>(10);
+  // Early-check-in uses the same setting as early check-out — they're
+  // symmetric concepts: don't clock in too soon, don't clock out too soon.
+  // One setting drives both.
+  const [earlyGraceMinutes, setEarlyGraceMinutes] = useState<number>(15);
 
   // Geolocation state
   const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
@@ -97,21 +109,24 @@ function CheckInPage() {
       return;
     }
     let cancelled = false;
-    Promise.all([getShiftById(shiftId), getLateGraceMinutes()]).then(
-      async ([s, grace]) => {
-        if (cancelled) return;
-        if (!s) {
-          setShiftError("Shift not found.");
-          return;
-        }
-        setShift(s);
-        setGraceMinutes(grace);
-        // Pull the customer to know its lat/lng + geofence radius.
-        const c = await getCustomerById(s.id);
-        if (cancelled) return;
-        setCustomer(c);
+    Promise.all([
+      getShiftById(shiftId),
+      getLateGraceMinutes(),
+      getEarlyGraceMinutes(),
+    ]).then(async ([s, grace, earlyGrace]) => {
+      if (cancelled) return;
+      if (!s) {
+        setShiftError("Shift not found.");
+        return;
       }
-    );
+      setShift(s);
+      setGraceMinutes(grace);
+      setEarlyGraceMinutes(earlyGrace);
+      // Pull the customer to know its lat/lng + geofence radius.
+      const c = await getCustomerById(s.id);
+      if (cancelled) return;
+      setCustomer(c);
+    });
     return () => {
       cancelled = true;
     };
@@ -187,17 +202,8 @@ function CheckInPage() {
     };
   }, [shift, customer, position, positionLoading, positionError]);
 
-  const lateInfo = useMemo(() => {
+  const timingInfo = useMemo(() => {
     if (!shift) return null;
-    // Build a Date for today + the shift's start_time. Today might be a
-    // different ISO date than the shift_date if the rep is checking in
-    // before midnight on the previous day; we deliberately use "now"
-    // relative to start_time, ignoring shift_date, because the timer
-    // matters more than calendar date.
-    // The shift's start label is e.g. "8:00 AM" (already display-formatted)
-    // or empty. We'll re-parse it by combining shift_date + the formatted
-    // start. Simpler: store the raw start_time on the row. For now we
-    // approximate via the formatted start label.
     const startStr = shift.start;
     // Parse "8:00 AM" → today's Date with that time.
     const m = startStr.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/);
@@ -217,56 +223,108 @@ function CheckInPage() {
       0,
       0
     );
-    const minutesLate = (now.getTime() - start.getTime()) / 60000;
-    if (minutesLate > graceMinutes) {
+    const deltaMin = (now.getTime() - start.getTime()) / 60000;
+
+    // Late: now is more than `graceMinutes` PAST the start.
+    if (deltaMin > graceMinutes) {
       return {
+        kind: "late" as const,
         triggered: true as const,
-        minutesLate,
+        minutesLate: deltaMin,
         startLabel: startStr,
         nowLabel: formatClockTime(now),
         graceMinutes,
       };
     }
+    // Early: now is more than `earlyGraceMinutes` BEFORE the start.
+    // Mirror of the early-check-out rule. Stops a rep clocking in
+    // hours before their shift actually starts.
+    if (deltaMin < -earlyGraceMinutes) {
+      return {
+        kind: "early" as const,
+        triggered: true as const,
+        minutesEarly: -deltaMin,
+        startLabel: startStr,
+        nowLabel: formatClockTime(now),
+        graceMinutes: earlyGraceMinutes,
+      };
+    }
+    // On time (within grace either way).
     return {
+      kind: "ontime" as const,
       triggered: false as const,
-      minutesLate,
+      deltaMin,
       startLabel: startStr,
       graceMinutes,
     };
-  }, [shift, graceMinutes]);
+  }, [shift, graceMinutes, earlyGraceMinutes]);
+
+  // Backwards-compat alias: existing render code reads `lateInfo`.
+  // Map only the late-or-not states onto the old shape.
+  const lateInfo = useMemo(() => {
+    if (!timingInfo) return null;
+    if (timingInfo.kind === "late") return timingInfo;
+    return {
+      kind: "ontime" as const,
+      triggered: false as const,
+      minutesLate:
+        timingInfo.kind === "ontime" ? timingInfo.deltaMin : 0,
+      startLabel: timingInfo.startLabel,
+      graceMinutes: timingInfo.graceMinutes,
+    };
+  }, [timingInfo]);
+  const earlyInfo = useMemo(
+    () => (timingInfo?.kind === "early" ? timingInfo : null),
+    [timingInfo]
+  );
 
   // Reason state — only relevant when an exception triggers.
-  const [openException, setOpenException] = useState<"location" | "late" | null>(null);
+  const [openException, setOpenException] = useState<
+    "location" | "late" | "early" | null
+  >(null);
   const [locationReason, setLocationReasonRaw] = useState<string | null>(null);
   const [locationNote, setLocationNote] = useState("");
   const [lateReason, setLateReasonRaw] = useState<string | null>(null);
   const [lateNote, setLateNote] = useState("");
+  const [earlyReason, setEarlyReasonRaw] = useState<string | null>(null);
+  const [earlyNote, setEarlyNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const offsiteTriggered = offsiteInfo?.triggered === true;
   const lateTriggered = lateInfo?.triggered === true;
-  const triggeredCount = (offsiteTriggered ? 1 : 0) + (lateTriggered ? 1 : 0);
+  const earlyTriggered = earlyInfo?.triggered === true;
+  const triggeredCount =
+    (offsiteTriggered ? 1 : 0) + (lateTriggered ? 1 : 0) + (earlyTriggered ? 1 : 0);
 
   // Auto-open the first triggered card on first detection.
   useEffect(() => {
     if (openException !== null) return;
     if (offsiteTriggered) setOpenException("location");
     else if (lateTriggered) setOpenException("late");
-  }, [offsiteTriggered, lateTriggered, openException]);
+    else if (earlyTriggered) setOpenException("early");
+  }, [offsiteTriggered, lateTriggered, earlyTriggered, openException]);
 
   const offsiteResolved = !offsiteTriggered || !!locationReason;
   const lateResolved = !lateTriggered || !!lateReason;
-  const allResolved = offsiteResolved && lateResolved;
+  const earlyResolved = !earlyTriggered || !!earlyReason;
+  const allResolved = offsiteResolved && lateResolved && earlyResolved;
   const canProceed = !!shift && allResolved && !submitting && !positionLoading;
 
   const handleSetLocationReason = (newValue: string | null) => {
     setLocationReasonRaw(newValue);
-    if (newValue !== null && lateTriggered && !lateReason) {
-      setOpenException("late");
+    if (newValue !== null) {
+      if (lateTriggered && !lateReason) setOpenException("late");
+      else if (earlyTriggered && !earlyReason) setOpenException("early");
     }
   };
   const handleSetLateReason = (newValue: string | null) => {
     setLateReasonRaw(newValue);
+    if (newValue !== null && offsiteTriggered && !locationReason) {
+      setOpenException("location");
+    }
+  };
+  const handleSetEarlyReason = (newValue: string | null) => {
+    setEarlyReasonRaw(newValue);
     if (newValue !== null && offsiteTriggered && !locationReason) {
       setOpenException("location");
     }
@@ -314,10 +372,28 @@ function CheckInPage() {
         },
       });
     }
+    if (earlyTriggered && earlyInfo) {
+      await logEvent({
+        event_type: "shift.checked_in_early",
+        shift_id: shift.realId,
+        customer_id: shift.id,
+        message: `Early check-in at ${shift.name} · ${formatLateness(
+          earlyInfo.minutesEarly
+        )} before start`,
+        meta: {
+          minutes_early: Math.round(earlyInfo.minutesEarly),
+          grace_minutes: earlyGraceMinutes,
+          start_label: earlyInfo.startLabel,
+          reason: earlyReason,
+          note: earlyNote || undefined,
+        },
+      });
+    }
     // 3. Forward the resolved reasons to the success screen for display.
     const sp = new URLSearchParams({
       ...(locationReason ? { locationReason, locationNote } : {}),
       ...(lateReason ? { lateReason, lateNote } : {}),
+      ...(earlyReason ? { earlyReason, earlyNote } : {}),
     });
     router.push(`/check-in/success?${sp.toString()}`);
   };
@@ -400,7 +476,8 @@ function CheckInPage() {
           {triggeredCount > 0 && (
             <span style={{ color: allResolved ? MC.ok : MC.hint }}>
               {(offsiteTriggered && locationReason ? 1 : 0) +
-                (lateTriggered && lateReason ? 1 : 0)}
+                (lateTriggered && lateReason ? 1 : 0) +
+                (earlyTriggered && earlyReason ? 1 : 0)}
               {" / "}
               {triggeredCount} resolved
             </span>
@@ -655,6 +732,85 @@ function CheckInPage() {
                   value={lateNote}
                   onChange={setLateNote}
                   placeholder="Traffic on M3, expected arrival earlier…"
+                />
+              </div>
+            )}
+          </ExceptionCard>
+        )}
+
+        {/* Early exception — only if triggered. Mirror of the late card. */}
+        {earlyTriggered && earlyInfo && (
+          <ExceptionCard
+            tone="warn"
+            iconName="clock"
+            title="Early check-in"
+            subtitle={
+              earlyResolved
+                ? `Reason · ${earlyReason}`
+                : `${formatLateness(earlyInfo.minutesEarly)} before ${earlyInfo.startLabel} start.`
+            }
+            open={openException === "early"}
+            onToggle={() => setOpenException(openException === "early" ? null : "early")}
+            resolved={earlyResolved}
+          >
+            <div
+              style={{
+                marginTop: 10,
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: 8,
+              }}
+            >
+              <Stat label="Scheduled" value={earlyInfo.startLabel} />
+              <Stat label="Now" value={earlyInfo.nowLabel} />
+              <Stat
+                label="Early by"
+                value={formatLateness(earlyInfo.minutesEarly)}
+                tone="warn"
+              />
+            </div>
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 11.5,
+                color: MC.mute,
+                marginTop: 8,
+              }}
+            >
+              Grace period: {earlyGraceMinutes} min before scheduled start.
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: MC.ink2,
+                  marginBottom: 8,
+                }}
+              >
+                Why are you checking in early?
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {EARLY_REASONS.map((r) => (
+                  <ReasonChip
+                    key={r}
+                    label={r}
+                    selected={earlyReason === r}
+                    onClick={() =>
+                      handleSetEarlyReason(earlyReason === r ? null : r)
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+            {earlyReason && (
+              <div style={{ marginTop: 14 }}>
+                <NoteField
+                  label="Add a note (optional)"
+                  value={earlyNote}
+                  onChange={setEarlyNote}
+                  placeholder="Customer asked me to come 30 min early…"
                 />
               </div>
             )}
