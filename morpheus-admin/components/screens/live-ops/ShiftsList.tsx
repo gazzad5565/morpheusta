@@ -268,8 +268,18 @@ function ShiftRowView({
   const state = STATE_MAP[stateKey] || STATE_MAP.scheduled;
   const checkIn = formatCheckIn(row.check_in_at);
 
+  // Make the row a link to the shift detail page. The trailing "more"
+  // button stops propagation so it doesn't trigger navigation.
   return (
-    <div style={shiftRowGrid()}>
+    <a
+      href={`/shifts/${row.id}`}
+      style={{
+        ...shiftRowGrid(),
+        textDecoration: "none",
+        color: "inherit",
+        cursor: "pointer",
+      }}
+    >
       <div
         style={{
           width: 3,
@@ -426,6 +436,11 @@ function ShiftRowView({
 
       <button
         type="button"
+        onClick={(e) => {
+          // Don't navigate to /shifts/[id] when the menu trigger is tapped.
+          e.preventDefault();
+          e.stopPropagation();
+        }}
         style={{
           width: 26,
           height: 26,
@@ -440,7 +455,7 @@ function ShiftRowView({
       >
         <AGlyph name="more" size={16} color={AC.mute} />
       </button>
-    </div>
+    </a>
   );
 }
 

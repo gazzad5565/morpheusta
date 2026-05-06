@@ -17,6 +17,10 @@ import {
   getTasksForCustomer,
   type TaskRow,
 } from "@/lib/shifts-store";
+import {
+  listCompletedTaskIds,
+  markTaskComplete,
+} from "@/lib/task-completions-store";
 
 interface ShiftData {
   name: string;
@@ -26,6 +30,8 @@ interface ShiftData {
   distance: string;
   checkInAt: string | null;
   customerId: string;
+  /** The real `shifts.id` UUID — used for persisting task completions. */
+  shiftId: string;
 }
 
 export default function ActiveShiftPage() {
@@ -52,9 +58,13 @@ export default function ActiveShiftPage() {
         distance: s.distance,
         checkInAt: s.checkInAt,
         customerId: s.id,
+        shiftId: s.realId,
       });
       setLoadedShift(true);
-      const rows = await getTasksForCustomer(s.id);
+      const [rows, alreadyDone] = await Promise.all([
+        getTasksForCustomer(s.id),
+        listCompletedTaskIds(s.realId),
+      ]);
       if (cancelled) return;
       setTasks(
         rows.map((r: TaskRow): Task => ({
@@ -65,6 +75,9 @@ export default function ActiveShiftPage() {
           description: r.description ?? "",
         }))
       );
+      // Hydrate completed-state from the DB so closing/reopening the
+      // app mid-shift doesn't lose the rep's ticks.
+      if (alreadyDone.length > 0) setCompletedTaskIds(alreadyDone);
     })();
     return () => {
       cancelled = true;
@@ -221,10 +234,22 @@ export default function ActiveShiftPage() {
 
   const completeTask = () => {
     if (!openSheet) return;
+    const taskId = openSheet.task.id;
     setActiveTaskId(null);
     setActiveTaskStartedAt(null);
-    setCompletedTaskIds((ids) => [...ids, openSheet.task.id]);
+    setCompletedTaskIds((ids) => (ids.includes(taskId) ? ids : [...ids, taskId]));
     setOpenSheet(null);
+    // Persist to DB so the manager can see what was done on this shift.
+    // Fire-and-forget; if it fails the local UI still reflects the tick
+    // and we'd rather leave that than block the rep on a flaky network.
+    if (shiftData?.shiftId) {
+      void markTaskComplete(shiftData.shiftId, taskId).then((r) => {
+        if (!r.ok) {
+          // eslint-disable-next-line no-console
+          console.warn("[active] markTaskComplete failed:", r.error);
+        }
+      });
+    }
   };
 
   const sheetMode = openSheet

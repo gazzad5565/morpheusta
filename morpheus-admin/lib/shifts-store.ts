@@ -98,6 +98,23 @@ export interface NewShift {
   rep_id?: string | null;
 }
 
+/** One shift by id, with the joined customer block. Used by the shift
+ *  detail page. */
+export async function getShiftById(id: string): Promise<ShiftRow | null> {
+  if (!isSupabaseConfigured() || !supabase) return null;
+  const { data, error } = await supabase
+    .from("shifts")
+    .select("*, customers(id,name,initials,color,code)")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] getById:", error.message);
+    return null;
+  }
+  return (data as ShiftRow | null) ?? null;
+}
+
 export async function createShift(
   s: NewShift
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
