@@ -534,17 +534,33 @@ function DayCell({
         display: "flex",
         flexDirection: "column",
         gap: 6,
+        // Cap the column height so a busy day doesn't stretch the
+        // whole grid row to 50+ cards tall. Shifts beyond what fits
+        // become scrollable inside the cell. The "+ Add" stays anchored
+        // at the bottom regardless.
+        maxHeight: 640,
+        overflow: "hidden",
       }}
     >
-      {shifts.map((s) => {
-        const repLabel = s.rep_id ? repNameMap[s.rep_id] || "Rep" : "Unassigned";
-        return <ShiftCard key={s.id} shift={s} repLabel={repLabel} />;
-      })}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        {shifts.map((s) => {
+          const repLabel = s.rep_id ? repNameMap[s.rep_id] || "Rep" : "Unassigned";
+          return <ShiftCard key={s.id} shift={s} repLabel={repLabel} />;
+        })}
+      </div>
       <Link
         href={addHref}
         aria-label={`Add shift on ${iso}`}
         style={{
-          marginTop: shifts.length === 0 ? 0 : "auto",
           minHeight: shifts.length === 0 ? 56 : 28,
           borderRadius: 6,
           border: `1px dashed ${AC.line}`,
@@ -558,6 +574,7 @@ function DayCell({
           fontSize: 11,
           fontWeight: 500,
           gap: 4,
+          flexShrink: 0,
         }}
       >
         <AGlyph name="plus" size={11} color={AC.faint} />
@@ -685,33 +702,21 @@ function RepRow({
         >
           {deriveInitials(rep)}
         </div>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 12,
-              fontWeight: 600,
-              color: AC.ink,
-              letterSpacing: -0.1,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {displayName(rep)}
-          </div>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 10.5,
-              color: AC.mute,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {rep.email}
-          </div>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            fontWeight: 600,
+            color: AC.ink,
+            letterSpacing: -0.1,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            minWidth: 0,
+          }}
+          title={rep.email}
+        >
+          {displayName(rep)}
         </div>
       </div>
       {days.map((d) => {
@@ -841,13 +846,19 @@ function RepDayCell({
     <div
       style={{
         position: "relative",
-        minHeight: 70,
+        // Lock every cell in the rep grid to the same height range so
+        // a single dense day can't stretch the whole rep row to 5x the
+        // height of its empty neighbours. Shifts beyond what fits
+        // become scrollable inside the cell.
+        minHeight: 78,
+        maxHeight: 156,
         padding: 6,
         borderLeft: `1px solid ${AC.lineDim}`,
         background: isToday ? "#FAFCFD" : isWeekend ? AC.bg : "#fff",
         display: "flex",
         flexDirection: "column",
         gap: 4,
+        overflowY: "auto",
       }}
     >
       {shifts.map((s) => {
