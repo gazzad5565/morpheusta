@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
-import { SAMPLE, type Customer } from "@/lib/mock-data";
+import { type Customer } from "@/lib/mock-data";
 import { addRequestedShift, listRequestedShifts } from "@/lib/shift-store";
 import { listAllCustomers } from "@/lib/customers-store";
+import { listMyShiftsToday } from "@/lib/shifts-store";
 import { AppHeader, AppFooter, CustomerTile } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
 
@@ -21,8 +22,12 @@ export default function AddShiftPage() {
   // Track which customers have already been requested so we can show
   // a "Requested" state on the row instead of the Request button.
   const [requestedIds, setRequestedIds] = useState<string[]>([]);
+  // Customer ids the rep is already scheduled for today — those rows
+  // get a "Today" pill instead of a Request button. Pulled from the
+  // real shifts table, not mock data.
+  const [todayIds, setTodayIds] = useState<Set<string>>(() => new Set());
 
-  // Hydrate both lists from the DB on mount.
+  // Hydrate everything from the DB on mount.
   useEffect(() => {
     let cancelled = false;
     listRequestedShifts().then((rows) => {
@@ -31,12 +36,13 @@ export default function AddShiftPage() {
     listAllCustomers().then((rows) => {
       if (!cancelled) setAllCustomers(rows);
     });
+    listMyShiftsToday().then((rows) => {
+      if (!cancelled) setTodayIds(new Set(rows.map((s) => s.id)));
+    });
     return () => {
       cancelled = true;
     };
   }, []);
-
-  const todayIds = new Set(SAMPLE.shifts.map((s) => s.id));
 
   const filtered = useMemo(() => {
     if (!allCustomers) return [];

@@ -3,7 +3,6 @@
 import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
-import { SAMPLE } from "@/lib/mock-data";
 import {
   AppHeader,
   AppFooter,
@@ -27,11 +26,16 @@ function SummaryPage() {
   const offsiteNote = params.get("offsiteNote") || "";
   const earlyReason = params.get("earlyReason");
   const earlyNote = params.get("earlyNote") || "";
+  // Customer name passed by /check-out so we don't need to refetch the
+  // shift here. Falls back to a generic label if missing.
+  const customerName = params.get("customer") || "your shift";
 
-  const shift = SAMPLE.shifts[0];
-  const tasksDone = 3;
-  const totalTasks = 4;
-  const totalElapsed = 60 * 47;
+  // TODO: thread real per-shift task counts + elapsed through the URL
+  // params too. Placeholder values for now (display-only on this
+  // post-shift confirmation screen).
+  const tasksDone = 0;
+  const totalTasks = 0;
+  const totalElapsed = 0;
   const hh = Math.floor(totalElapsed / 3600);
   const mm = Math.floor((totalElapsed % 3600) / 60);
   const exceptionCount = (offsiteReason ? 1 : 0) + (earlyReason ? 1 : 0);
@@ -76,7 +80,7 @@ function SummaryPage() {
           Checked out
         </div>
         <div style={{ fontFamily: MC.font, fontSize: 14, color: MC.mute, marginTop: 4 }}>
-          {shift.name} · {hh > 0 ? `${hh}h ` : ""}
+          {customerName} · {hh > 0 ? `${hh}h ` : ""}
           {mm}m on shift
         </div>
       </div>

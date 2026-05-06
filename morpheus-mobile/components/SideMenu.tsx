@@ -1,11 +1,20 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { Glyph, MorpheusMark, type GlyphName } from "./Glyph";
 import { useMenu } from "./MenuShell";
 import { signOut } from "@/lib/auth";
+import { getMyProfile, type Profile } from "@/lib/profiles-store";
+
+function deriveInitials(name: string | null, email: string): string {
+  const src = (name?.trim() || email.split("@")[0] || "?").trim();
+  const parts = src.split(/[\s._-]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return (parts[0]?.slice(0, 2) || "??").toUpperCase();
+}
 
 interface Item {
   id: string;
@@ -15,10 +24,9 @@ interface Item {
   href: string;
 }
 
-// Direct port of nav.jsx SideMenu items, plus Profile + Add shift.
 const ITEMS: Item[] = [
-  { id: "shifts",    label: "Today's Shifts", icon: "clock", color: MC.brand,  href: "/" },
-  { id: "addshift",  label: "Add shift",      icon: "pin",   color: MC.brand,  href: "/add-shift" },
+  { id: "shifts",    label: "Today",          icon: "clock", color: MC.brand,  href: "/" },
+  { id: "addshift",  label: "Request shift",  icon: "pin",   color: MC.brand,  href: "/add-shift" },
   { id: "library",   label: "Library",        icon: "book",  color: "#5b3da5", href: "/library" },
   { id: "support",   label: "Support",        icon: "mic",   color: "#9c4a2c", href: "/support" },
   { id: "profile",   label: "Profile",        icon: "leave", color: MC.mute,   href: "/profile" },
@@ -35,6 +43,17 @@ export function SideMenu() {
   const { open, setOpen } = useMenu();
   const pathname = usePathname() || "/";
   const router = useRouter();
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMyProfile().then((p) => {
+      if (!cancelled) setProfile(p);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!open) return null;
 
@@ -142,11 +161,22 @@ export function SideMenu() {
                 letterSpacing: 0.5,
               }}
             >
-              M2
+              {profile ? deriveInitials(profile.name, profile.email) : "··"}
             </div>
-            <div>
-              <div style={{ fontFamily: MC.font, fontSize: 15, fontWeight: 600 }}>
-                Merchandiser2
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 15,
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {profile?.name?.trim() ||
+                  profile?.email?.split("@")[0] ||
+                  "Loading…"}
               </div>
               <div
                 style={{
@@ -154,9 +184,12 @@ export function SideMenu() {
                   fontSize: 11.5,
                   color: "rgba(255,255,255,.55)",
                   marginTop: 2,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                 }}
               >
-                devtest · v1.0.21
+                {profile?.email || ""}
               </div>
             </div>
           </div>
@@ -242,7 +275,7 @@ export function SideMenu() {
             borderTop: `1px solid ${MC.line}`,
           }}
         >
-          Powered by Morpheus · build 255
+          Powered by Morpheus
         </div>
       </div>
     </div>

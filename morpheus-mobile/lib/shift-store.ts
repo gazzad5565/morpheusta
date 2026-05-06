@@ -65,9 +65,9 @@ interface DbRow {
 }
 
 function rowToShift(row: DbRow): RequestedShift {
-  // Use customer_id as the externally-visible id so callers compare with
-  // ALL_CUSTOMERS[i].id (which is also the customer code). The DB row's id
-  // is a composite "{userId}-{customerId}" — internal only.
+  // Use customer_id as the externally-visible id so it matches the
+  // customer id used elsewhere in the app. The DB row's id is a
+  // composite "{userId}-{customerId}" — internal only.
   return {
     id: row.customer_id,
     name: row.customer_name,

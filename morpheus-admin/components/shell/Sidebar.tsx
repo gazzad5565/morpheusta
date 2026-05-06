@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AC } from "@/lib/tokens";
-import { ORG, CURRENT_USER, NAV_ITEMS } from "@/lib/mock-data";
+import { NAV_ITEMS } from "@/lib/mock-data";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { getUser, signOut } from "@/lib/auth";
 import {
@@ -13,7 +13,7 @@ import {
 } from "@/lib/settings-store";
 
 function nameFromEmail(email: string | null | undefined): { name: string; initials: string } {
-  if (!email) return { name: CURRENT_USER.name, initials: CURRENT_USER.initials };
+  if (!email) return { name: "", initials: "··" };
   const local = email.split("@")[0] || "";
   const parts = local.split(/[._-]/).filter(Boolean);
   const name = parts.length
@@ -49,7 +49,7 @@ export function Sidebar() {
     };
   }, []);
   const { name: userName, initials: userInitials } = nameFromEmail(userEmail);
-  const userRole = userEmail ? "Field Ops Manager" : CURRENT_USER.role;
+  const userRole = userEmail ? "Field Ops Manager" : "";
   const handleLogout = () => {
     // Fire-and-forget so a slow network can't trap the user. Wipe any
     // cached Supabase tokens and hard-reload to /login as a safety net.
@@ -245,65 +245,10 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Org switcher */}
-      <button
-        type="button"
-        style={{
-          margin: "10px 12px 6px",
-          padding: "10px 12px",
-          background: "#171B22",
-          border: "1px solid #232932",
-          borderRadius: 10,
-          color: AC.sideInk,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          cursor: "pointer",
-          textAlign: "left",
-        }}
-      >
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 7,
-            background: "#2E4FB8",
-            color: "#fff",
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 700,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          AF
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 12.5,
-              fontWeight: 600,
-              color: AC.sideInk,
-              letterSpacing: -0.1,
-            }}
-          >
-            {ORG.name}
-          </div>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 10.5,
-              color: AC.sideMute,
-              marginTop: 1,
-            }}
-          >
-            {ORG.plan}
-          </div>
-        </div>
-        <AGlyph name="chev-d" size={14} color={AC.sideMute} />
-      </button>
+      {/* Org name + logo are shown in the brand block above. The
+          previous "Org switcher" pill below the module switcher used
+          mock ORG data + we don't have multi-org tenancy yet, so it's
+          gone. If we add tenancy later, drop a real switcher here. */}
 
       {/* Nav */}
       <div style={{ padding: "10px 8px", display: "flex", flexDirection: "column", gap: 1 }}>

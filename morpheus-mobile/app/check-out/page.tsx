@@ -296,6 +296,7 @@ function CheckOutPage() {
     const params = new URLSearchParams({
       ...(offsiteReason ? { offsiteReason, offsiteNote } : {}),
       ...(earlyReason ? { earlyReason, earlyNote } : {}),
+      ...(shift?.name ? { customer: shift.name } : {}),
     });
     router.push(`/summary?${params.toString()}`);
   };
