@@ -389,8 +389,29 @@ function CheckInPage() {
         },
       });
     }
-    // 3. Forward the resolved reasons to the success screen for display.
+    // 3. Forward EVERYTHING the success screen needs so it's not
+    //    static. Customer name + check-in clock time + a discriminator
+    //    saying whether late/early/offsite actually fired (and the
+    //    minutes for late/early) so the success card renders the
+    //    right pills only.
+    const checkInClock = formatClockTime(new Date());
+    const lateMinutes =
+      lateTriggered && lateInfo
+        ? String(Math.round(lateInfo.minutesLate))
+        : "";
+    const earlyMinutes =
+      earlyTriggered && earlyInfo
+        ? String(Math.round(earlyInfo.minutesEarly))
+        : "";
     const sp = new URLSearchParams({
+      customer: shift.name,
+      shift: shift.realId,
+      checkInAt: checkInClock,
+      ...(offsiteTriggered && offsiteInfo && "distanceM" in offsiteInfo && offsiteInfo.distanceM != null
+        ? { offsiteDistanceM: String(Math.round(offsiteInfo.distanceM)) }
+        : {}),
+      ...(lateMinutes ? { lateMinutes } : {}),
+      ...(earlyMinutes ? { earlyMinutes } : {}),
       ...(locationReason ? { locationReason, locationNote } : {}),
       ...(lateReason ? { lateReason, lateNote } : {}),
       ...(earlyReason ? { earlyReason, earlyNote } : {}),

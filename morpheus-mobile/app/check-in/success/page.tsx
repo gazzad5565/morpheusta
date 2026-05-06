@@ -1,10 +1,40 @@
 "use client";
 
+/**
+ * /check-in/success — confirmation screen after a successful check-in.
+ *
+ * Reads everything from URL params (passed by /check-in on success):
+ *   - customer        : human-readable customer name
+ *   - shift           : real shifts.id (used to find the next shift)
+ *   - checkInAt       : "HH:MM AM/PM" wall-clock time of the check-in
+ *   - offsiteDistanceM: distance from site, only present if off-site fired
+ *   - lateMinutes     : minutes late, only present if late fired
+ *   - earlyMinutes    : minutes early, only present if early fired
+ *   - locationReason  : rep's reason chip selection (off-site)
+ *   - locationNote    : optional note (off-site)
+ *   - lateReason / lateNote
+ *   - earlyReason / earlyNote
+ *
+ * Renders only the exception cards that actually fired. If none fired,
+ * shows a clean "All clear" body. The next-shift block is live-loaded
+ * from listMyShiftsToday() and shows whichever scheduled shift comes
+ * after the one you just checked into — hidden if there isn't one.
+ */
+
+import { useEffect, useState, Suspense, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import Link from "next/link";
 import { MC } from "@/lib/tokens";
 import { AppHeader, AppFooter, CustomerTile, PrimaryButton } from "@/components/Chrome";
 import { Glyph, type GlyphName } from "@/components/Glyph";
+import { listMyShiftsToday } from "@/lib/shifts-store";
+import type { Shift } from "@/lib/mock-data";
+
+type DbShift = Shift & {
+  realId: string;
+  state: string;
+  checkInAt: string | null;
+};
 
 export default function SuccessPageWrapper() {
   return (
@@ -14,13 +44,76 @@ export default function SuccessPageWrapper() {
   );
 }
 
+function formatLatenessShort(mins: number): string {
+  const m = Math.round(mins);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
+}
+
+function formatDistanceShort(meters: number): string {
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(meters < 10000 ? 2 : 1)} km`;
+}
+
 function SuccessPage() {
   const router = useRouter();
   const params = useSearchParams();
-  const locationReason = params.get("locationReason") || "Customer site closed";
+
+  const customerName = params.get("customer") || "your shift";
+  const shiftId = params.get("shift") || "";
+  const checkInAt = params.get("checkInAt") || "";
+
+  const offsiteDistanceM = parseInt(params.get("offsiteDistanceM") || "", 10);
+  const lateMinutes = parseInt(params.get("lateMinutes") || "", 10);
+  const earlyMinutes = parseInt(params.get("earlyMinutes") || "", 10);
+
+  const locationReason = params.get("locationReason") || "";
   const locationNote = params.get("locationNote") || "";
-  const lateReason = params.get("lateReason") || "Traffic";
+  const lateReason = params.get("lateReason") || "";
   const lateNote = params.get("lateNote") || "";
+  const earlyReason = params.get("earlyReason") || "";
+  const earlyNote = params.get("earlyNote") || "";
+
+  const offsiteFired = !Number.isNaN(offsiteDistanceM);
+  const lateFired = !Number.isNaN(lateMinutes) && lateMinutes > 0;
+  const earlyFired = !Number.isNaN(earlyMinutes) && earlyMinutes > 0;
+  const anyException = offsiteFired || lateFired || earlyFired;
+
+  // Find the next scheduled shift after the one we just checked into.
+  // Pulled live from listMyShiftsToday so a manager-assigned later
+  // shift shows up correctly even if it landed after this page mounted.
+  const [todayShifts, setTodayShifts] = useState<DbShift[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    listMyShiftsToday().then((rows) => {
+      if (!cancelled) setTodayShifts(rows as DbShift[]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const nextShift = useMemo<DbShift | null>(() => {
+    if (!todayShifts) return null;
+    // Find the shift we just checked into (state should now be in-progress).
+    const current = todayShifts.find((s) => s.realId === shiftId);
+    if (!current) {
+      // Fall back: pick the next "scheduled" shift on the day.
+      return (
+        todayShifts
+          .filter((s) => s.state === "scheduled")
+          .sort((a, b) => a.start.localeCompare(b.start))[0] || null
+      );
+    }
+    // Pick the earliest scheduled shift whose start_time > current.start
+    return (
+      todayShifts
+        .filter((s) => s.state === "scheduled" && s.start > current.start)
+        .sort((a, b) => a.start.localeCompare(b.start))[0] || null
+    );
+  }, [todayShifts, shiftId]);
 
   return (
     <div
@@ -90,82 +183,134 @@ function SuccessPage() {
             color: MC.mute,
             marginTop: 6,
             textAlign: "center",
-            maxWidth: 300,
+            maxWidth: 320,
+            lineHeight: 1.5,
           }}
         >
-          Shift at GreenWave Innovations started at 2:13 PM. Your reasons were sent to your
-          manager.
+          Shift at <b style={{ color: MC.ink }}>{customerName}</b>
+          {checkInAt ? <> started at <b style={{ color: MC.ink }}>{checkInAt}</b></> : null}
+          .
+          {anyException && " Your reasons were sent to your manager."}
         </div>
 
-        <div
-          style={{
-            width: "100%",
-            background: MC.card,
-            border: `1px solid ${MC.line}`,
-            borderRadius: MC.radiusCard,
-            padding: 14,
-            marginTop: 22,
-          }}
-        >
-          <SummaryRow
-            iconTone={MC.dangerTint}
-            iconColor={MC.danger}
-            iconName="pin"
-            title="Off-site check-in"
-            value={locationReason}
-            note={locationNote}
-          />
-          <div style={{ height: 1, background: MC.line, margin: "12px 0" }} />
-          <SummaryRow
-            iconTone={MC.warnTint}
-            iconColor="#b27606"
-            iconName="clock"
-            title="Late by 6h 13m"
-            value={lateReason}
-            note={lateNote}
-          />
-        </div>
-
-        <div
-          style={{
-            width: "100%",
-            marginTop: 16,
-            padding: 14,
-            background: MC.card,
-            border: `1px solid ${MC.line}`,
-            borderRadius: MC.radiusCard,
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
-          <CustomerTile initials="N" color={MC.swatch.NG} size={40} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontFamily: MC.font,
-                fontSize: 11,
-                color: MC.hint,
-                fontWeight: 600,
-                letterSpacing: 0.6,
-                textTransform: "uppercase",
-              }}
-            >
-              Next shift
-            </div>
-            <div
-              style={{
-                fontFamily: MC.fontDisplay,
-                fontSize: 15,
-                fontWeight: 700,
-                color: MC.ink,
-              }}
-            >
-              NextGenTech
-            </div>
+        {/* Exception cards — render only the ones that actually fired. */}
+        {anyException && (
+          <div
+            style={{
+              width: "100%",
+              background: MC.card,
+              border: `1px solid ${MC.line}`,
+              borderRadius: MC.radiusCard,
+              padding: 14,
+              marginTop: 22,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            {offsiteFired && (
+              <SummaryRow
+                iconTone={MC.dangerTint}
+                iconColor={MC.danger}
+                iconName="pin"
+                title={`Off-site by ${formatDistanceShort(offsiteDistanceM)}`}
+                value={locationReason || "Reason not given"}
+                note={locationNote}
+              />
+            )}
+            {lateFired && (
+              <>
+                {offsiteFired && <Divider />}
+                <SummaryRow
+                  iconTone={MC.warnTint}
+                  iconColor="#b27606"
+                  iconName="clock"
+                  title={`Late by ${formatLatenessShort(lateMinutes)}`}
+                  value={lateReason || "Reason not given"}
+                  note={lateNote}
+                />
+              </>
+            )}
+            {earlyFired && (
+              <>
+                {(offsiteFired || lateFired) && <Divider />}
+                <SummaryRow
+                  iconTone={MC.warnTint}
+                  iconColor="#b27606"
+                  iconName="clock"
+                  title={`Early by ${formatLatenessShort(earlyMinutes)}`}
+                  value={earlyReason || "Reason not given"}
+                  note={earlyNote}
+                />
+              </>
+            )}
           </div>
-          <Glyph name="chev-r" size={18} color={MC.mute} />
-        </div>
+        )}
+
+        {/* Next shift — live from the DB, hidden if there isn't one. */}
+        {nextShift && (
+          <Link
+            href={`/check-in?shift=${nextShift.realId}`}
+            style={{ width: "100%", textDecoration: "none", marginTop: 16 }}
+          >
+            <div
+              style={{
+                width: "100%",
+                padding: 14,
+                background: MC.card,
+                border: `1px solid ${MC.line}`,
+                borderRadius: MC.radiusCard,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <CustomerTile
+                initials={nextShift.initials}
+                color={nextShift.color}
+                size={40}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 11,
+                    color: MC.hint,
+                    fontWeight: 600,
+                    letterSpacing: 0.6,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Next shift
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.fontDisplay,
+                    fontSize: 15,
+                    fontWeight: 700,
+                    color: MC.ink,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {nextShift.name}
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 12,
+                    color: MC.mute,
+                    marginTop: 1,
+                  }}
+                >
+                  {nextShift.start} – {nextShift.end}
+                </div>
+              </div>
+              <Glyph name="chev-r" size={18} color={MC.mute} />
+            </div>
+          </Link>
+        )}
       </div>
 
       <div style={{ padding: "0 16px 18px" }}>
@@ -177,6 +322,10 @@ function SuccessPage() {
       <AppFooter />
     </div>
   );
+}
+
+function Divider() {
+  return <div style={{ height: 1, background: MC.line }} />;
 }
 
 function SummaryRow({
