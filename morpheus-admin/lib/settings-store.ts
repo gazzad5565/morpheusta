@@ -62,3 +62,21 @@ export async function setEarlyGraceMinutes(
 ): Promise<{ ok: boolean; error?: string }> {
   return writeSetting("early_grace_minutes", Math.max(0, Math.round(minutes)));
 }
+
+// Default geofence radius for new customers (per-customer override on
+// each customer's Address tab takes precedence).
+export const DEFAULT_GEOFENCE_RADIUS_M = 100;
+
+export async function getDefaultGeofenceRadius(): Promise<number> {
+  const v = await readSetting<number>(
+    "default_geofence_radius_m",
+    DEFAULT_GEOFENCE_RADIUS_M
+  );
+  return typeof v === "number" && v > 0 ? v : DEFAULT_GEOFENCE_RADIUS_M;
+}
+
+export async function setDefaultGeofenceRadius(
+  meters: number
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting("default_geofence_radius_m", Math.max(1, Math.round(meters)));
+}
