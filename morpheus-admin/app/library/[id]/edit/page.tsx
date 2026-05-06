@@ -26,6 +26,7 @@ import {
   type LibraryFile,
 } from "@/lib/library-store";
 import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
+import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
 
 export default function EditLibraryFilePage({
@@ -219,20 +220,21 @@ export default function EditLibraryFilePage({
           </div>
         </Card>
 
-        <Card padding={16}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 11,
-              fontWeight: 600,
-              color: AC.mute,
-              letterSpacing: 0.4,
-              textTransform: "uppercase",
-              marginBottom: 8,
-            }}
-          >
-            File details
-          </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card padding={16}>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 11,
+                fontWeight: 600,
+                color: AC.mute,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                marginBottom: 8,
+              }}
+            >
+              File details
+            </div>
           <div
             style={{
               fontFamily: AC.font,
@@ -273,6 +275,8 @@ export default function EditLibraryFilePage({
             To replace the file content, delete this entry and re-upload from the Library page.
           </div>
         </Card>
+        <CustomFieldsCard entity="library_file" entityId={id} />
+        </div>
       </div>
     </AdminShell>
   );

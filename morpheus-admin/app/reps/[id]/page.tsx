@@ -15,6 +15,7 @@ import {
   listCustomersForRep,
   setCustomersForRep,
 } from "@/lib/assignments-store";
+import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
 
 function deriveInitials(name: string, email: string): string {
@@ -224,6 +225,7 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
               />
             </div>
           </Card>
+          <CustomFieldsCard entity="rep" entityId={profile.id} />
         </div>
 
         {/* Right: shifts list */}

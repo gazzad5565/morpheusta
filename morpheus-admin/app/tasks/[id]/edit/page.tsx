@@ -18,6 +18,7 @@ import { inputStyle } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
 import { getTask, updateTask, deleteTask } from "@/lib/tasks-store";
+import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
 
 export default function EditTaskPage({
@@ -261,32 +262,35 @@ export default function EditTaskPage({
           </div>
         </Card>
 
-        <Card padding={16}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 11,
-              fontWeight: 600,
-              color: AC.mute,
-              letterSpacing: 0.4,
-              textTransform: "uppercase",
-              marginBottom: 8,
-            }}
-          >
-            About editing
-          </div>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 12.5,
-              color: AC.ink2,
-              lineHeight: 1.55,
-            }}
-          >
-            Edits affect this single row. To re-spray a task across many customers, delete this
-            row and create a fresh one with the multi-customer scope.
-          </div>
-        </Card>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card padding={16}>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 11,
+                fontWeight: 600,
+                color: AC.mute,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                marginBottom: 8,
+              }}
+            >
+              About editing
+            </div>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 12.5,
+                color: AC.ink2,
+                lineHeight: 1.55,
+              }}
+            >
+              Edits affect this single row. To re-spray a task across many customers, delete this
+              row and create a fresh one with the multi-customer scope.
+            </div>
+          </Card>
+          <CustomFieldsCard entity="task" entityId={id} />
+        </div>
       </div>
     </AdminShell>
   );
