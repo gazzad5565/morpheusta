@@ -124,6 +124,45 @@ function SuccessPage() {
         flexDirection: "column",
       }}
     >
+      {/* Animation keyframes scoped to this page. Drive a one-shot
+          celebration sequence: ring pulses outward, halo + disc pop
+          in, the checkmark draws itself stroke-by-stroke, and the
+          content below staggers up. Plays once on mount, no repeat. */}
+      <style>{`
+        @keyframes ci-pop {
+          0%   { transform: scale(0); opacity: 0; }
+          60%  { transform: scale(1.08); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes ci-ring {
+          0%   { transform: translate(-50%, -50%) scale(0.85); opacity: 0.75; }
+          100% { transform: translate(-50%, -50%) scale(2.4);  opacity: 0; }
+        }
+        @keyframes ci-draw {
+          to { stroke-dashoffset: 0; }
+        }
+        @keyframes ci-fade-up {
+          0%   { opacity: 0; transform: translateY(10px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+        .ci-fade-up { animation: ci-fade-up .42s cubic-bezier(.22, 1, .36, 1) both; }
+        .ci-stage { animation: ci-pop .42s cubic-bezier(.34, 1.6, .64, 1) both; }
+        .ci-ring  { animation: ci-ring 1.6s cubic-bezier(.16, 1, .3, 1) .15s both; }
+        .ci-ring-2 { animation-delay: .45s; }
+        .ci-ring-3 { animation-delay: .75s; }
+        .ci-check-path {
+          stroke-dasharray: 28;
+          stroke-dashoffset: 28;
+          animation: ci-draw .38s cubic-bezier(.65, 0, .35, 1) .28s both;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .ci-stage, .ci-ring, .ci-check-path, .ci-fade-up {
+            animation: none !important;
+          }
+          .ci-check-path { stroke-dashoffset: 0; }
+        }
+      `}</style>
+
       <AppHeader title="Checked in" onBack={() => router.push("/")} />
 
       <div
@@ -135,36 +174,87 @@ function SuccessPage() {
           alignItems: "center",
         }}
       >
+        {/* Animated celebration stage. Three rings pulse outward from
+            the center, a soft halo + brand disc pop in, and the
+            checkmark draws itself in. */}
         <div
           style={{
-            width: 104,
-            height: 104,
-            borderRadius: "50%",
-            background:
-              "radial-gradient(circle at 30% 30%, #E3F6FB 0%, #B7E6F2 70%, #8FD4E6 100%)",
+            position: "relative",
+            width: 160,
+            height: 160,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            boxShadow: `0 20px 40px ${MC.brand}40`,
           }}
         >
+          {/* Pulsing rings — absolutely positioned + transform-origin
+              center via the translate(-50%,-50%) trick. */}
+          {[1, 2, 3].map((i) => (
+            <span
+              key={i}
+              className={`ci-ring ci-ring-${i}`}
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                width: 104,
+                height: 104,
+                borderRadius: "50%",
+                border: `2px solid ${MC.brand}`,
+                pointerEvents: "none",
+              }}
+              aria-hidden
+            />
+          ))}
+
+          {/* Halo + disc + animated check */}
           <div
+            className="ci-stage"
             style={{
-              width: 72,
-              height: 72,
+              width: 104,
+              height: 104,
               borderRadius: "50%",
-              background: MC.brand,
+              background:
+                "radial-gradient(circle at 30% 30%, #E3F6FB 0%, #B7E6F2 70%, #8FD4E6 100%)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              boxShadow: `0 20px 40px ${MC.brand}40`,
+              position: "relative",
             }}
           >
-            <Glyph name="check" size={38} color="#fff" strokeWidth={2.5} />
+            <div
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: "50%",
+                background: MC.brand,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg
+                width={38}
+                height={38}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#fff"
+                strokeWidth={2.6}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path className="ci-check-path" d="M5 12 L10 17 L19 8" />
+              </svg>
+            </div>
           </div>
         </div>
 
         <div
+          className="ci-fade-up"
           style={{
+            animationDelay: ".42s",
             fontFamily: MC.fontDisplay,
             fontSize: 24,
             fontWeight: 700,
@@ -177,7 +267,9 @@ function SuccessPage() {
           You&apos;re checked in
         </div>
         <div
+          className="ci-fade-up"
           style={{
+            animationDelay: ".55s",
             fontFamily: MC.font,
             fontSize: 14,
             color: MC.mute,
@@ -196,7 +288,9 @@ function SuccessPage() {
         {/* Exception cards — render only the ones that actually fired. */}
         {anyException && (
           <div
+            className="ci-fade-up"
             style={{
+              animationDelay: ".7s",
               width: "100%",
               background: MC.card,
               border: `1px solid ${MC.line}`,
@@ -251,7 +345,13 @@ function SuccessPage() {
         {nextShift && (
           <Link
             href={`/check-in?shift=${nextShift.realId}`}
-            style={{ width: "100%", textDecoration: "none", marginTop: 16 }}
+            className="ci-fade-up"
+            style={{
+              animationDelay: ".85s",
+              width: "100%",
+              textDecoration: "none",
+              marginTop: 16,
+            }}
           >
             <div
               style={{
@@ -313,7 +413,10 @@ function SuccessPage() {
         )}
       </div>
 
-      <div style={{ padding: "0 16px 18px" }}>
+      <div
+        className="ci-fade-up"
+        style={{ animationDelay: "1s", padding: "0 16px 18px" }}
+      >
         <PrimaryButton onClick={() => router.push("/active")} icon="arrow-r">
           Start activities
         </PrimaryButton>
