@@ -94,22 +94,39 @@ No tests yet. No CI beyond Vercel auto-deploy on push to `main`.
 
 If you switch computers (or hand this project to a developer), this section is the complete onboarding. You shouldn't need anything that isn't here.
 
-### Where things stand right now (handover for tomorrow)
+### Where things stand right now (handover for the next chat)
 
-**Last commit:** `1ad5ee7` — "shift_events log + Live Feed merged & live; mobile breaks restored"
+**Last commit:** `110fd38` — "User CRUD via service-role server route + Add/Edit/Delete user UI"
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
 **Working end-to-end on real data (no mock fallbacks left in the rep flow):**
-- **Auth** (signup / login / logout) — both apps. Profile auto-created via `handle_new_user()` trigger on signup.
-- **Admin** — customers (create / edit / soft-delete + tabbed detail page with Address+geofence map / Reps editor / Tasks / Library / Today's shifts / Custom fields), reps roster + per-rep page (with Assigned customers editor), `/schedule` week-planner grid (real reps × 7 days), `/schedule/new` (multi-customer × recurring weekly = N shifts in one save), Live Ops home (realtime KPIs + shifts table + field map with live customer pins + green rep dots), Requests inbox (rep requests → Schedule pre-fills `/schedule/new` → on save deletes the request), Tasks library (Universal / Specific / Multi-customer at create time, edit + delete), Library storage (categories + multi-customer + edit + delete + signed-URL download), `/settings` Custom Fields CRUD (per-entity, 6 field types, required flag), clickable breadcrumbs everywhere.
-- **Mobile** — dashboard (real shifts / today's date / library count + MapLibre route preview with today's customer pins + rep GPS dot), shifts list (state badges: scheduled / in-progress / complete; complete dimmed + struck-through, sinks to bottom; "Resume shift" CTA on the active one), check-in (writes `state='in-progress'` + `check_in_at`), active shift (real customer info, real per-customer + universal tasks, timer anchored to real check-in time, standard 15/30/60-min break options), check-out (writes `state='complete'` + `tasks_done`; clears rep's GPS dot via Realtime).
-- **Realtime everywhere it matters:** KPIs + shifts table + field map rep dots + Live Feed (both tabs) all flip without a refresh. The Live Feed is just two tabs now: **Needs action** (pending requests) and **All activity** (the `shift_events` log).
-- **Activity log:** every CRUD action across both apps writes a row to `shift_events`. Reps tap "Request a customer" → admin sees it land in real time. Admin schedules → rep's `/shifts` updates and the event appears in the feed. And so on.
+- **Auth** (signup / login / logout) — both apps. Profile auto-created via `handle_new_user()` trigger that reads `role` + `name` from `raw_user_meta_data`. Mobile signups are reps; admin signups are managers. **Admin AuthGate locks out non-managers** with an "Admin console only" screen; reps redirected to mobile.
+- **User CRUD from admin** — `/settings/managers` lists every user with role badges + filter chips. "+ Add user" opens a modal: Name / Email / Role / auto-generated password (with regenerate + copy). "Edit" pencil per row → `/settings/managers/[id]/edit` to change name / email / role / reset password / delete user. All writes go through `/api/users` server route which uses the **Supabase service-role key** to call `auth.admin.*` and verifies the caller is a manager before doing anything sensitive.
+- **Admin** — customers (create / edit / soft-delete + tabbed detail page with Address+geofence map / Reps editor / Tasks / Library / Today's shifts / Custom fields), reps roster + per-rep page (with Assigned customers editor), `/schedule` week-planner grid (real reps × 7 days), `/schedule/new` (multi-customer × recurring weekly = N shifts in one save), Live Ops home (realtime KPIs + shifts table + field map with live customer pins + green rep dots), Requests inbox (rep requests → Schedule pre-fills `/schedule/new` → on save deletes the request), Tasks library (Universal / Specific / Multi-customer at create time, edit + delete), Library storage (categories + multi-customer + edit + delete + signed-URL download), `/settings` (sticky-nav sectioned page: Managers, Check-in rules, Custom fields, plus Org/Notifications/Billing placeholders), clickable breadcrumbs everywhere.
+- **Mobile** — dashboard (real shifts / today's date / library count + MapLibre route preview with today's customer pins + rep GPS dot), shifts list (state badges: scheduled / in-progress / complete; complete dimmed + struck-through, sinks to bottom; "Resume shift" CTA on the active one), check-in / check-out (only show off-site / late / early exception cards when the rule is actually broken — green "Ready to check in/out" state otherwise), active shift (real customer info, real per-customer + universal tasks, timer anchored to real check-in time, standard 15/30/60-min break options).
+- **Real exception logic on check-in / check-out** — Haversine distance to customer's lat/lng compared to that customer's `geofence_radius_m` for the off-site check; configurable late and early grace periods (`/settings` → Check-in rules) for the time-based checks. Each fired exception writes a dedicated event (`shift.checked_in_offsite`, `shift.checked_in_late`, `shift.checked_out_offsite`, `shift.checked_out_early`) with distance / minutes / reason / note in `meta`.
+- **Realtime everywhere it matters:** KPIs + shifts table + field map rep dots + Live Feed (both tabs) all flip without a refresh. Live Feed has two tabs: **Needs action** (pending requests) and **All activity** (the `shift_events` log).
+- **Activity log:** every CRUD action across both apps writes a row to `shift_events`. Reps tap "Request a customer" → admin sees it land in real time. Admin schedules → rep's `/shifts` updates and the event appears in the feed. Off-site / late / early exceptions get their own dedicated event types with `danger`/`warn` accents.
+- **Today timezone fix:** "today's shifts" no longer shows yesterday's rows past midnight in non-UTC timezones. Both apps' shifts-stores use a local-tz `todayLocalISO()`. Dashboards refetch on `document.visibilitychange` so a tab left open across midnight wakes up correctly.
 
-**You do NOT need to run any migration on the new machine** — schema lives on the shared Supabase project, code lives on GitHub. Just clone + `npm install` + `npm run dev`.
+### One critical env var on top of the standard ones
 
-**Migrations applied to the shared Supabase project (already in the cloud — DO NOT re-run on a new machine; only relevant for spinning up a brand-new Supabase environment):**
+The user-CRUD server route (`/api/users`) needs the Supabase **service-role key** (sometimes shown as `sb_secret_*` in newer Supabase dashboards). Without it, Add User / Edit User / Delete User return a 500 with a helpful error.
+
+In Vercel (admin project only):
+```
+SUPABASE_SERVICE_ROLE_KEY = sb_secret_…   (mark as Sensitive)
+```
+Already added to **production**, **preview**, **development** for `morpheus-admin` on Gary's account. **Do not** prefix with `NEXT_PUBLIC_` — that would ship the key to the browser. **Never** commit this key to git.
+
+For local dev on a new machine, add the same line to `morpheus-admin/.env.local` (gitignored).
+
+### You do NOT need to run any migration on the new machine
+
+Schema lives on the shared Supabase project, code lives on GitHub. Just clone + `npm install` + `npm run dev` on each app. The migration files in `db/migrations/` are kept for the historical record + brand-new Supabase environment setup.
+
+**Migrations applied to the shared Supabase project (DO NOT re-run on a new machine — they're already in the cloud):**
 | File in `db/migrations/` | What it does |
 |---|---|
 | `2026_05_05_customers_address_geo.sql` | `customers` gains `address`, `latitude`, `longitude` |
@@ -128,13 +145,20 @@ If you switch computers (or hand this project to a developer), this section is t
 | `2026_05_05_custom_fields.sql` | `custom_fields` definitions + `custom_field_values` polymorphic store |
 | `2026_05_05_customers_geofence_radius.sql` | `customers.geofence_radius_m` |
 | `2026_05_05_shift_events.sql` | central activity log + RLS + Realtime |
+| `2026_05_05_handle_new_user_role.sql` | trigger reads `role` from signup metadata (mobile=rep, admin=manager) |
+| `2026_05_05_profiles_admin_update.sql` | open profiles UPDATE so admin Promote/Demote works |
+| `2026_05_05_app_settings.sql` | tiny key/value table for grace periods + future org settings |
+| `2026_05_05_default_geofence_radius.sql` | seeds `default_geofence_radius_m = 100` |
+| `2026_05_05_requested_shifts_realtime.sql` | adds `requested_shifts` to Realtime publication |
 
-**Top of the deferred list when you sit down tomorrow:**
-1. **Phase 4: tighten RLS by role.** Use `profiles.role = 'manager'` to gate INSERT/UPDATE/DELETE on `customers` / `shifts` / `customer_tasks` / `library_files` / `custom_fields`. Mobile reps wouldn't be able to write to these even if they tried.
-2. **Off-site / late event types.** Detect at write time in mobile `checkInToShift` (we already get `start_time` from the row + `Date.now()` at check-in + GPS distance from the customer) and log dedicated `shift.checked_in_late` / `shift.checked_in_offsite` event types with the deltas in `meta`.
-3. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Easy now that we have `shift_events` — daily aggregation query, render real lines.
-4. **Per-shift task completion log.** Currently only `shifts.tasks_done` (a count). A `shift_task_completions` join would record exactly which tasks the rep ticked off on a given shift.
+**Top of the deferred list — pick any one and run with it:**
+1. **Phase 4: tighten RLS by role.** Use `profiles.role = 'manager'` to gate INSERT/UPDATE/DELETE on `customers` / `shifts` / `customer_tasks` / `library_files` / `custom_fields` / `app_settings`. Mobile reps wouldn't be able to write to these even if they tried.
+2. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Easy now that we have `shift_events` — daily aggregation query, render real lines.
+3. **Per-shift task completion log.** Currently only `shifts.tasks_done` (a count). A `shift_task_completions` join would record exactly which tasks the rep ticked off on a given shift.
+4. **Render custom fields on every entity's detail page.** The data model already supports `applies_to ∈ {customer, rep, shift, task, library_file}` but only `/customers/[id]` renders the `<CustomFieldsCard />`. Drop it into the rep / shift / task / library-file detail pages too.
 5. **Background location tracking.** GPS only updates while `/active` is foregrounded (browser limit). Needs Capacitor wrap or a service worker with `periodicSync`.
+6. **Email confirmation back on** for production. Toggle in Supabase Auth settings + small UX change to login page.
+7. **Tests.** No tests yet — at minimum smoke tests for auth + critical CRUD.
 
 See the full **Done vs Deferred** sections further down for detail.
 
@@ -586,6 +610,19 @@ Or via CLI: `npx vercel rollback`.
 - **`shift_events` activity log** — every meaningful action across both apps writes a row to `shift_events`: shift scheduled / claimed / checked-in / checked-out / deleted, request submitted / scheduled / declined, customer created / deactivated / reactivated / deleted, library file uploaded / deleted, task created / deleted. Each row has actor, customer/shift links, a pre-rendered display message, and an optional JSON `meta` blob (off-site distance, late mins, etc). The Live Feed "All activity" tab streams this in real time via `subscribeEvents` (postgres_changes INSERT). Mobile app and admin both write to the same log.
 - **Live Feed merged + live** — the dashboard panel now has just two tabs: **Needs action** (pending rep requests with Schedule/Decline; subscribed to `requested_shifts`) and **All activity** (the `shift_events` log; subscribed to inserts). Both tabs flip in real time. The previous third "Requests" tab was redundant with "Needs action" and is gone.
 - **Mobile breaks restored** — `/active` Breaks section now offers Short (15m) / Lunch (30m) / Long (60m) options. Tapping any opens the existing break sheet — Start break starts a timer, End break stops it. Tasks sections show clean "no compulsory/optional tasks for this customer yet" empty states when there's nothing defined.
+- **Auth role separation** — mobile signups land as `role='rep'`, admin signups land as `role='manager'`. Trigger `handle_new_user()` reads the role from `raw_user_meta_data`, clamps to `{rep, manager}`. Admin AuthGate refuses non-managers with an "Admin console only" lock screen + Sign out button. Both signout paths (lock screen, sidebar) and the mobile menu logout are now fire-and-forget + clear local Supabase tokens + hard-reload to /login, so a stalled signOut() can't strand the user.
+- **Managers list under Settings** — `/settings/managers` lists every user with role badge, joined date, filter chips. Promote / Demote button on each row toggles role with a confirm dialog (extra warning when self-demoting). RLS opens profiles UPDATE to any-authed for now (Phase 4 narrows to manager only).
+- **User CRUD via service-role server route** — `/api/users` (POST/PATCH/DELETE) uses the Supabase service-role key (env var `SUPABASE_SERVICE_ROLE_KEY`, marked Sensitive in Vercel) to call `auth.admin.createUser` / `updateUserById` / `deleteUser`. Every call verifies the caller's session token belongs to a manager. "+ Add user" modal on `/settings/managers` collects name + email + role + an auto-generated password (with regenerate / copy / show-hide); success screen shows credentials once with copy-all. "Edit" pencil per row → `/settings/managers/[id]/edit` to change name / email / role / reset password / delete. Deleting your own account is blocked.
+- **Real check-in / check-out exception logic** — exceptions only render when an actual rule fires:
+  - Off-site = browser geolocation Haversine distance to customer's lat/lng > customer's `geofence_radius_m` (default 100m, override per-customer on Address tab).
+  - Late check-in = `(now − start_time) > late_grace_minutes` (org-wide setting, default 10).
+  - Early check-out = `(end_time − now) > early_grace_minutes` (org-wide setting, default 15).
+  - GPS denied / unavailable → off-site exception with "Location unavailable" message.
+  - When zero exceptions fire → green "Ready to check in/out" card with one-tap confirm; no reason chips, no friction.
+  - Each fired exception writes a dedicated event (`shift.checked_in_offsite`, `shift.checked_in_late`, `shift.checked_out_offsite`, `shift.checked_out_early`) with distance / minutes / reason / note in `meta`. Live Feed shows them with `danger` / `warn` accents.
+- **`/settings` restructured into sticky-nav sections** — 240px left rail with Managers / Check-in rules / Custom fields / Org / Notifications / Billing. Click any to smooth-scroll; active section highlights as the user scrolls. Adding a new section is two lines in `NAV_SECTIONS` + a `<Section>` block. Check-in rules contains the late grace + early grace + default geofence radius inputs (the latter is a new `default_geofence_radius_m` org setting in `app_settings`).
+- **Today timezone bug fix** — both shifts-stores compute "today" via a local-tz formatter (`getFullYear`/`getMonth`/`getDate`) instead of `toISOString().slice(0,10)`. Past midnight in non-UTC timezones, the dashboard now shows today's shifts, not yesterday's. Admin Live Ops `KpiStrip` + `ShiftsList` and the mobile dashboard also refetch on `document.visibilitychange` so a tab left open across midnight wakes up with today's data.
+- **Dedup guard on Live Feed events** — the realtime subscription dedups by `id` so a near-simultaneous initial fetch + INSERT delivery can't double-render the same row.
 - **Mobile shifts list shows state** — `/shifts` "Scheduled for me" sorts in-progress → scheduled → complete (so finished shifts sink to the bottom), with a green "Complete" badge on done shifts (dimmed, struck-through times) and a brand "In progress" badge with a "Resume shift" button on the active one.
 - **Mobile dashboard is fully real-data** — date is today's actual date, "last sync" is real now, shift count + progress bar reflect today's DB shifts (green segment for complete, brand for in-progress, grey for scheduled), Library shortcut shows real file count, "Up next" picks the in-progress shift first (with "Resume shift") then the next scheduled (with "Check in"), and the route-preview card is a real MapLibre map plotting today's customer pins + the rep's GPS dot.
 - **Library** — admin uploads files at `/library` (with optional customer association) into Supabase Storage bucket `library` + metadata in `library_files`. Mobile `/library` lists everything reps can see; tap any file to open it via a short-lived signed URL.
@@ -607,16 +644,15 @@ Or via CLI: `npx vercel rollback`.
 
 These are the next obvious chunks of work, roughly in order of impact:
 
-1. **Phase 4: Tighten RLS by role.** Right now any authenticated user can write to `customers`/`shifts`/`customer_tasks`/`library_files`. Use the `profiles.role` column to restrict INSERT/UPDATE/DELETE on those tables to `role = 'manager'`. SELECT can stay open. Mobile reps would only see DB-level errors if they try to misbehave through the API.
+1. **Phase 4: Tighten RLS by role.** Right now any authenticated user can write to `customers`/`shifts`/`customer_tasks`/`library_files`/`profiles`. Use the `profiles.role` column to restrict INSERT/UPDATE/DELETE on those tables to `role = 'manager'`. SELECT can stay open. Mobile reps would only see DB-level errors if they try to misbehave through the API. Note: profiles UPDATE was deliberately opened to any-authed in Phase 3 so the managers list could promote/demote — that policy needs narrowing first.
 2. **Background location tracking on mobile.** Today GPS only updates while the active-shift screen is in the foreground (browser limitation). For background tracking we'd need a Capacitor wrap or a service worker with `periodicSync` (limited support).
-3. **Off-site / late event types** — currently we log shift.checked_in/out/etc but don't yet emit dedicated "off-site check-in" or "late check-in" event types. Easy add: detect at write time in mobile/check-in and emit alongside the regular check-in event with the distance/lateness in `meta`.
-4. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Needs the event log above + a daily aggregation query.
-5. **Per-shift task completion log.** Customer tasks now flow rep ↔ admin, but *which tasks were done on which shift* is only counted (`shifts.tasks_done`), not stored row-by-row. A `shift_task_completions` join table would let the admin see exactly which tasks the rep ticked off on a given shift.
-6. **Render custom fields on every entity's detail page.** The data model is universal — `applies_to` ∈ {`customer`, `rep`, `shift`, `task`, `library_file`} — but only `/customers/[id]` currently renders the `<CustomFieldsCard />`. Drop it into the rep / shift / task / library-file detail pages too.
-7. **Email confirmation** turned back on for production.
-8. **Promote `db/migrations/` to the Supabase CLI** so migrations apply automatically per environment instead of being pasted into the SQL Editor by hand.
-9. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
-10. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence — also unlocks proper background location.
+3. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Needs daily aggregation queries on top of the `shift_events` log.
+4. **Per-shift task completion log.** Customer tasks now flow rep ↔ admin, but *which tasks were done on which shift* is only counted (`shifts.tasks_done`), not stored row-by-row. A `shift_task_completions` join table would let the admin see exactly which tasks the rep ticked off on a given shift.
+5. **Render custom fields on every entity's detail page.** The data model is universal — `applies_to` ∈ {`customer`, `rep`, `shift`, `task`, `library_file`} — but only `/customers/[id]` currently renders the `<CustomFieldsCard />`. Drop it into the rep / shift / task / library-file detail pages too.
+6. **Email confirmation** turned back on for production. Note: admin-created users are already auto-confirmed (`email_confirm:true` in `/api/users` POST), so this only matters for self-signup.
+7. **Promote `db/migrations/` to the Supabase CLI** so migrations apply automatically per environment instead of being pasted into the SQL Editor by hand.
+8. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
+9. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence — also unlocks proper background location.
 
 ---
 
@@ -717,9 +753,6 @@ morpheus-admin/app/library/page.tsx            ← upload (CustomerScopePicker f
 morpheus-admin/app/library/[id]/edit/page.tsx  ← edit name/category/multi-customer association on a single file
 morpheus-admin/lib/assignments-store.ts        ← rep ↔ customer many-to-many helpers (listCustomersForRep, listRepsForCustomer, set… both directions, idempotent diff)
 morpheus-admin/lib/custom-fields-store.ts      ← custom_fields + custom_field_values CRUD; polymorphic value handling
-morpheus-admin/app/settings/page.tsx           ← list all custom fields grouped by entity + delete inline
-morpheus-admin/app/settings/fields/new/page.tsx ← create a custom field
-morpheus-admin/app/settings/fields/[id]/edit/page.tsx ← edit / delete an existing field
 morpheus-admin/components/ui/CustomFieldForm.tsx     ← shared create/edit form
 morpheus-admin/components/ui/CustomFieldsCard.tsx    ← drop into any entity detail page; renders + saves field values
 morpheus-admin/components/ui/CustomerScopePicker.tsx ← reusable "All / Specific (one or many)" picker
@@ -729,6 +762,15 @@ morpheus-admin/lib/events-store.ts             ← shift_events log: logEvent / 
 morpheus-mobile/lib/events-store.ts            ← write-only mobile mirror (logEvent only)
 morpheus-mobile/lib/library-store.ts           ← read-only library list + signed-URL fetcher
 morpheus-mobile/lib/shifts-store.ts            ← also exports getTasksForCustomer for /active
+morpheus-admin/lib/settings-store.ts           ← app_settings key/value getters/setters (late grace, early grace, default geofence radius)
+morpheus-mobile/lib/settings-store.ts          ← read-only mirror used by /check-in + /check-out (late + early grace)
+morpheus-admin/lib/users-admin.ts              ← client helpers for /api/users (createUser/updateUser/deleteUser + randomPassword)
+morpheus-admin/app/api/users/route.ts          ← server-only CRUD for auth users (POST/PATCH/DELETE) — uses SUPABASE_SERVICE_ROLE_KEY + manager-gate
+morpheus-admin/app/settings/page.tsx           ← /settings hub (sticky-nav with Managers / Check-in rules / Custom fields sections)
+morpheus-admin/app/settings/managers/page.tsx  ← list every user, promote/demote, "+ Add user" modal
+morpheus-admin/app/settings/managers/[id]/edit/page.tsx ← per-user edit (name/email/role/reset password/delete)
+morpheus-admin/app/settings/fields/new/page.tsx       ← create a custom field
+morpheus-admin/app/settings/fields/[id]/edit/page.tsx ← edit / delete an existing field
 morpheus-admin/app/api/geocode/route.ts        ← Nominatim geocode proxy (address → lat/lng)
 morpheus-admin/app/api/geocode/suggest/route.ts ← Nominatim autocomplete suggestions
 morpheus-admin/app/schedule/new/page.tsx       ← create-shift form (with rep picker)
