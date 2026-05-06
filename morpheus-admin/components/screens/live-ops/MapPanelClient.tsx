@@ -45,7 +45,24 @@ export function MapPanelClient() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     map.on("load", () => setLoaded(true));
     mapRef.current = map;
+
+    // The map's parent Card stretches to match the Live Feed's height
+    // via the dashboard's grid alignItems:stretch. When that height
+    // changes (Live Feed loading more items, window resize, etc),
+    // MapLibre needs an explicit resize() to re-flow tiles into the
+    // new bounds — otherwise the canvas stays at its initial size and
+    // we get a band of empty light-grey along the bottom.
+    const ro = new ResizeObserver(() => {
+      try {
+        map.resize();
+      } catch {
+        /* map removed mid-tick — ignore */
+      }
+    });
+    ro.observe(containerRef.current);
+
     return () => {
+      ro.disconnect();
       map.remove();
       mapRef.current = null;
     };
@@ -188,7 +205,11 @@ export function MapPanelClient() {
   ).length;
 
   return (
-    <Card padding={0}>
+    // Card stretches in the parent grid (alignItems: stretch) to match
+    // the Live Feed's height. We mirror that with display:flex + column
+    // so the map div below can flex-grow into whatever extra space the
+    // Card got — eliminates the dead whitespace below the tiles.
+    <Card padding={0} style={{ display: "flex", flexDirection: "column" }}>
       <div
         style={{
           padding: "12px 16px",
@@ -197,6 +218,7 @@ export function MapPanelClient() {
           alignItems: "center",
           gap: 12,
           flexWrap: "wrap",
+          flexShrink: 0,
         }}
       >
         <SectionTitle>Field map · live</SectionTitle>
@@ -213,7 +235,12 @@ export function MapPanelClient() {
 
       <div
         ref={containerRef}
-        style={{ height: 360, width: "100%", background: "#F1F4F7" }}
+        style={{
+          flex: 1,
+          minHeight: 360,
+          width: "100%",
+          background: "#F1F4F7",
+        }}
       />
     </Card>
   );

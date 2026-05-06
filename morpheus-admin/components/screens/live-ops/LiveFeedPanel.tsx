@@ -52,7 +52,10 @@ function formatRelative(iso: string): string {
 
 export function LiveFeedPanel() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<TabKey>("needs-action");
+  // Default tab = "All activity" — the feed is the primary thing
+  // managers want to see. The "Needs action" pill below already pulses
+  // when there's something to deal with, so they won't miss it.
+  const [activeTab, setActiveTab] = useState<TabKey>("all");
 
   // Pending requests (Needs action)
   const [requests, setRequests] = useState<PendingRequest[]>([]);
@@ -62,6 +65,23 @@ export function LiveFeedPanel() {
   // Activity (All activity)
   const [events, setEvents] = useState<ShiftEvent[]>([]);
   const [eventsLoaded, setEventsLoaded] = useState(false);
+
+  // Tab-title alert: when there's something needing action, prefix the
+  // browser tab title with "(N)" so the manager notices on a different
+  // tab. Reverts to the original title when the count goes to zero.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const original = document.title.replace(/^\(\d+\)\s+/, "");
+    if (requests.length > 0) {
+      document.title = `(${requests.length}) ${original}`;
+    } else {
+      document.title = original;
+    }
+    return () => {
+      // On unmount, leave the title clean.
+      document.title = original;
+    };
+  }, [requests.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,14 +162,24 @@ export function LiveFeedPanel() {
     setRequests((rs) => rs.filter((x) => x.id !== r.id));
   };
 
-  const tabs: { key: TabKey; label: string; count: number; tone?: string }[] = [
+  const tabs: {
+    key: TabKey;
+    label: string;
+    count: number;
+    /** When true, the pill animates + uses a danger tint to draw the eye. */
+    alert?: boolean;
+  }[] = [
+    {
+      key: "all",
+      label: "All activity",
+      count: events.length,
+    },
     {
       key: "needs-action",
       label: "Needs action",
       count: requests.length,
-      tone: requests.length > 0 ? AC.brand : undefined,
+      alert: requests.length > 0,
     },
-    { key: "all", label: "All activity", count: events.length },
   ];
 
   return (
@@ -217,7 +247,7 @@ export function LiveFeedPanel() {
                   fontFamily: AC.font,
                   fontSize: 11.5,
                   fontWeight: 700,
-                  color: active ? AC.ink : AC.mute,
+                  color: t.alert ? AC.danger : active ? AC.ink : AC.mute,
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
@@ -227,13 +257,14 @@ export function LiveFeedPanel() {
               >
                 {t.label}
                 <span
+                  className={t.alert ? "lf-pulse" : undefined}
                   style={{
                     padding: "1px 6px",
                     borderRadius: 99,
                     fontSize: 10,
                     fontWeight: 700,
-                    background: t.tone === AC.brand ? AC.brandTint : AC.bg,
-                    color: t.tone || AC.mute,
+                    background: t.alert ? AC.danger : AC.bg,
+                    color: t.alert ? "#fff" : AC.mute,
                   }}
                 >
                   {t.count}
@@ -242,6 +273,15 @@ export function LiveFeedPanel() {
             );
           })}
         </div>
+        {/* Pulse animation for the Needs-action tab pill when count > 0 */}
+        <style>{`
+          @keyframes lf-pulse-kf {
+            0%   { box-shadow: 0 0 0 0   rgba(190, 24, 60, 0.55); }
+            70%  { box-shadow: 0 0 0 6px rgba(190, 24, 60, 0);    }
+            100% { box-shadow: 0 0 0 0   rgba(190, 24, 60, 0);    }
+          }
+          .lf-pulse { animation: lf-pulse-kf 1.4s ease-out infinite; }
+        `}</style>
       </div>
 
       {activeTab === "needs-action" && (

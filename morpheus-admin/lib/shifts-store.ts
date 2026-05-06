@@ -219,26 +219,32 @@ export function subscribeShifts(onChange: () => void): () => void {
 }
 
 /**
- * Sweep any in-progress shifts that have run past their auto-checkout
- * cutoff and force them to "complete". Reps sometimes forget to tap
- * Check out — without this, they show as "in shift" on the admin map
- * forever and the rep_locations dot stays green.
+ * Sweep stale "active" shifts past the auto-checkout cutoff and force
+ * them to "complete", and clear any orphaned rep_locations rows that
+ * are leaving phantom dots on the admin map.
  *
- * Cutoff rules:
- *   - shift_date earlier than today → always stale (yesterdays shifts).
- *   - shift_date == today AND current local time >= auto_checkout_time
- *     → stale.
+ * Without this, reps who forget to tap Check out keep showing as "in
+ * shift" on the dashboard map forever and their green dot stays alive.
  *
- * For each stale shift we:
- *   1. UPDATE shifts SET state="complete"
- *   2. DELETE FROM rep_locations WHERE rep_id IN (...) so the green dot
- *      disappears from the admin map.
- *   3. logEvent shift.auto_checked_out for the audit trail.
+ * Two passes:
  *
- * Returns the number of shifts swept. Designed to be safe to call on
- * every admin home load — when nothing is stale it does one cheap
- * SELECT and returns 0.
+ * 1. Active-state shifts past cutoff → state="complete".
+ *    Active = state in ('in-progress','travelling','on-break','late').
+ *    Cutoff:
+ *      - shift_date < today                                  → always stale
+ *      - shift_date == today AND now >= auto_checkout_time    → stale
+ *
+ * 2. Orphan rep_locations cleanup. Any rep_locations row whose rep_id
+ *    has NO currently-active shift gets deleted. Catches the case
+ *    where a shift was already marked complete (manual check-out, an
+ *    earlier sweep run, or a previous bug) but the location-tracker's
+ *    final clearRepLocation() never fired so the dot stuck.
+ *
+ * Returns the number of shifts auto-completed (orphan rep_locations
+ * cleanup runs silently). Safe to call on every admin home mount.
  */
+const ACTIVE_SHIFT_STATES = ["in-progress", "travelling", "on-break", "late"];
+
 export async function sweepStaleShifts(): Promise<{ swept: number }> {
   if (!isSupabaseConfigured() || !supabase) return { swept: 0 };
 
@@ -257,16 +263,14 @@ export async function sweepStaleShifts(): Promise<{ swept: number }> {
   ).getTime();
   const todayPastCutoff = now.getTime() >= cutoffTodayMs;
 
-  // Pull any in-progress shifts. Filter client-side because the DATE
-  // comparison + cutoff logic is awkward to express in PostgREST.
+  // ─── Pass 1: stale active shifts ─────────────────────────────────────
   const { data, error } = await supabase
     .from("shifts")
     .select("id, rep_id, shift_date, customer_id, customers(name)")
-    .eq("state", "in-progress");
+    .in("state", ACTIVE_SHIFT_STATES);
   if (error) {
     // eslint-disable-next-line no-console
     console.warn("[shifts] sweep select:", error.message);
-    return { swept: 0 };
   }
   type Row = {
     id: string;
@@ -281,47 +285,65 @@ export async function sweepStaleShifts(): Promise<{ swept: number }> {
     if (r.shift_date === today && todayPastCutoff) return true;
     return false;
   });
-  if (stale.length === 0) return { swept: 0 };
 
-  const ids = stale.map((s) => s.id);
-  const { error: updErr } = await supabase
-    .from("shifts")
-    .update({ state: "complete" })
-    .in("id", ids);
-  if (updErr) {
-    // eslint-disable-next-line no-console
-    console.warn("[shifts] sweep update:", updErr.message);
-    return { swept: 0 };
-  }
-
-  // Clear rep_locations rows for any reps whose only in-progress shift
-  // was just swept — best-effort. If the rep has another concurrent
-  // in-progress shift the upcoming admin map subscription will resync
-  // anyway when location-tracker pings again.
-  const repIds = Array.from(
-    new Set(stale.map((s) => s.rep_id).filter((id): id is string => !!id))
-  );
-  if (repIds.length > 0) {
-    const { error: delErr } = await supabase
-      .from("rep_locations")
-      .delete()
-      .in("rep_id", repIds);
-    if (delErr) {
+  if (stale.length > 0) {
+    const ids = stale.map((s) => s.id);
+    const { error: updErr } = await supabase
+      .from("shifts")
+      .update({ state: "complete" })
+      .in("id", ids);
+    if (updErr) {
       // eslint-disable-next-line no-console
-      console.warn("[shifts] sweep clear locations:", delErr.message);
+      console.warn("[shifts] sweep update:", updErr.message);
+    }
+
+    // Audit trail per shift.
+    for (const s of stale) {
+      const customerName = s.customers?.name || "a customer";
+      await logEvent({
+        event_type: "shift.auto_checked_out",
+        shift_id: s.id,
+        customer_id: s.customer_id,
+        message: `Auto checked-out of ${customerName} (past ${cutoff})`,
+        meta: { cutoff, shift_date: s.shift_date },
+      });
     }
   }
 
-  // Audit trail.
-  for (const s of stale) {
-    const customerName = s.customers?.name || "a customer";
-    await logEvent({
-      event_type: "shift.auto_checked_out",
-      shift_id: s.id,
-      customer_id: s.customer_id,
-      message: `Auto checked-out of ${customerName} (past ${cutoff})`,
-      meta: { cutoff, shift_date: s.shift_date },
-    });
+  // ─── Pass 2: orphan rep_locations cleanup ────────────────────────────
+  // Re-fetch the still-active shift list AFTER pass 1 so the active-rep
+  // set reflects any auto-completes we just did.
+  const { data: stillActive } = await supabase
+    .from("shifts")
+    .select("rep_id")
+    .in("state", ACTIVE_SHIFT_STATES);
+  const activeRepIds = new Set(
+    ((stillActive as { rep_id: string | null }[]) || [])
+      .map((r) => r.rep_id)
+      .filter((id): id is string => !!id)
+  );
+
+  const { data: locRows } = await supabase
+    .from("rep_locations")
+    .select("rep_id");
+  const orphanRepIds = ((locRows as { rep_id: string }[]) || [])
+    .map((r) => r.rep_id)
+    .filter((id) => !activeRepIds.has(id));
+
+  if (orphanRepIds.length > 0) {
+    const { error: delErr } = await supabase
+      .from("rep_locations")
+      .delete()
+      .in("rep_id", orphanRepIds);
+    if (delErr) {
+      // eslint-disable-next-line no-console
+      console.warn("[shifts] sweep clear orphan locations:", delErr.message);
+    } else {
+      // eslint-disable-next-line no-console
+      console.info(
+        `[sweep] cleared ${orphanRepIds.length} orphan rep_locations row(s)`
+      );
+    }
   }
 
   return { swept: stale.length };
