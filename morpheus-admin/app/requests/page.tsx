@@ -23,6 +23,7 @@ import { AC } from "@/lib/tokens";
 import {
   listPendingRequests,
   deleteRequest,
+  approveRequest,
   subscribeRequests,
   type PendingRequest,
 } from "@/lib/requests-store";
@@ -62,14 +63,34 @@ export default function RequestsPage() {
     return () => unsub();
   }, []);
 
-  const onApprove = (r: PendingRequest) => {
-    // Hand off to the schedule form with rep + customer + request id pre-filled.
+  // "Schedule…" — open the form pre-filled so manager can override
+  // date/time/rep/etc.
+  const onSchedule = (r: PendingRequest) => {
     const qs = new URLSearchParams({
       rep: r.repId,
       customer: r.customerId,
       request: r.id,
     });
     router.push(`/schedule/new?${qs.toString()}`);
+  };
+
+  // "Approve" — one-tap, schedules today 08:00–17:00 to the requester.
+  const onApprove = async (r: PendingRequest) => {
+    if (
+      !confirm(
+        `Schedule ${r.customerName} for ${r.repName} today, 08:00–17:00?\n\nUse "Schedule…" instead if you need to pick a different date or time.`
+      )
+    ) {
+      return;
+    }
+    setPendingDelete(r.id);
+    const result = await approveRequest(r.id);
+    setPendingDelete(null);
+    if (!result.ok) {
+      alert(`Couldn't approve: ${result.error}`);
+      return;
+    }
+    setRequests((rs) => rs.filter((x) => x.id !== r.id));
   };
 
   const onDecline = async (r: PendingRequest) => {
@@ -162,6 +183,7 @@ export default function RequestsPage() {
                   key={r.id}
                   request={r}
                   isLast={i === requests.length - 1}
+                  onSchedule={() => onSchedule(r)}
                   onApprove={() => onApprove(r)}
                   onDecline={() => onDecline(r)}
                   busy={pendingDelete === r.id}
@@ -178,12 +200,14 @@ export default function RequestsPage() {
 function RequestRow({
   request: r,
   isLast,
+  onSchedule,
   onApprove,
   onDecline,
   busy,
 }: {
   request: PendingRequest;
   isLast: boolean;
+  onSchedule: () => void;
   onApprove: () => void;
   onDecline: () => void;
   busy: boolean;
@@ -192,7 +216,7 @@ function RequestRow({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1.4fr 1.6fr 130px 200px",
+        gridTemplateColumns: "1.4fr 1.6fr 110px 320px",
         gap: 16,
         alignItems: "center",
         padding: "14px 16px",
@@ -311,8 +335,8 @@ function RequestRow({
         {formatRelative(r.requestedAt)}
       </div>
 
-      {/* Actions */}
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+      {/* Actions: Approve (1-tap, today/8-5), Schedule… (form), Decline */}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
         <Btn
           kind="ghost"
           size="sm"
@@ -323,13 +347,23 @@ function RequestRow({
           Decline
         </Btn>
         <Btn
+          size="sm"
+          icon="cal"
+          onClick={onSchedule}
+          disabled={busy}
+          title="Open the schedule form to pick a date / time / different rep"
+        >
+          Schedule…
+        </Btn>
+        <Btn
           kind="primary"
           size="sm"
           icon="check"
           onClick={onApprove}
           disabled={busy}
+          title="Schedule today 08:00–17:00 for this rep — one tap"
         >
-          Approve & schedule
+          Approve
         </Btn>
       </div>
     </div>

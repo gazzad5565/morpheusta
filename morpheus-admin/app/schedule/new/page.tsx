@@ -21,7 +21,7 @@ import { inputStyle } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
 import { createShift } from "@/lib/shifts-store";
-import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import { listProfiles, getProfileById, displayName, type Profile } from "@/lib/profiles-store";
 import { deleteRequest } from "@/lib/requests-store";
 import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
 import type { Customer } from "@/lib/types";
@@ -83,15 +83,27 @@ function NewShiftPage() {
   useEffect(() => {
     let cancelled = false;
     Promise.all([listCustomers(), listProfiles({ role: "rep" })]).then(
-      ([cs, rs]) => {
+      async ([cs, rs]) => {
         if (cancelled) return;
         setCustomers(cs);
         // Pre-fill from a rep request when present.
         if (fromCustomer && cs.some((c) => c.id === fromCustomer)) {
           setCustomerScope([fromCustomer]);
         }
-        setReps(rs);
-        if (fromRep && rs.some((r) => r.id === fromRep)) {
+        // If the request came from someone who isn't in the role='rep'
+        // list (e.g. a manager testing the mobile flow on their own
+        // account), back-fill that profile so the dropdown can show +
+        // pre-select them. Without this, repId silently stays empty
+        // and the shift is created as Unassigned.
+        let repList = rs;
+        if (fromRep && !rs.some((r) => r.id === fromRep)) {
+          const extra = await getProfileById(fromRep);
+          if (extra && !cancelled) {
+            repList = [extra, ...rs];
+          }
+        }
+        setReps(repList);
+        if (fromRep && repList.some((r) => r.id === fromRep)) {
           setRepId(fromRep);
         }
         setLoading(false);

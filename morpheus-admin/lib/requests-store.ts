@@ -10,6 +10,7 @@
 
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent, type EventType } from "./events-store";
+import { createShift } from "./shifts-store";
 
 export interface PendingRequest {
   id: string; // composite "{userId}-{customerId}"
@@ -143,6 +144,90 @@ export function subscribeRequests(onChange: () => void): () => void {
     console.warn("[requests] subscribe failed:", err);
     return () => {};
   }
+}
+
+/**
+ * "Today" in the user's local timezone, formatted YYYY-MM-DD. Same
+ * helper as in shifts-store; duplicated here to keep this file
+ * self-contained.
+ */
+function todayLocalISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * One-tap approval. Creates a shift assigned to the requester with
+ * sensible defaults, then deletes the pending request. Use this when
+ * the manager doesn't need to override the rep / time / tasks — the
+ * form-based flow (router.push to /schedule/new?…) is still there for
+ * when they do.
+ *
+ * Defaults:
+ *   - shift_date  = today (local tz)
+ *   - start_time  = 08:00
+ *   - end_time    = 17:00
+ *   - tasks_total = 4
+ * Override any of these by passing `opts`.
+ */
+export async function approveRequest(
+  id: string,
+  opts?: {
+    shift_date?: string;
+    start_time?: string;
+    end_time?: string;
+    tasks_total?: number;
+    distance_label?: string;
+  }
+): Promise<{ ok: boolean; error?: string; shiftId?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+
+  // Look up the request to get rep_id + customer_id + customer_name.
+  const { data: row, error: rowErr } = await supabase
+    .from("requested_shifts")
+    .select("rep_id, customer_id, customer_name")
+    .eq("id", id)
+    .maybeSingle();
+  if (rowErr) return { ok: false, error: rowErr.message };
+  if (!row) return { ok: false, error: "Request not found" };
+
+  const r = row as { rep_id: string | null; customer_id: string; customer_name: string };
+  if (!r.rep_id) {
+    return {
+      ok: false,
+      error: "This request has no rep attached — open Schedule to assign one manually.",
+    };
+  }
+
+  // Create the shift with defaults.
+  const created = await createShift({
+    customer_id: r.customer_id,
+    rep_id: r.rep_id,
+    shift_date: opts?.shift_date || todayLocalISO(),
+    start_time: opts?.start_time || "08:00",
+    end_time: opts?.end_time || "17:00",
+    tasks_total: opts?.tasks_total ?? 4,
+    distance_label: opts?.distance_label || "",
+  });
+  if (!created.ok) return { ok: false, error: created.error };
+
+  // Delete the request now that the shift exists. logEvent inside
+  // deleteRequest will emit a request.scheduled event.
+  const del = await deleteRequest(id, "scheduled");
+  if (!del.ok) {
+    // Shift was created but request wasn't cleared — surface the error
+    // so the manager knows to delete it manually. Don't try to roll
+    // back the shift; the rep would rather have a duplicate to clean
+    // up than a missing approved shift.
+    return { ok: false, error: `Shift created, but couldn't clear the request: ${del.error}` };
+  }
+
+  return { ok: true, shiftId: created.id };
 }
 
 /**

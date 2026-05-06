@@ -24,6 +24,7 @@ import { Btn } from "@/components/ui/Btn";
 import {
   listPendingRequests,
   deleteRequest,
+  approveRequest,
   subscribeRequests,
   type PendingRequest,
 } from "@/lib/requests-store";
@@ -100,13 +101,33 @@ export function LiveFeedPanel() {
     };
   }, []);
 
-  const onApprove = (r: PendingRequest) => {
+  // Schedule = open the form pre-filled, manager picks date/time/etc.
+  const onSchedule = (r: PendingRequest) => {
     const qs = new URLSearchParams({
       rep: r.repId,
       customer: r.customerId,
       request: r.id,
     });
     router.push(`/schedule/new?${qs.toString()}`);
+  };
+
+  // Approve = one-tap, schedules today 08:00–17:00 to the requester.
+  const onApprove = async (r: PendingRequest) => {
+    if (
+      !confirm(
+        `Schedule ${r.customerName} for ${r.repName} today, 08:00–17:00?\n\nUse "Schedule" instead if you need to pick a different date or time.`
+      )
+    ) {
+      return;
+    }
+    setBusyId(r.id);
+    const result = await approveRequest(r.id);
+    setBusyId(null);
+    if (!result.ok) {
+      alert(`Couldn't approve: ${result.error}`);
+      return;
+    }
+    setRequests((rs) => rs.filter((x) => x.id !== r.id));
   };
 
   const onDecline = async (r: PendingRequest) => {
@@ -228,6 +249,7 @@ export function LiveFeedPanel() {
           requests={requests}
           loaded={requestsLoaded}
           busyId={busyId}
+          onSchedule={onSchedule}
           onApprove={onApprove}
           onDecline={onDecline}
         />
@@ -243,12 +265,14 @@ function NeedsActionList({
   requests,
   loaded,
   busyId,
+  onSchedule,
   onApprove,
   onDecline,
 }: {
   requests: PendingRequest[];
   loaded: boolean;
   busyId: string | null;
+  onSchedule: (r: PendingRequest) => void;
   onApprove: (r: PendingRequest) => void;
   onDecline: (r: PendingRequest) => void;
 }) {
@@ -381,15 +405,25 @@ function NeedsActionList({
             >
               Wants to work <b style={{ color: AC.ink }}>{r.customerName}</b> · #{r.customerCode}
             </div>
-            <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
+            <div style={{ display: "flex", gap: 5, marginTop: 7, flexWrap: "wrap" }}>
               <Btn
                 size="sm"
                 kind="primary"
                 icon="check"
                 onClick={() => onApprove(r)}
                 disabled={busyId === r.id}
+                title="Schedule today 08:00–17:00 for this rep — one tap"
               >
-                Schedule
+                Approve
+              </Btn>
+              <Btn
+                size="sm"
+                icon="cal"
+                onClick={() => onSchedule(r)}
+                disabled={busyId === r.id}
+                title="Open the schedule form to pick a date / time / different rep"
+              >
+                Schedule…
               </Btn>
               <Btn
                 size="sm"

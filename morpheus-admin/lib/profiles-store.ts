@@ -36,6 +36,28 @@ export function displayName(p: Profile): string {
 }
 
 /**
+ * Fetch a single profile by id. Used by the schedule form to back-fill
+ * the rep dropdown when the requester isn't in the listProfiles({role:'rep'})
+ * result — e.g. a manager who requested a shift via the mobile app while
+ * testing. Without this, the requester silently drops out of the dropdown
+ * and the shift is created as Unassigned.
+ */
+export async function getProfileById(id: string): Promise<Profile | null> {
+  if (!isSupabaseConfigured() || !supabase) return null;
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, email, name, role, created_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[profiles] getById:", error.message);
+    return null;
+  }
+  return (data as Profile | null) ?? null;
+}
+
+/**
  * Set a profile's role. Used by /settings/managers to promote a rep
  * to manager (giving them admin console access) or demote a manager
  * back to rep. We require RLS to allow UPDATE on profiles where
