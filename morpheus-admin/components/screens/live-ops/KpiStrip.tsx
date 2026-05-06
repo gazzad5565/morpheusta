@@ -12,13 +12,18 @@
  *   - Open exceptions    = shifts where state='late' (Phase 4 will add off-site)
  *   - Avg completion     = mean(tasks_done / tasks_total) across today's shifts
  *
- * Sparklines are intentionally placeholder shapes — real time-series data
- * would need an event log table, deferred to a later phase.
+ * Sparklines are real 8-day trends computed from shifts in
+ * [today-7, today] — same data shape as the dashboard, aggregated by
+ * shift_date. See computeSparks() for the per-card formulas.
  */
 
 import { useEffect, useState } from "react";
 import { AC } from "@/lib/tokens";
-import { listShifts, subscribeShifts, type ShiftRow } from "@/lib/shifts-store";
+import {
+  listShiftsInRange,
+  subscribeShifts,
+  type ShiftRow,
+} from "@/lib/shifts-store";
 import { listProfiles } from "@/lib/profiles-store";
 
 type Tone = "ok" | "warn" | "danger" | "info";
@@ -42,8 +47,42 @@ interface KpiData {
   avgCompletion: number;
 }
 
+interface KpiSparks {
+  repsActive: number[];
+  shiftsCount: number[];
+  onTimePct: number[];
+  exceptions: number[];
+  avgCompletion: number[];
+}
+
+/** Today in local tz, formatted YYYY-MM-DD. */
+function todayLocalISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** ISO date string `daysAgo` calendar days before today (local tz). */
+function isoDaysAgo(daysAgo: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Eight ISO dates ending today, oldest → newest. */
+function lastEightDays(): string[] {
+  const out: string[] = [];
+  for (let i = 7; i >= 0; i--) out.push(isoDaysAgo(i));
+  return out;
+}
+
 function computeKpis(shifts: ShiftRow[], totalReps: number): KpiData {
-  const todayShifts = shifts; // already filtered to today by listShifts()
+  const todayShifts = shifts;
 
   const activeRepIds = new Set(
     todayShifts.filter((s) => s.state === "in-progress" && s.rep_id).map((s) => s.rep_id)
@@ -100,19 +139,102 @@ const PLACEHOLDER_KPIS: KpiData = {
   avgCompletion: 0,
 };
 
+const FLAT_SPARK = [0, 0, 0, 0, 0, 0, 0, 0];
+const PLACEHOLDER_SPARKS: KpiSparks = {
+  repsActive: FLAT_SPARK,
+  shiftsCount: FLAT_SPARK,
+  onTimePct: FLAT_SPARK,
+  exceptions: FLAT_SPARK,
+  avgCompletion: FLAT_SPARK,
+};
+
+/**
+ * Build 8-day trend arrays for each KPI from a window of shifts. Each
+ * array is oldest → newest; the rightmost dot in the sparkline is today.
+ *
+ * Why aggregate from `shifts` rather than `shift_events`? Daily KPIs
+ * are about the day's *shifts* — completed, late, on-time — and that
+ * lives natively on the shifts table. Events would force us to
+ * reconstruct state per shift per day. We can revisit if we ever need
+ * KPIs that don't have a shifts-table mirror.
+ */
+function computeSparks(allShifts: ShiftRow[]): KpiSparks {
+  const days = lastEightDays();
+  const byDay = new Map<string, ShiftRow[]>();
+  for (const d of days) byDay.set(d, []);
+  for (const s of allShifts) {
+    const arr = byDay.get(s.shift_date);
+    if (arr) arr.push(s);
+  }
+
+  const repsActive: number[] = [];
+  const shiftsCount: number[] = [];
+  const onTimePct: number[] = [];
+  const exceptions: number[] = [];
+  const avgCompletion: number[] = [];
+
+  for (const d of days) {
+    const dayShifts = byDay.get(d) || [];
+
+    // distinct reps that worked at least one in-progress / complete shift that day
+    const reps = new Set(
+      dayShifts
+        .filter((s) => s.rep_id && (s.state === "in-progress" || s.state === "complete"))
+        .map((s) => s.rep_id)
+    );
+    repsActive.push(reps.size);
+
+    shiftsCount.push(dayShifts.length);
+
+    // on-time % within that day's checked-in shifts. We don't know the
+    // local-tz "scheduled start" precisely from shift_date alone, but
+    // start_time is local-clock. Build a Date from shift_date + start_time
+    // and compare to check_in_at.
+    const checkedIn = dayShifts.filter((s) => s.check_in_at);
+    const onTime = checkedIn.filter((s) => {
+      if (!s.check_in_at) return false;
+      const [hh, mm] = s.start_time.split(":").map((n) => parseInt(n, 10));
+      const [Y, M, D] = s.shift_date.split("-").map((n) => parseInt(n, 10));
+      const startLocal = new Date(Y, M - 1, D, hh, mm, 0, 0);
+      return new Date(s.check_in_at).getTime() <= startLocal.getTime();
+    }).length;
+    onTimePct.push(checkedIn.length === 0 ? 0 : Math.round((onTime / checkedIn.length) * 100));
+
+    exceptions.push(dayShifts.filter((s) => s.state === "late").length);
+
+    const withTasks = dayShifts.filter((s) => s.tasks_total > 0);
+    avgCompletion.push(
+      withTasks.length === 0
+        ? 0
+        : Math.round(
+            (withTasks.reduce((sum, s) => sum + s.tasks_done / s.tasks_total, 0) /
+              withTasks.length) *
+              100
+          )
+    );
+  }
+
+  return { repsActive, shiftsCount, onTimePct, exceptions, avgCompletion };
+}
+
 export function KpiStrip() {
   const [k, setK] = useState<KpiData>(PLACEHOLDER_KPIS);
+  const [sparks, setSparks] = useState<KpiSparks>(PLACEHOLDER_SPARKS);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const [shifts, reps] = await Promise.all([
-        listShifts(),
+      const today = todayLocalISO();
+      const start = isoDaysAgo(7);
+      const [windowShifts, reps] = await Promise.all([
+        listShiftsInRange(start, today),
         listProfiles({ role: "rep" }),
       ]);
       if (cancelled) return;
-      setK(computeKpis(shifts, reps.length));
+      const todayShifts = windowShifts.filter((s) => s.shift_date === today);
+      setK(computeKpis(todayShifts, reps.length));
+      setSparks(computeSparks(windowShifts));
       setLoading(false);
     };
     load();
@@ -137,35 +259,35 @@ export function KpiStrip() {
       value: loading ? "…" : `${k.repsActive}`,
       sub: `of ${k.repsTotal} on roster`,
       tone: "ok",
-      spark: [3, 5, 4, 6, 7, 8, 8, 8],
+      spark: sparks.repsActive,
     },
     {
       label: "Shifts today",
       value: loading ? "…" : `${k.shiftsToday}`,
       sub: `${k.shiftsCompleted} completed`,
       tone: "info",
-      spark: [6, 8, 10, 11, 12, 12, 12, 12],
+      spark: sparks.shiftsCount,
     },
     {
       label: "On-time check-ins",
       value: loading ? "…" : `${k.onTimePct}%`,
       sub: "of all checked-in shifts",
       tone: k.onTimePct >= 80 ? "ok" : k.onTimePct >= 60 ? "warn" : "danger",
-      spark: [70, 72, 68, 75, 80, 79, 82, 83],
+      spark: sparks.onTimePct,
     },
     {
       label: "Open exceptions",
       value: loading ? "…" : `${k.exceptionsOpen}`,
       sub: k.exceptionsOpen === 0 ? "all clear" : `${k.exceptionsLate} late`,
       tone: k.exceptionsOpen === 0 ? "ok" : "warn",
-      spark: [1, 2, 2, 3, 3, 3, 3, 3],
+      spark: sparks.exceptions,
     },
     {
       label: "Avg shift completion",
       value: loading ? "…" : `${k.avgCompletion}%`,
       sub: "tasks done today",
       tone: k.avgCompletion >= 80 ? "ok" : "warn",
-      spark: [88, 89, 91, 90, 92, 91, 92, 92],
+      spark: sparks.avgCompletion,
     },
   ];
 
@@ -186,7 +308,9 @@ function KpiCard({ label, value, sub, tone, spark }: KpiItem) {
     info: AC.brand,
   };
   const c = toneColor[tone];
-  const max = Math.max(...spark);
+  // Guard the all-zero case (fresh DB, empty range) so the divisor below
+  // doesn't NaN and the line still draws as a flat baseline.
+  const max = Math.max(1, ...spark);
 
   return (
     <div
