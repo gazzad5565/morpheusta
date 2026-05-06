@@ -90,8 +90,18 @@ export default function ActiveShiftPage() {
     // Covers manager-deleted, manager-reassigned, auto-checkout sweep —
     // anything that flips the rep out of an in-progress state.
     const unsub = subscribeShifts(load);
+    // Mobile browsers aggressively suspend websockets when the screen
+    // sleeps, so realtime alone isn't enough — when the page comes
+    // back to the foreground we need to manually re-sync. Without
+    // this a rep who locks their phone for 5 minutes can come back
+    // to a stale shift state.
+    const onVis = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVis);
       unsub();
     };
   }, []);
