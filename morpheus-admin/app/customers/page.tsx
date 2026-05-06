@@ -21,9 +21,16 @@ import { CustomerSwatch } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { FilterChip } from "@/components/ui/Filters";
 import { AGlyph } from "@/components/ui/AGlyph";
+import {
+  SortableHeader,
+  compareBy,
+  type SortState,
+} from "@/components/ui/SortableHeader";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
 import type { Customer } from "@/lib/types";
+
+type CustomerSortKey = "name" | "code" | "address" | "status";
 
 // MapLibre needs `window`; load on client only.
 const CustomersMap = dynamic(
@@ -40,6 +47,10 @@ export default function CustomersPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [withAddressOnly, setWithAddressOnly] = useState(false);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortState<CustomerSortKey>>({
+    key: "name",
+    dir: "asc",
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -75,8 +86,22 @@ export default function CustomersPage() {
           (c.address || "").toLowerCase().includes(q)
       );
     }
-    return out;
-  }, [customers, statusFilter, withAddressOnly, search]);
+    // Sort — only impacts Table view visually, but the order is stable
+    // across views so toggling Grid ↔ Table doesn't shuffle cards.
+    const sorted = [...out].sort((a, b) => {
+      switch (sort.key) {
+        case "name":
+          return compareBy(a, b, (c) => c.name, sort.dir);
+        case "code":
+          return compareBy(a, b, (c) => c.code, sort.dir);
+        case "address":
+          return compareBy(a, b, (c) => c.address, sort.dir);
+        case "status":
+          return compareBy(a, b, (c) => (c.active === false ? "inactive" : "active"), sort.dir);
+      }
+    });
+    return sorted;
+  }, [customers, statusFilter, withAddressOnly, search, sort]);
 
   return (
     <AdminShell
@@ -214,7 +239,7 @@ export default function CustomersPage() {
         ) : view === "Grid" ? (
           <GridView customers={filtered} />
         ) : view === "Table" ? (
-          <TableView customers={filtered} />
+          <TableView customers={filtered} sort={sort} onSort={setSort} />
         ) : (
           <CustomersMap customers={filtered} />
         )}
@@ -335,7 +360,15 @@ function GridView({ customers }: { customers: Customer[] }) {
   );
 }
 
-function TableView({ customers }: { customers: Customer[] }) {
+function TableView({
+  customers,
+  sort,
+  onSort,
+}: {
+  customers: Customer[];
+  sort: SortState<CustomerSortKey>;
+  onSort: (s: SortState<CustomerSortKey>) => void;
+}) {
   return (
     <Card padding={0}>
       <div
@@ -354,10 +387,18 @@ function TableView({ customers }: { customers: Customer[] }) {
           textTransform: "uppercase",
         }}
       >
-        <div>Name</div>
-        <div>Code</div>
-        <div>Address</div>
-        <div>Status</div>
+        <SortableHeader k="name" sort={sort} onChange={onSort}>
+          Name
+        </SortableHeader>
+        <SortableHeader k="code" sort={sort} onChange={onSort}>
+          Code
+        </SortableHeader>
+        <SortableHeader k="address" sort={sort} onChange={onSort}>
+          Address
+        </SortableHeader>
+        <SortableHeader k="status" sort={sort} onChange={onSort}>
+          Status
+        </SortableHeader>
         <div></div>
       </div>
       {customers.map((c, i) => (
