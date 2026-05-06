@@ -192,3 +192,46 @@ export function eventTone(type: EventType): "ok" | "warn" | "danger" | "info" {
   if (type === "request.submitted") return "info";
   return "ok";
 }
+
+/**
+ * Map shift_id → ISO timestamp of the latest check-out event for that
+ * shift. Covers every variant we log: shift.checked_out (clean exit),
+ * shift.checked_out_offsite, shift.checked_out_early, and
+ * shift.auto_checked_out (sweep at 23:59).
+ *
+ * Used by the /reports/timesheet page — shifts table doesn't have a
+ * check_out_at column, so the events log is authoritative for "when
+ * the rep actually clocked out".
+ *
+ * Pass at most ~1k shift ids per call. Larger batches should chunk.
+ */
+const CHECKOUT_EVENT_TYPES = [
+  "shift.checked_out",
+  "shift.checked_out_offsite",
+  "shift.checked_out_early",
+  "shift.auto_checked_out",
+] as const;
+
+export async function getCheckoutTimesForShifts(
+  shiftIds: string[]
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!isSupabaseConfigured() || !supabase) return out;
+  if (shiftIds.length === 0) return out;
+  const { data, error } = await supabase
+    .from("shift_events")
+    .select("shift_id, created_at, event_type")
+    .in("shift_id", shiftIds)
+    .in("event_type", CHECKOUT_EVENT_TYPES as unknown as string[])
+    .order("created_at", { ascending: false });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[events] checkout times:", error.message);
+    return out;
+  }
+  // Rows are sorted newest-first; first row per shift_id wins.
+  for (const r of (data as { shift_id: string | null; created_at: string }[]) || []) {
+    if (r.shift_id && !out.has(r.shift_id)) out.set(r.shift_id, r.created_at);
+  }
+  return out;
+}

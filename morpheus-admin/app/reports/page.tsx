@@ -39,6 +39,15 @@ const REPORTS: {
     tone: AC.brandSoft,
     toneInk: AC.brandDeep,
   },
+  {
+    slug: "timesheet",
+    title: "Timesheet",
+    blurb:
+      "Payroll-grade hours per rep per shift, computed from real check-in / check-out timestamps. Filter by rep, sort any column, export to CSV.",
+    glyph: "clock",
+    tone: "#FEF3D6",
+    toneInk: "#7A560A",
+  },
 ];
 
 export default function ReportsHubPage() {
