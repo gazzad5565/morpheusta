@@ -118,9 +118,16 @@ export function KpiStrip() {
     load();
     // Recompute on every shifts change so the KPIs reflect reality live.
     const unsub = subscribeShifts(load);
+    // Also refetch on tab-becomes-visible so KPIs flip to "today" if
+    // the admin left the dashboard open across midnight.
+    const onVis = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       cancelled = true;
       unsub();
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
 

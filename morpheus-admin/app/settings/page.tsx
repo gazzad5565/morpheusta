@@ -89,6 +89,100 @@ export default function SettingsPage() {
       }
     >
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Sub-page nav */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Link
+            href="/settings/managers"
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
+            <Card padding={16} style={{ cursor: "pointer", height: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 9,
+                    background: AC.brandSoft,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <AGlyph name="reps" size={18} color={AC.brandDeep} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: AC.ink,
+                      letterSpacing: -0.2,
+                    }}
+                  >
+                    Managers
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 12,
+                      color: AC.mute,
+                      marginTop: 2,
+                    }}
+                  >
+                    Promote reps to managers (admin console access).
+                  </div>
+                </div>
+                <AGlyph name="chev-r" size={14} color={AC.mute} />
+              </div>
+            </Card>
+          </Link>
+          <div style={{ opacity: 0.55 }}>
+            <Card padding={16} style={{ height: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 9,
+                    background: AC.bg,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <AGlyph name="settings" size={18} color={AC.mute} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: AC.ink,
+                      letterSpacing: -0.2,
+                    }}
+                  >
+                    Org · Notifications · Billing
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 12,
+                      color: AC.mute,
+                      marginTop: 2,
+                    }}
+                  >
+                    Coming soon.
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+
         <Card padding={16}>
           <SectionTitle>Custom fields</SectionTitle>
           <div

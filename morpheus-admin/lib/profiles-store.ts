@@ -34,3 +34,22 @@ export async function listProfiles(opts?: { role?: string }): Promise<Profile[]>
 export function displayName(p: Profile): string {
   return p.name?.trim() || p.email.split("@")[0];
 }
+
+/**
+ * Set a profile's role. Used by /settings/managers to promote a rep
+ * to manager (giving them admin console access) or demote a manager
+ * back to rep. We require RLS to allow UPDATE on profiles where
+ * id = auth.uid() OR role = 'manager' updating others — see migration
+ * 2026_05_05_profiles_manager_update.sql.
+ */
+export async function setProfileRole(
+  id: string,
+  role: "rep" | "manager"
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { error } = await supabase.from("profiles").update({ role }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

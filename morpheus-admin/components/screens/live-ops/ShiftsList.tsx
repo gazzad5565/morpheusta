@@ -95,9 +95,18 @@ export function ShiftsList() {
     // Refetch on any shifts change (rep checks in/out, claims, manager
     // schedules, etc) so the table updates without a manual refresh.
     const unsub = subscribeShifts(load);
+    // Refetch when the tab comes back into focus — covers the case
+    // where the admin opened the dashboard yesterday, left it idle
+    // overnight, and is now looking at it again. listShifts() reads
+    // "today" at call time so this picks up the new day's window.
+    const onVis = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       cancelled = true;
       unsub();
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
 

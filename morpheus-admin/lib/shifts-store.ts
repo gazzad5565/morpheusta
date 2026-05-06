@@ -29,12 +29,26 @@ export interface ShiftRow {
   } | null;
 }
 
+/**
+ * "Today" in the user's local timezone, formatted YYYY-MM-DD.
+ * Note: we deliberately don't use toISOString() here — that returns UTC,
+ * which means at e.g. 1 AM local in UTC+2 you'd get yesterday's date and
+ * the dashboard would show yesterday's shifts as "today's".
+ */
+function todayLocalISO(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export async function listShifts(opts?: {
-  date?: string; // YYYY-MM-DD; default today
+  date?: string; // YYYY-MM-DD; default today (local tz)
   limit?: number;
 }): Promise<ShiftRow[]> {
   if (!isSupabaseConfigured() || !supabase) return [];
-  const date = opts?.date || new Date().toISOString().slice(0, 10);
+  const date = opts?.date || todayLocalISO();
   const { data, error } = await supabase
     .from("shifts")
     .select("*, customers(id,name,initials,color,code)")

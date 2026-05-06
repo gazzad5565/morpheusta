@@ -73,18 +73,28 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getMyProfile(), getUser(), listMyShiftsToday(), listLibraryFiles()]).then(
-      ([profile, user, myShifts, libFiles]) => {
-        if (cancelled) return;
-        const fromProfile = profile?.name?.trim();
-        setDisplayName(fromProfile || nameFromEmail(user?.email));
-        setShifts(myShifts);
-        setShiftsLoaded(true);
-        setLibraryCount(libFiles.length);
-      }
-    );
+    const load = () =>
+      Promise.all([getMyProfile(), getUser(), listMyShiftsToday(), listLibraryFiles()]).then(
+        ([profile, user, myShifts, libFiles]) => {
+          if (cancelled) return;
+          const fromProfile = profile?.name?.trim();
+          setDisplayName(fromProfile || nameFromEmail(user?.email));
+          setShifts(myShifts);
+          setShiftsLoaded(true);
+          setLibraryCount(libFiles.length);
+        }
+      );
+    load();
+    // Refetch on tab-becomes-visible so a rep who left the PWA open
+    // overnight wakes up to today's shifts, not yesterday's. Also covers
+    // the "checked in late last night, opens at 8 AM" case.
+    const onVis = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
 
