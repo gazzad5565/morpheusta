@@ -40,11 +40,29 @@ export function SideMenu() {
 
   const close = () => setOpen(false);
 
-  const handleLogout = async (e: React.MouseEvent) => {
+  const handleLogout = (e: React.MouseEvent) => {
     e.preventDefault();
     close();
-    await signOut();
-    // Hard navigation guarantees AuthGate sees a fresh empty session.
+    // Fire-and-forget so a stalled network call can't strand the rep
+    // half-logged-out. Wipe Supabase tokens locally as a belt-and-
+    // braces, then force a hard reload to /login.
+    try {
+      void signOut().catch(() => {});
+    } catch {
+      /* noop */
+    }
+    try {
+      if (typeof window !== "undefined") {
+        for (let i = window.localStorage.length - 1; i >= 0; i--) {
+          const k = window.localStorage.key(i);
+          if (k && (k.startsWith("sb-") || k.includes("auth-token"))) {
+            window.localStorage.removeItem(k);
+          }
+        }
+      }
+    } catch {
+      /* noop */
+    }
     window.location.href = "/login";
   };
 

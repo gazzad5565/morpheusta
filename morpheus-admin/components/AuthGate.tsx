@@ -167,8 +167,32 @@ export function AuthGate({ children }: { children: ReactNode }) {
           </div>
           <button
             type="button"
-            onClick={async () => {
-              await signOut();
+            onClick={() => {
+              // Fire-and-forget signOut so a hung network call can't
+              // strand the user on this lock screen. Belt-and-braces:
+              // also wipe the Supabase token from localStorage and
+              // force a hard reload to /login. On the next render,
+              // AuthGate sees no session and shows the login form.
+              try {
+                void signOut().catch(() => {});
+              } catch {
+                /* noop */
+              }
+              try {
+                if (typeof window !== "undefined") {
+                  for (let i = window.localStorage.length - 1; i >= 0; i--) {
+                    const k = window.localStorage.key(i);
+                    if (
+                      k &&
+                      (k.startsWith("sb-") || k.includes("auth-token"))
+                    ) {
+                      window.localStorage.removeItem(k);
+                    }
+                  }
+                }
+              } catch {
+                /* noop */
+              }
               window.location.href = "/login";
             }}
             style={{

@@ -37,9 +37,31 @@ export function Sidebar() {
   }, []);
   const { name: userName, initials: userInitials } = nameFromEmail(userEmail);
   const userRole = userEmail ? "Field Ops Manager" : CURRENT_USER.role;
-  const handleLogout = async () => {
-    await signOut();
-    router.replace("/login");
+  const handleLogout = () => {
+    // Fire-and-forget so a slow network can't trap the user. Wipe any
+    // cached Supabase tokens and hard-reload to /login as a safety net.
+    try {
+      void signOut().catch(() => {});
+    } catch {
+      /* noop */
+    }
+    try {
+      if (typeof window !== "undefined") {
+        for (let i = window.localStorage.length - 1; i >= 0; i--) {
+          const k = window.localStorage.key(i);
+          if (k && (k.startsWith("sb-") || k.includes("auth-token"))) {
+            window.localStorage.removeItem(k);
+          }
+        }
+      }
+    } catch {
+      /* noop */
+    }
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    } else {
+      router.replace("/login");
+    }
   };
 
   const isActive = (href: string) => {
