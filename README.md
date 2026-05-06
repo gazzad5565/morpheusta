@@ -96,19 +96,89 @@ If you switch computers (or hand this project to a developer), this section is t
 
 ### Where things stand right now (handover for the next chat)
 
-**Last commit:** `110fd38` — "User CRUD via service-role server route + Add/Edit/Delete user UI"
+**Last commit:** `1dd067d` — "Schedule/new: rep picker now matches the customer pattern (single + multi)"
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
-**Working end-to-end on real data (no mock fallbacks left in the rep flow):**
-- **Auth** (signup / login / logout) — both apps. Profile auto-created via `handle_new_user()` trigger that reads `role` + `name` from `raw_user_meta_data`. Mobile signups are reps; admin signups are managers. **Admin AuthGate locks out non-managers** with an "Admin console only" screen; reps redirected to mobile.
-- **User CRUD from admin** — `/settings/managers` lists every user with role badges + filter chips. "+ Add user" opens a modal: Name / Email / Role / auto-generated password (with regenerate + copy). "Edit" pencil per row → `/settings/managers/[id]/edit` to change name / email / role / reset password / delete user. All writes go through `/api/users` server route which uses the **Supabase service-role key** to call `auth.admin.*` and verifies the caller is a manager before doing anything sensitive.
-- **Admin** — customers (create / edit / soft-delete + tabbed detail page with Address+geofence map / Reps editor / Tasks / Library / Today's shifts / Custom fields), reps roster + per-rep page (with Assigned customers editor), `/schedule` week-planner grid (real reps × 7 days), `/schedule/new` (multi-customer × recurring weekly = N shifts in one save), Live Ops home (realtime KPIs + shifts table + field map with live customer pins + green rep dots), Requests inbox (rep requests → Schedule pre-fills `/schedule/new` → on save deletes the request), Tasks library (Universal / Specific / Multi-customer at create time, edit + delete), Library storage (categories + multi-customer + edit + delete + signed-URL download), `/settings` (sticky-nav sectioned page: Managers, Check-in rules, Custom fields, plus Org/Notifications/Billing placeholders), clickable breadcrumbs everywhere.
-- **Mobile** — dashboard (real shifts / today's date / library count + MapLibre route preview with today's customer pins + rep GPS dot), shifts list (state badges: scheduled / in-progress / complete; complete dimmed + struck-through, sinks to bottom; "Resume shift" CTA on the active one), check-in / check-out (only show off-site / late / early exception cards when the rule is actually broken — green "Ready to check in/out" state otherwise), active shift (real customer info, real per-customer + universal tasks, timer anchored to real check-in time, standard 15/30/60-min break options).
-- **Real exception logic on check-in / check-out** — Haversine distance to customer's lat/lng compared to that customer's `geofence_radius_m` for the off-site check; configurable late and early grace periods (`/settings` → Check-in rules) for the time-based checks. Each fired exception writes a dedicated event (`shift.checked_in_offsite`, `shift.checked_in_late`, `shift.checked_out_offsite`, `shift.checked_out_early`) with distance / minutes / reason / note in `meta`.
-- **Realtime everywhere it matters:** KPIs + shifts table + field map rep dots + Live Feed (both tabs) all flip without a refresh. Live Feed has two tabs: **Needs action** (pending requests) and **All activity** (the `shift_events` log).
-- **Activity log:** every CRUD action across both apps writes a row to `shift_events`. Reps tap "Request a customer" → admin sees it land in real time. Admin schedules → rep's `/shifts` updates and the event appears in the feed. Off-site / late / early exceptions get their own dedicated event types with `danger`/`warn` accents.
-- **Today timezone fix:** "today's shifts" no longer shows yesterday's rows past midnight in non-UTC timezones. Both apps' shifts-stores use a local-tz `todayLocalISO()`. Dashboards refetch on `document.visibilitychange` so a tab left open across midnight wakes up correctly.
+**Working end-to-end on real data — both apps build clean, all 18 admin routes return 200, no mock fallbacks left in the rep flow.**
+
+#### Admin (manager console)
+
+- **Live Ops home**: realtime KPI strip with **8-day sparklines on real data** (daily aggregates from shifts), MapLibre map with live rep dots + customer pins, Live Feed (Needs action + All activity tabs, both pulse + alert), today's shifts table (now also shows pending **Requested** rows alongside real shifts).
+- **Reports** (`/reports` hub) with 3 working dashboards:
+  - `/reports/operations` — daily Scheduled vs Completed line chart, on-time rate trend, state donut, top-customers bar chart, KPIs with period-over-period deltas (7/30/90d).
+  - `/reports/rep-performance` — leaderboard with sortable columns + Δ vs prev period + coloured progress bars (Good/Warn/Danger thresholds).
+  - `/reports/timesheet` — payroll-grade hours per shift, joins `shifts.check_out_at` (or events fallback), CSV export.
+- **Schedule / Calendar** — toggle between **Days view** (flat day-only) and **Reps view** (per-rep grid). Sortable cells, smart default `+ Add` time per cell, cards link to `/shifts/[id]` (locked detail) or `/shifts/[id]/edit` (when scheduled).
+- **Shift edit page** — `/shifts/[id]/edit`. Editable while `state='scheduled'`; redirects to read-only detail once the rep checks in. Server-enforces the lock too.
+- **Customers / Reps** — both list pages share the same toolbar: filter chips, search, Grid + Table view toggle, sortable columns. `/customers` also has Map view.
+- **Schedule/new** — multi-customer × multi-rep × weekly recurrence cartesian product (e.g. 3 reps × 5 customers × Mon-Fri = 75 shifts in one save).
+- **User CRUD** — sidebar nav link is now **"Users"** but route stays `/settings/managers`. Add User modal, edit page, role promote/demote. Server route at `/api/users` uses the service-role key, gates by `profiles.role='manager'`.
+- **Settings hub + sub-pages** — `/settings` is a tile hub; each section is its own route under `SettingsShell` (Users, Check-in rules, Custom fields, Organisation, Notifications, Billing). Notifications/Billing are "Soon" placeholders.
+- **Organisation logo** — upload at `/settings/organisation` to a public Storage bucket; Sidebar reads it on mount and replaces the default Morpheus mark.
+- **Topbar search** — live filter across reps, managers, customers, tasks. ⌘K focuses; ↑↓ + Enter navigates.
+- **Sidebar Live Ops badge** — flashing red pill + browser tab title prefix when there are pending rep requests, visible from any page. Refreshes via realtime + visibilitychange + 60s poll + every navigation.
+
+#### Mobile (rep PWA)
+
+- **Today / Shifts / Active / Library** all auto-refresh in real time via Supabase Realtime + visibilitychange + 60s poll fallbacks.
+- **Check-in animated success page** — `/check-in/success` is now fully data-driven (customer, time, distance, late mins, early mins, real next shift). Includes a one-shot animated celebration: pop-in icon, three pulsing rings, stroke-drawn checkmark, staggered fade-up of content. Respects `prefers-reduced-motion`.
+- **Off-site / Late / Early check-in** all detected and gated. **Early check-out** symmetric. Configurable grace periods on `/settings/check-in-rules`.
+- **Task / Break / Travel** all log dedicated events (`shift.task_started`, `shift.task_completed`, `shift.break_started`, `shift.break_ended`, `shift.travel_started`, `shift.travel_ended`).
+- **Travel UI** lives in three places: `<UpNextCard>` Start/Stop, post-checkout `/summary` "What's next?" tiles, and auto-ended on next check-in. State persists in `localStorage` so closing the app mid-travel doesn't lose it.
+- **Active task / break / travel state** persists across screen lock + app close via `localStorage`.
+- **Event queue** — failed `logEvent` calls are queued in localStorage and retried on the next mount or visibility-change. Up to 200 events buffered.
+- **Auto-checkout sweep** — admin home + tab-focus runs `sweepStaleShifts()` which marks any active-state shift past the configured cutoff as complete, also clears orphan `rep_locations` rows. Cutoff is configurable in `/settings/check-in-rules` (default 23:59).
+
+#### Database
+
+- **Activity log** (`shift_events`) is the audit trail. **Every** in-app action writes a row: shift scheduled / claimed / checked-in (incl. offsite/late/early variants) / checked-out (incl. offsite/early/auto variants) / task-started / task-completed / break-started / break-ended / travel-started / travel-ended / shift-deleted / customer-CRUD / library-CRUD / task-CRUD / request submitted/scheduled/declined.
+- **Indexes** on hot paths (added during the stabilisation pass): `shifts (shift_date)`, `shifts (rep_id, shift_date)`, partial `shifts (state)` on active states only, `shifts (customer_id)`, `requested_shifts (status, requested_at)`, `requested_shifts (rep_id)`. Plus everything in `db/migrations/*` already indexed.
+- **`shifts.check_out_at`** is now a real column (was inferred from events) — backfilled from event log via migration; mobile checkout + admin sweep both stamp it.
+- **`shift_task_completions`** logs which tasks the rep ticked off on a given shift (cascades on shift / task delete; unique on (shift, task)).
+
+### Today's session — what shipped (May 6, 2026)
+
+Big day. Roughly in order:
+
+- **Per-shift task completion log** + admin `/shifts/[id]` detail page (`a478033`)
+- **KPI strip sparklines** computed from real 8-day shift history (`e677b9a`)
+- **Sidebar nav** — Schedule renamed to "Schedule / Calendar"; Notifications marked SOON; schedule cards now show rep+customer+state and link to `/shifts/[id]` (`dca47c3`)
+- **Custom fields** rendered on rep / task / library-file detail pages (`9e08777`)
+- **Shifts table indexes** (`shift_date`, `(rep_id, shift_date)`, partial state, `customer_id`) + UTC date bug fix on `/schedule/new` + shared `lib/format.ts` (`12c0b2f`)
+- **Settings split** into separate pages with shared `<SettingsShell>` + new Organisation page with logo upload (`7d654b3`)
+- **Live Feed default tab** flipped to "All activity"; Needs Action gets a pulsing red badge + browser tab title alert (`9a1cbb1`)
+- **`rep_locations` manager-delete RLS** so the orphan-cleanup sweep actually works (`16d8164`)
+- **Schedule view toggle** Days / Reps + persisted in localStorage (`9a1cbb1`)
+- **Editable scheduled shifts** at `/shifts/[id]/edit` with a server-enforced lock once in-progress (`a72d717`)
+- **Mobile realtime everywhere** — shifts, library, active screen all auto-refresh; visibility refetch covers websocket suspension (`3b01ee2`, `75d6490`, `16bfec1`)
+- **Reps + Customers list pages aligned** — shared toolbar shape, sortable columns, search, Grid/Table view toggle (`c6b2a5c`)
+- **"Users" rename** in settings nav (route stays `/settings/managers`) (`a6f0383`)
+- **Schedule grid bug** — `minmax(0, 1fr)` so a long address can't blow out neighbouring cells. Removed Requests from sidebar; Live Ops badge for pending requests live across every page (`58a8135`)
+- **Topbar search** — live filter across reps / managers / customers / tasks with ⌘K + arrow nav (`049292f`)
+- **Schedule/new smart default times** — clicking + Add on a day cell defaults start to "after the latest shift's end" or "next round hour" (today) or "09:00"; end = start+1h (`8727109`)
+- **Three reports** at `/reports`: Operations Overview, Rep Performance leaderboard, Timesheet with CSV export. Includes `<KpiBig>`, `<LineChart>`, `<BarChart>`, `<DonutChart>` SVG primitives (`d964a29`, `3fa84b9`)
+- **Activity tracking gaps closed** — task_started / task_completed / break_started / break_ended / travel_started / travel_ended event types, all wired from mobile `/active`. New `shifts.check_out_at` column with backfill (`735843f`)
+- **Pending request count** — Sidebar pill flashes + tab title prefix; defence-in-depth refresh (realtime + visibility + 60s poll + nav). Today's shifts list also shows requests as rows (`608050f`)
+- **Travel UI** — entry from `<UpNextCard>` Start/Stop, post-checkout `/summary` "What's next?" tiles, auto-end on next check-in. State persists in localStorage (`90e5765`)
+- **Offline event queue** + active-task persistence + fix for "approved request stuck in Unscheduled" (`c4bd851`)
+- **Check-in success page** rewired from static defaults to real data + animated celebration sequence (`f1fea66`, `ab36e4e`)
+- **Multi-rep picker on Schedule/new** — `<RepScopePicker>` mirrors `<CustomerScopePicker>`; cartesian product expands by rep too (`1dd067d`)
+
+### Migrations applied today (already in cloud)
+
+- `2026_05_06_shifts_indexes.sql`
+- `2026_05_06_organisation.sql`
+- `2026_05_06_rep_locations_manager_delete.sql`
+- `2026_05_06_shift_task_completions.sql`
+- `2026_05_06_shifts_check_out_at.sql`
+- `2026_05_06_library_files_realtime.sql`
+
+### What the next chat should do first
+
+Top of the queue: **Phase 4 RLS** (locks down the database against malicious-rep API access — see #1 in the deferred list above). Or **Capacitor wrap** if background GPS is the priority. Or **Custom report builder** if reporting is the priority.
+
+Open the `/reports` hub to see what works visually, the Timesheet report to see how the events log + new `check_out_at` column come together for payroll, and `/schedule/new` to see the multi-rep × multi-customer × recurrence pattern.
 
 ### One critical env var on top of the standard ones
 
@@ -126,39 +196,53 @@ For local dev on a new machine, add the same line to `morpheus-admin/.env.local`
 
 Schema lives on the shared Supabase project, code lives on GitHub. Just clone + `npm install` + `npm run dev` on each app. The migration files in `db/migrations/` are kept for the historical record + brand-new Supabase environment setup.
 
-**Migrations applied to the shared Supabase project (DO NOT re-run on a new machine — they're already in the cloud):**
+**Migrations applied to the shared Supabase project** (DO NOT re-run on a new machine — they're already in the cloud; safe to re-run if you ever spin up a fresh DB). Listed in chronological order:
+
 | File in `db/migrations/` | What it does |
 |---|---|
-| `2026_05_05_customers_address_geo.sql` | `customers` gains `address`, `latitude`, `longitude` |
-| `2026_05_05_customers_active_flag.sql` | `customers.active` boolean (soft-delete) |
-| `2026_05_05_rep_locations.sql` | `rep_locations` table + RLS + Realtime publication |
-| `2026_05_05_rep_locations_self_delete.sql` | DELETE policy so check-out clears the dot |
-| `2026_05_05_requested_shifts_admin_access.sql` | open SELECT/UPDATE/DELETE on `requested_shifts` so admin can see + handle |
-| `2026_05_05_shifts_realtime.sql` | adds `shifts` to the `supabase_realtime` publication |
+| `2026_05_05_app_settings.sql` | Key/value table for grace periods, org settings, etc |
+| `2026_05_05_custom_fields.sql` | `custom_fields` definitions + `custom_field_values` polymorphic store |
 | `2026_05_05_customer_tasks.sql` | `customer_tasks` table |
-| `2026_05_05_customer_tasks_nullable.sql` | makes `customer_tasks.customer_id` nullable (universal tasks) |
+| `2026_05_05_customer_tasks_nullable.sql` | Makes `customer_tasks.customer_id` nullable (universal tasks) |
+| `2026_05_05_customers_active_flag.sql` | `customers.active` boolean (soft-delete) |
+| `2026_05_05_customers_address_geo.sql` | `customers` gains `address`, `latitude`, `longitude` |
+| `2026_05_05_customers_geofence.sql` | `customers.geofence_radius_m` (per-customer override) |
+| `2026_05_05_default_geofence_radius.sql` | Seeds `default_geofence_radius_m = 100` in app_settings |
+| `2026_05_05_handle_new_user_role.sql` | Trigger reads `role` from signup metadata (mobile=rep, admin=manager) |
 | `2026_05_05_library.sql` | `library_files` table + Storage bucket "library" + RLS |
 | `2026_05_05_library_files_category.sql` | `library_files.category` + UPDATE policy |
-| `2026_05_05_library_multi_customer.sql` | swaps `library_files.customer_id` for `customer_ids text[]` |
-| `2026_05_05_rep_customer_assignments.sql` | rep ↔ customer many-to-many |
-| `2026_05_05_requested_shifts_realtime.sql` | adds `requested_shifts` to Realtime |
-| `2026_05_05_custom_fields.sql` | `custom_fields` definitions + `custom_field_values` polymorphic store |
-| `2026_05_05_customers_geofence_radius.sql` | `customers.geofence_radius_m` |
-| `2026_05_05_shift_events.sql` | central activity log + RLS + Realtime |
-| `2026_05_05_handle_new_user_role.sql` | trigger reads `role` from signup metadata (mobile=rep, admin=manager) |
-| `2026_05_05_profiles_admin_update.sql` | open profiles UPDATE so admin Promote/Demote works |
-| `2026_05_05_app_settings.sql` | tiny key/value table for grace periods + future org settings |
-| `2026_05_05_default_geofence_radius.sql` | seeds `default_geofence_radius_m = 100` |
-| `2026_05_05_requested_shifts_realtime.sql` | adds `requested_shifts` to Realtime publication |
+| `2026_05_05_library_multi_customer.sql` | Swaps `library_files.customer_id` for `customer_ids text[]` |
+| `2026_05_05_profiles_admin_update.sql` | Opens profiles UPDATE so admin Promote/Demote works |
+| `2026_05_05_rep_customer_assignments.sql` | Rep ↔ customer many-to-many join table |
+| `2026_05_05_rep_locations.sql` | `rep_locations` table + RLS + Realtime publication |
+| `2026_05_05_rep_locations_self_delete.sql` | DELETE policy so check-out clears the dot |
+| `2026_05_05_requested_shifts_admin_access.sql` | Opens SELECT/UPDATE/DELETE on `requested_shifts` so admin can see + handle |
+| `2026_05_05_requested_shifts_realtime.sql` | Adds `requested_shifts` to the `supabase_realtime` publication |
+| `2026_05_05_shift_events.sql` | Central activity log + RLS + Realtime + indexes |
+| `2026_05_05_shifts_realtime.sql` | Adds `shifts` to the `supabase_realtime` publication |
+| `2026_05_06_library_files_realtime.sql` | Adds `library_files` to Realtime so mobile /library auto-updates |
+| `2026_05_06_organisation.sql` | `organisation_name` + `organisation_logo_url` keys + public `org_assets` Storage bucket |
+| `2026_05_06_rep_locations_manager_delete.sql` | Manager-can-delete-any-row policy so the orphan-cleanup sweep works |
+| `2026_05_06_shift_task_completions.sql` | Per-shift task completion log (which tasks the rep ticked off, when) |
+| `2026_05_06_shifts_check_out_at.sql` | Adds `shifts.check_out_at` column + backfills from events log |
+| `2026_05_06_shifts_indexes.sql` | Hot-path indexes on shifts + requested_shifts (perf — was missing) |
 
-**Top of the deferred list — pick any one and run with it:**
-1. **Phase 4: tighten RLS by role.** Use `profiles.role = 'manager'` to gate INSERT/UPDATE/DELETE on `customers` / `shifts` / `customer_tasks` / `library_files` / `custom_fields` / `app_settings`. Mobile reps wouldn't be able to write to these even if they tried.
-2. **Sparklines on KPI strip use real time-series.** Today they're placeholder shapes. Easy now that we have `shift_events` — daily aggregation query, render real lines.
-3. **Per-shift task completion log.** Currently only `shifts.tasks_done` (a count). A `shift_task_completions` join would record exactly which tasks the rep ticked off on a given shift.
-4. **Render custom fields on every entity's detail page.** The data model already supports `applies_to ∈ {customer, rep, shift, task, library_file}` but only `/customers/[id]` renders the `<CustomFieldsCard />`. Drop it into the rep / shift / task / library-file detail pages too.
-5. **Background location tracking.** GPS only updates while `/active` is foregrounded (browser limit). Needs Capacitor wrap or a service worker with `periodicSync`.
-6. **Email confirmation back on** for production. Toggle in Supabase Auth settings + small UX change to login page.
-7. **Tests.** No tests yet — at minimum smoke tests for auth + critical CRUD.
+**Top of the deferred list — pick any one and run with it tomorrow:**
+
+1. **Phase 4 RLS — security debt** ⚠️ HIGHEST PRIORITY before opening to real users. Every table is currently `TO authenticated USING (true)`. Reps and managers have the same DB write powers; the apps gate by role at the UI but the DB doesn't. A motivated rep could `curl` Supabase directly and modify customers / shifts / tasks / library files / app_settings / profiles. The path: write a single coordinated migration that uses a `is_manager()` SECURITY DEFINER helper and rewrites every table's policies. Test in a staging Supabase first. Note: `profiles` UPDATE was deliberately opened for promote/demote — narrow that too.
+2. **Capacitor wrap** for proper background GPS + push notifications. Browsers don't expose persistent background geolocation, so the rep app can only track location while `/active` is foregrounded. Wrapping the existing React app in Capacitor (1-2 weeks) gives: real background location, push notifications, App Store / Play Store presence. The codebase doesn't change much — replace `navigator.geolocation` calls with `@capacitor/geolocation` (same API), plus shell config + permission requests.
+3. **Custom report builder.** The 3 fixed reports (Operations / Rep performance / Timesheet) are good but the user wanted "users can build their own". Picture: a builder UI where a manager picks metrics, dimensions, filters, and a chart type, then saves. Multi-week project — needs builder UI + query AST + saved-report storage + per-user permissions on saves.
+4. **Background sweep (`pg_cron`).** Today `sweepStaleShifts()` only runs when an admin opens the Live Ops home or focuses the tab. If no admin opens for several days, stale shifts and orphan rep_locations rows accumulate. Either a Vercel Cron route hitting `/api/sweep` or a Postgres `pg_cron` job (cleaner). 1-hour task.
+5. **Error monitoring.** Drop in Sentry or Vercel Analytics before user count grows past ~10. You're flying blind on prod errors right now. ~30 minutes of work, saves a lot of guessing.
+6. **Push notifications via Web Push.** Service worker + VAPID setup. Works on Chrome/Firefox/Safari 16+. Cleaner alternative to Capacitor if iOS install isn't a priority. ~1 day of work.
+7. **Email confirmation** turned back on for production self-signups. Admin-created users are already auto-confirmed.
+8. **Tests.** No tests yet — at minimum smoke tests for auth + the critical CRUD paths and the check-in / check-out flow.
+
+**Smaller cleanups that didn't make the cut today:**
+- 8 `deriveInitials` definitions still scattered across pages — dedupe to `initialsFromNameOrEmail` from `lib/format.ts` next time you touch each file. Same for 3 `formatTimeRange` copies. Functionally equivalent; just maintenance.
+- 5 page files >900 LOC (`customers/[id]/page.tsx`, `mobile/active/page.tsx`, `mobile/check-in/page.tsx`, `schedule/page.tsx`, `settings/managers/page.tsx`). They build fine but onboarding a new dev means reading a lot of inline code per page. Extract sub-components opportunistically when adding features.
+- `mock-data.ts` is now misleadingly named in both apps — only contains type definitions + (admin) `NAV_ITEMS`. Rename to `nav.ts` (admin) and merge mobile's into a shared types file.
+- No `<ErrorBoundary>` at the layout level. A page that throws crashes the whole shell to Next's overlay. Adding one would give a graceful "Something went wrong" card.
 
 See the full **Done vs Deferred** sections further down for detail.
 
