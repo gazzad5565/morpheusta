@@ -80,3 +80,61 @@ export async function setDefaultGeofenceRadius(
 ): Promise<{ ok: boolean; error?: string }> {
   return writeSetting("default_geofence_radius_m", Math.max(1, Math.round(meters)));
 }
+
+// ─── Organisation (name + logo) ────────────────────────────────────────
+
+export async function getOrganisationName(): Promise<string> {
+  const v = await readSetting<string>("organisation_name", "");
+  return typeof v === "string" ? v : "";
+}
+
+export async function setOrganisationName(
+  name: string
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting("organisation_name", name.trim());
+}
+
+export async function getOrganisationLogoUrl(): Promise<string> {
+  const v = await readSetting<string>("organisation_logo_url", "");
+  return typeof v === "string" ? v : "";
+}
+
+export async function setOrganisationLogoUrl(
+  url: string
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting("organisation_logo_url", url);
+}
+
+/**
+ * Upload an org logo to the public `org_assets` bucket and return its
+ * public URL. Each upload uses a fresh path so cached browsers / sidebars
+ * pick up the new logo immediately (no manual cache-bust query needed).
+ *
+ * Caller is responsible for then calling setOrganisationLogoUrl(url).
+ */
+export async function uploadOrgLogo(
+  file: File
+): Promise<{ ok: boolean; url?: string; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  if (!file.type.startsWith("image/")) {
+    return { ok: false, error: "File must be an image (PNG, JPG, SVG, etc)." };
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    return { ok: false, error: "Logo must be under 2 MB." };
+  }
+  const ext = file.name.split(".").pop()?.toLowerCase() || "png";
+  const path = `logo-${Date.now()}.${ext}`;
+  const { error: upErr } = await supabase.storage
+    .from("org_assets")
+    .upload(path, file, {
+      cacheControl: "3600",
+      upsert: true,
+      contentType: file.type,
+    });
+  if (upErr) return { ok: false, error: upErr.message };
+  const { data: pub } = supabase.storage.from("org_assets").getPublicUrl(path);
+  return { ok: true, url: pub.publicUrl };
+}
+

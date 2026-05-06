@@ -7,6 +7,10 @@ import { AC } from "@/lib/tokens";
 import { ORG, CURRENT_USER, NAV_ITEMS } from "@/lib/mock-data";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { getUser, signOut } from "@/lib/auth";
+import {
+  getOrganisationName,
+  getOrganisationLogoUrl,
+} from "@/lib/settings-store";
 
 function nameFromEmail(email: string | null | undefined): { name: string; initials: string } {
   if (!email) return { name: CURRENT_USER.name, initials: CURRENT_USER.initials };
@@ -26,10 +30,19 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string>("");
+  // Org branding (set under /settings/organisation). Empty strings →
+  // fall back to the built-in MORPHEUS / Field Operations Suite block.
+  const [orgName, setOrgName] = useState<string>("");
+  const [orgLogoUrl, setOrgLogoUrl] = useState<string>("");
   useEffect(() => {
     let cancelled = false;
     getUser().then((u) => {
       if (!cancelled) setUserEmail(u?.email || "");
+    });
+    Promise.all([getOrganisationName(), getOrganisationLogoUrl()]).then(([n, u]) => {
+      if (cancelled) return;
+      setOrgName(n);
+      setOrgLogoUrl(u);
     });
     return () => {
       cancelled = true;
@@ -81,7 +94,7 @@ export function Sidebar() {
         borderRight: `1px solid #1B2027`,
       }}
     >
-      {/* Brand */}
+      {/* Brand — org logo + name if set, else default Morpheus mark. */}
       <div
         style={{
           padding: "16px 16px 12px",
@@ -90,19 +103,43 @@ export function Sidebar() {
           gap: 10,
         }}
       >
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 8,
-            background: AC.brand,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <div style={{ width: 12, height: 12, background: AC.side, borderRadius: 3 }} />
-        </div>
+        {orgLogoUrl ? (
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+              flexShrink: 0,
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={orgLogoUrl}
+              alt={orgName || "Organisation logo"}
+              style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: AC.brand,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ width: 12, height: 12, background: AC.side, borderRadius: 3 }} />
+          </div>
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
@@ -111,9 +148,13 @@ export function Sidebar() {
               fontWeight: 700,
               letterSpacing: 0.4,
               lineHeight: 1,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
+            title={orgName || "MORPHEUS"}
           >
-            MORPHEUS
+            {orgName ? orgName.toUpperCase() : "MORPHEUS"}
           </div>
           <div
             style={{
@@ -124,7 +165,7 @@ export function Sidebar() {
               marginTop: 2,
             }}
           >
-            Field Operations Suite
+            {orgName ? "Powered by Morpheus" : "Field Operations Suite"}
           </div>
         </div>
       </div>

@@ -10,8 +10,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { AdminShell } from "@/components/shell/AdminShell";
+import { SettingsShell } from "@/components/shell/SettingsShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
@@ -42,7 +41,6 @@ function formatJoined(iso: string | undefined): string {
 }
 
 export default function ManagersPage() {
-  const router = useRouter();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
@@ -107,25 +105,20 @@ export default function ManagersPage() {
   };
 
   return (
-    <AdminShell
-      breadcrumbs={["Home", "Settings", "Managers"]}
+    <SettingsShell
+      section="managers"
       actions={
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn size="sm" onClick={() => router.push("/settings")}>
-            Back
-          </Btn>
-          <Btn
-            size="sm"
-            kind="primary"
-            icon="plus"
-            onClick={() => setAddOpen(true)}
-          >
-            Add user
-          </Btn>
-        </div>
+        <Btn
+          size="sm"
+          kind="primary"
+          icon="plus"
+          onClick={() => setAddOpen(true)}
+        >
+          Add user
+        </Btn>
       }
     >
-      <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <Card padding={20}>
           <SectionTitle>Managers vs reps</SectionTitle>
           <div
@@ -396,7 +389,7 @@ export default function ManagersPage() {
           }}
         />
       )}
-    </AdminShell>
+    </SettingsShell>
   );
 }
 
