@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
@@ -22,6 +23,7 @@ import {
   displayName,
   type Profile,
 } from "@/lib/profiles-store";
+import { createUser, deleteUser, randomPassword } from "@/lib/users-admin";
 
 function deriveInitials(p: Profile): string {
   const src = p.name?.trim() || p.email.split("@")[0] || "?";
@@ -47,6 +49,9 @@ export default function ManagersPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "manager" | "rep">("all");
+
+  // Add-user modal
+  const [addOpen, setAddOpen] = useState(false);
 
   const reload = () => {
     listProfiles().then((rows) => {
@@ -105,9 +110,19 @@ export default function ManagersPage() {
     <AdminShell
       breadcrumbs={["Home", "Settings", "Managers"]}
       actions={
-        <Btn size="sm" onClick={() => router.push("/settings")}>
-          Back to settings
-        </Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn size="sm" onClick={() => router.push("/settings")}>
+            Back
+          </Btn>
+          <Btn
+            size="sm"
+            kind="primary"
+            icon="plus"
+            onClick={() => setAddOpen(true)}
+          >
+            Add user
+          </Btn>
+        </div>
       }
     >
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -323,7 +338,24 @@ export default function ManagersPage() {
                 >
                   {p.role === "manager" ? "Admin access" : "Mobile only"}
                 </div>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+                  <Link
+                    href={`/settings/managers/${p.id}/edit`}
+                    title="Edit user"
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 8,
+                      border: `1px solid ${AC.line}`,
+                      background: "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <AGlyph name="edit" size={14} color={AC.ink2} />
+                  </Link>
                   <Btn
                     size="sm"
                     kind={p.role === "manager" ? "secondary" : "primary"}
@@ -354,9 +386,474 @@ export default function ManagersPage() {
           allowed but you'll lose admin access immediately.
         </div>
       </div>
+
+      {addOpen && (
+        <AddUserModal
+          onClose={() => setAddOpen(false)}
+          onCreated={() => {
+            setAddOpen(false);
+            reload();
+          }}
+        />
+      )}
     </AdminShell>
   );
 }
+
+// ─── Add user modal ────────────────────────────────────────────────────
+
+function AddUserModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"manager" | "rep">("manager");
+  const [password, setPassword] = useState(() => randomPassword(12));
+  const [showPass, setShowPass] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState(false);
+
+  const onSubmit = async () => {
+    if (busy) return;
+    setError(null);
+    if (!name.trim()) return setError("Name is required.");
+    if (!email.trim()) return setError("Email is required.");
+    if (password.length < 6) return setError("Password must be ≥ 6 chars.");
+    setBusy(true);
+    const r = await createUser({
+      email: email.trim(),
+      password,
+      name: name.trim(),
+      role,
+    });
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't create user.");
+      return;
+    }
+    setCreated(true);
+  };
+
+  const copyPassword = async () => {
+    try {
+      await navigator.clipboard.writeText(password);
+    } catch {
+      /* no-op */
+    }
+  };
+  const copyAll = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        `Email: ${email}\nPassword: ${password}\nLogin: https://morpheus-admin.vercel.app/login`
+      );
+    } catch {
+      /* no-op */
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        background: "rgba(10,15,30,.45)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff",
+          borderRadius: 14,
+          width: "100%",
+          maxWidth: 480,
+          boxShadow: "0 20px 60px rgba(10,15,30,.25)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "16px 20px",
+            borderBottom: `1px solid ${AC.line}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 15,
+              fontWeight: 700,
+              color: AC.ink,
+              letterSpacing: -0.2,
+            }}
+          >
+            {created ? "User created" : "Add user"}
+          </div>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <AGlyph name="x" size={14} color={AC.mute} />
+          </button>
+        </div>
+        <div style={{ padding: 20 }}>
+          {!created ? (
+            <>
+              <ModalField label="Full name" required>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Sarah Mokoena"
+                  style={modalInputStyle}
+                />
+              </ModalField>
+              <ModalField label="Email" required>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="sarah@yourcompany.com"
+                  style={modalInputStyle}
+                />
+              </ModalField>
+              <ModalField label="Role" required>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <RoleButton
+                    active={role === "manager"}
+                    onClick={() => setRole("manager")}
+                    title="Manager"
+                    sub="Admin console access"
+                  />
+                  <RoleButton
+                    active={role === "rep"}
+                    onClick={() => setRole("rep")}
+                    title="Rep"
+                    sub="Mobile app only"
+                  />
+                </div>
+              </ModalField>
+              <ModalField
+                label="Initial password"
+                hint="You'll share this with the user. They can change it themselves later."
+              >
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    type={showPass ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    style={{ ...modalInputStyle, fontFamily: AC.fontMono, flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPass((s) => !s)}
+                    title={showPass ? "Hide" : "Show"}
+                    style={iconBtnStyle}
+                  >
+                    <AGlyph name="eye" size={14} color={AC.mute} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPassword(randomPassword(12))}
+                    title="Regenerate"
+                    style={iconBtnStyle}
+                  >
+                    <AGlyph name="refresh" size={14} color={AC.mute} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyPassword}
+                    title="Copy"
+                    style={iconBtnStyle}
+                  >
+                    <AGlyph name="check" size={14} color={AC.mute} />
+                  </button>
+                </div>
+              </ModalField>
+
+              {error && (
+                <div
+                  style={{
+                    padding: "9px 11px",
+                    background: AC.dangerTint,
+                    color: "#9c1a3c",
+                    borderRadius: 8,
+                    fontFamily: AC.font,
+                    fontSize: 12.5,
+                    fontWeight: 500,
+                    marginBottom: 12,
+                  }}
+                >
+                  {error}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <Btn onClick={onClose} disabled={busy}>
+                  Cancel
+                </Btn>
+                <Btn kind="primary" icon="check" onClick={onSubmit} disabled={busy}>
+                  {busy ? "Creating…" : "Create user"}
+                </Btn>
+              </div>
+            </>
+          ) : (
+            // ─── Success: show credentials once ──────────────────────
+            <div>
+              <div
+                style={{
+                  padding: 12,
+                  background: AC.okTint,
+                  borderRadius: 10,
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  color: "#0d6a45",
+                  fontWeight: 500,
+                  marginBottom: 14,
+                }}
+              >
+                Account created. Share these credentials with{" "}
+                <b>{name || email}</b>. The password won't be shown again.
+              </div>
+              <CredentialRow label="Email" value={email} />
+              <CredentialRow label="Password" value={password} mono />
+              <CredentialRow
+                label="Login URL"
+                value={
+                  role === "manager"
+                    ? "https://morpheus-admin.vercel.app/login"
+                    : "https://morpheusta-khaki-omega.vercel.app/login"
+                }
+              />
+              <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
+                <Btn onClick={copyAll}>Copy all</Btn>
+                <Btn kind="primary" onClick={onCreated}>
+                  Done
+                </Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalField({
+  label,
+  hint,
+  required,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          color: AC.mute,
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+        {required && <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>}
+      </div>
+      {children}
+      {hint && (
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11,
+            color: AC.mute,
+            marginTop: 4,
+          }}
+        >
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoleButton({
+  active,
+  onClick,
+  title,
+  sub,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  sub: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1,
+        padding: "10px 12px",
+        borderRadius: 10,
+        background: active ? AC.brandSoft : "#fff",
+        border: `1px solid ${active ? AC.brand : AC.line}`,
+        cursor: "pointer",
+        textAlign: "left",
+      }}
+    >
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 13,
+          fontWeight: 600,
+          color: active ? AC.brandInk : AC.ink,
+          letterSpacing: -0.1,
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          color: active ? AC.brandDeep : AC.mute,
+          marginTop: 2,
+        }}
+      >
+        {sub}
+      </div>
+    </button>
+  );
+}
+
+function CredentialRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* no-op */
+    }
+  };
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "9px 11px",
+        background: AC.bg,
+        borderRadius: 8,
+        marginBottom: 8,
+        fontFamily: AC.font,
+        fontSize: 12.5,
+      }}
+    >
+      <div
+        style={{
+          width: 80,
+          color: AC.mute,
+          fontWeight: 600,
+          letterSpacing: 0.2,
+          textTransform: "uppercase",
+          fontSize: 10.5,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          flex: 1,
+          color: AC.ink,
+          fontWeight: 500,
+          fontFamily: mono ? AC.fontMono : AC.font,
+          wordBreak: "break-all",
+        }}
+      >
+        {value}
+      </div>
+      <button
+        type="button"
+        onClick={copy}
+        title="Copy"
+        style={{ ...iconBtnStyle, background: copied ? AC.okTint : "#fff" }}
+      >
+        <AGlyph
+          name={copied ? "check" : "edit"}
+          size={13}
+          color={copied ? "#0d6a45" : AC.mute}
+        />
+      </button>
+    </div>
+  );
+}
+
+const modalInputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "9px 11px",
+  borderRadius: 10,
+  border: `1px solid ${AC.line}`,
+  background: "#fff",
+  fontFamily: AC.font,
+  fontSize: 13.5,
+  color: AC.ink,
+  boxSizing: "border-box",
+};
+
+const iconBtnStyle: React.CSSProperties = {
+  width: 36,
+  height: 36,
+  borderRadius: 8,
+  border: `1px solid ${AC.line}`,
+  background: "#fff",
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+};
 
 function StatChip({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
