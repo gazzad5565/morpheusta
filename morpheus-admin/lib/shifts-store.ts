@@ -331,17 +331,28 @@ export async function sweepStaleShifts(): Promise<{ swept: number }> {
     .filter((id) => !activeRepIds.has(id));
 
   if (orphanRepIds.length > 0) {
-    const { error: delErr } = await supabase
+    // .select() after .delete() returns the deleted rows so we can
+    // detect silent RLS blocks (Postgres returns 0 rows + no error
+    // when a policy refuses the delete). The manager-delete policy
+    // in db/migrations/2026_05_06_rep_locations_manager_delete.sql
+    // is required for the admin app to actually wipe these rows.
+    const { data: deleted, error: delErr } = await supabase
       .from("rep_locations")
       .delete()
-      .in("rep_id", orphanRepIds);
+      .in("rep_id", orphanRepIds)
+      .select("rep_id");
     if (delErr) {
       // eslint-disable-next-line no-console
-      console.warn("[shifts] sweep clear orphan locations:", delErr.message);
+      console.warn("[sweep] clear orphan locations:", delErr.message);
+    } else if (!deleted || deleted.length === 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[sweep] tried to clear ${orphanRepIds.length} orphan rep_locations row(s) but Postgres affected 0 — likely missing the rep_locations_manager_delete RLS policy. Apply db/migrations/2026_05_06_rep_locations_manager_delete.sql in Supabase.`
+      );
     } else {
       // eslint-disable-next-line no-console
       console.info(
-        `[sweep] cleared ${orphanRepIds.length} orphan rep_locations row(s)`
+        `[sweep] cleared ${deleted.length} orphan rep_locations row(s)`
       );
     }
   }
