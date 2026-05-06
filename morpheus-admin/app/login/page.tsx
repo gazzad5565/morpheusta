@@ -12,6 +12,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,6 +24,10 @@ export default function LoginPage() {
       setError("Email and password are required.");
       return;
     }
+    if (mode === "signup" && !name.trim()) {
+      setError("Tell us your name so reps see who scheduled them.");
+      return;
+    }
     if (password.length < 6) {
       setError("Password must be at least 6 characters.");
       return;
@@ -31,7 +36,7 @@ export default function LoginPage() {
     const result =
       mode === "login"
         ? await signIn(email.trim(), password)
-        : await signUp(email.trim(), password);
+        : await signUp(email.trim(), password, name.trim());
     setBusy(false);
     if (!result.ok) {
       setError(result.error || "Something went wrong.");
@@ -231,6 +236,32 @@ export default function LoginPage() {
                 <AGlyph name="check" size={14} color={AC.ok} />
               </div>
             </div>
+            {mode === "signup" && (
+              <div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: AC.mute,
+                    fontWeight: 700,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                    marginBottom: 6,
+                  }}
+                >
+                  Your name
+                </div>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Gary Durbach"
+                  style={inputStyle}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") onSubmit();
+                  }}
+                />
+              </div>
+            )}
             <div>
               <div
                 style={{

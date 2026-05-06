@@ -32,9 +32,22 @@ export async function signIn(email: string, password: string): Promise<AuthResul
   return { ok: true, user: data.user ?? undefined };
 }
 
-export async function signUp(email: string, password: string): Promise<AuthResult> {
+export async function signUp(
+  email: string,
+  password: string,
+  name?: string
+): Promise<AuthResult> {
   if (!supabase) return { ok: false, error: "Supabase not configured" };
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  // Signups via this app are managers (the admin console). The
+  // handle_new_user() trigger reads role + name from raw_user_meta_data
+  // and inserts the matching profiles row.
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { ...(name ? { name } : {}), role: "manager" },
+    },
+  });
   if (error) return { ok: false, error: error.message };
   return { ok: true, user: data.user ?? undefined };
 }

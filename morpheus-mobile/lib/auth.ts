@@ -39,13 +39,14 @@ export async function signUp(
   name?: string
 ): Promise<AuthResult> {
   if (!supabase) return { ok: false, error: "Supabase not configured" };
+  // The handle_new_user() trigger reads name + role out of
+  // raw_user_meta_data when it inserts the matching profiles row.
+  // Signups via this app are reps (the field-rep PWA).
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      // Stored on auth.users.raw_user_meta_data and read by the
-      // handle_new_user() trigger to populate profiles.name on signup.
-      data: name ? { name } : undefined,
+      data: { ...(name ? { name } : {}), role: "rep" },
     },
   });
   if (error) return { ok: false, error: error.message };
