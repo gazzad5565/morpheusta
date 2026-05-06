@@ -126,7 +126,10 @@ export default function TimesheetReportPage() {
       const repInitials = profile
         ? initialsFromNameOrEmail(profile.name, profile.email)
         : "—";
-      const actualOutIso = checkoutTimes.get(s.id) ?? null;
+      // Prefer the new shifts.check_out_at column (cheap, direct).
+      // Fall back to the events log lookup for rows from before the
+      // 2026_05_06_shifts_check_out_at backfill landed.
+      const actualOutIso = s.check_out_at ?? checkoutTimes.get(s.id) ?? null;
       const hoursScheduled = computeScheduledHours(s.start_time, s.end_time);
       const hoursActual = computeActualHours(s.check_in_at, actualOutIso);
       const flags = collectFlags(s);

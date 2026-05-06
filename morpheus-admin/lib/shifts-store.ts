@@ -20,6 +20,10 @@ export interface ShiftRow {
   distance_label: string | null;
   state: string;
   check_in_at: string | null;
+  /** ISO timestamp of when the rep checked out. Set by checkOutOfShift
+   *  (mobile) and by sweepStaleShifts (admin). NULL while the shift is
+   *  still in flight. Backfilled from shift_events for historical rows. */
+  check_out_at: string | null;
   tasks_done: number;
   tasks_total: number;
   customers: {
@@ -363,7 +367,15 @@ export async function sweepStaleShifts(): Promise<{ swept: number }> {
     const ids = stale.map((s) => s.id);
     const { error: updErr } = await supabase
       .from("shifts")
-      .update({ state: "complete" })
+      .update({
+        state: "complete",
+        // Stamp the column so the timesheet can read it directly.
+        // For shifts that never checked in, this is when the sweep
+        // ran rather than a "real" rep checkout — the
+        // shift.auto_checked_out event in shift_events tells the
+        // story if anyone needs to dig in.
+        check_out_at: new Date().toISOString(),
+      })
       .in("id", ids);
     if (updErr) {
       // eslint-disable-next-line no-console

@@ -21,6 +21,13 @@ export type EventType =
   | "shift.checked_out_early"
   | "shift.auto_checked_out"
   | "shift.deleted"
+  // In-shift activity (everything that happens between check-in / check-out)
+  | "shift.task_started"
+  | "shift.task_completed"
+  | "shift.break_started"
+  | "shift.break_ended"
+  | "shift.travel_started"
+  | "shift.travel_ended"
   // Requests
   | "request.submitted"
   | "request.scheduled"
@@ -157,6 +164,12 @@ export const EVENT_LABEL: Record<EventType, string> = {
   "shift.checked_out_early": "checked out EARLY",
   "shift.auto_checked_out": "was auto-checked out",
   "shift.deleted": "removed a shift",
+  "shift.task_started": "started a task",
+  "shift.task_completed": "completed a task",
+  "shift.break_started": "started a break",
+  "shift.break_ended": "ended a break",
+  "shift.travel_started": "started travelling",
+  "shift.travel_ended": "arrived",
   "request.submitted": "requested a customer",
   "request.scheduled": "approved a request",
   "request.declined": "declined a request",

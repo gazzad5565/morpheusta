@@ -22,6 +22,7 @@ import {
   listCompletedTaskIds,
   markTaskComplete,
 } from "@/lib/task-completions-store";
+import { logEvent } from "@/lib/events-store";
 
 interface ShiftData {
   name: string;
@@ -249,27 +250,72 @@ export default function ActiveShiftPage() {
 
   const startTask = () => {
     if (!openSheet) return;
-    setActiveTaskId(openSheet.task.id);
+    const task = openSheet.task;
+    setActiveTaskId(task.id);
     setActiveTaskStartedAt(Date.now());
     setOpenSheet(null);
+    // Audit trail: which task / break / travel did the rep start, when?
+    if (shiftData?.shiftId) {
+      const isBreak = task.kind === "break";
+      void logEvent({
+        event_type: isBreak ? "shift.break_started" : "shift.task_started",
+        shift_id: shiftData.shiftId,
+        customer_id: shiftData.customerId,
+        message: isBreak
+          ? `Started break: ${task.name}`
+          : `Started task: ${task.name}`,
+        meta: {
+          task_id: task.id,
+          task_name: task.name,
+          duration_min: task.duration,
+          ...(isBreak ? { kind: "break" } : { compulsory: task.compulsory }),
+        },
+      });
+    }
   };
 
   const completeTask = () => {
     if (!openSheet) return;
-    const taskId = openSheet.task.id;
+    const task = openSheet.task;
+    const taskId = task.id;
+    const startedAt = activeTaskStartedAt;
     setActiveTaskId(null);
     setActiveTaskStartedAt(null);
     setCompletedTaskIds((ids) => (ids.includes(taskId) ? ids : [...ids, taskId]));
     setOpenSheet(null);
-    // Persist to DB so the manager can see what was done on this shift.
-    // Fire-and-forget; if it fails the local UI still reflects the tick
-    // and we'd rather leave that than block the rep on a flaky network.
+
+    const elapsedSec = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : null;
+    const isBreak = task.kind === "break";
+
     if (shiftData?.shiftId) {
-      void markTaskComplete(shiftData.shiftId, taskId).then((r) => {
-        if (!r.ok) {
-          // eslint-disable-next-line no-console
-          console.warn("[active] markTaskComplete failed:", r.error);
-        }
+      // Per-task completion record (already in place — only for real tasks,
+      // not breaks; the unique constraint is keyed off shift_task_completions
+      // and break ids aren't real customer_tasks rows).
+      if (!isBreak) {
+        void markTaskComplete(shiftData.shiftId, taskId).then((r) => {
+          if (!r.ok) {
+            // eslint-disable-next-line no-console
+            console.warn("[active] markTaskComplete failed:", r.error);
+          }
+        });
+      }
+      // Activity-feed event so the manager sees this in real time on the
+      // Live Feed + later in audit views. Breaks log a different type so
+      // we can compute paid vs unpaid time later.
+      void logEvent({
+        event_type: isBreak ? "shift.break_ended" : "shift.task_completed",
+        shift_id: shiftData.shiftId,
+        customer_id: shiftData.customerId,
+        message: isBreak
+          ? `Ended break: ${task.name}`
+          : `Completed task: ${task.name}`,
+        meta: {
+          task_id: task.id,
+          task_name: task.name,
+          duration_min: task.duration,
+          elapsed_sec: elapsedSec,
+          ...(isBreak ? { kind: "break" } : {}),
+        },
       });
     }
   };

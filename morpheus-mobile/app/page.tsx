@@ -8,6 +8,7 @@ import { type Shift } from "@/lib/mock-data";
 import { AppHeader, AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
 import { Glyph, formatTime } from "@/components/Glyph";
 import { getUser } from "@/lib/auth";
+import { logEvent } from "@/lib/events-store";
 import { listMyShiftsToday, subscribeShifts } from "@/lib/shifts-store";
 import { getMyProfile } from "@/lib/profiles-store";
 import { listLibraryFiles } from "@/lib/library-store";
@@ -610,12 +611,38 @@ function BreakCard() {
   const m = Math.floor(elapsed / 60);
   const s = elapsed % 60;
 
+  // Off-shift break — no shift_id attached, but the event still goes
+  // into shift_events so the audit trail captures rest time.
+  const startBreak = () => {
+    const ts = Date.now();
+    setBreakSince(ts);
+    void logEvent({
+      event_type: "shift.break_started",
+      message: "Started a rest break (off-shift)",
+      meta: { kind: "off_shift" },
+    });
+  };
+  const endBreak = () => {
+    const startedAt = breakSince;
+    setBreakSince(null);
+    if (startedAt) {
+      void logEvent({
+        event_type: "shift.break_ended",
+        message: "Ended a rest break (off-shift)",
+        meta: {
+          kind: "off_shift",
+          elapsed_sec: Math.floor((Date.now() - startedAt) / 1000),
+        },
+      });
+    }
+  };
+
   return (
     <div style={{ padding: "12px 16px 0" }}>
       {breakSince === null ? (
         <button
           type="button"
-          onClick={() => setBreakSince(Date.now())}
+          onClick={startBreak}
           style={{
             width: "100%",
             background: MC.card,
@@ -743,7 +770,7 @@ function BreakCard() {
             </div>
             <button
               type="button"
-              onClick={() => setBreakSince(null)}
+              onClick={endBreak}
               style={{
                 background: PURPLE,
                 color: "#fff",

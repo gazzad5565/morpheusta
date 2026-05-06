@@ -334,7 +334,13 @@ export async function checkOutOfShift(
     .select("customer_id, customers(name)")
     .eq("id", shiftId)
     .maybeSingle();
-  const update: Record<string, unknown> = { state: "complete" };
+  const update: Record<string, unknown> = {
+    state: "complete",
+    // First-class column so the timesheet can compute hours without
+    // joining shift_events. The events log still gets a row below for
+    // the audit trail / Live Feed.
+    check_out_at: new Date().toISOString(),
+  };
   if (typeof tasksDone === "number") update.tasks_done = tasksDone;
   const { error } = await supabase.from("shifts").update(update).eq("id", shiftId);
   if (error) return { ok: false, error: error.message };
