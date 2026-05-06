@@ -61,6 +61,41 @@ const UNASSIGNED_KEY = "__unassigned__";
 const VIEW_STORAGE_KEY = "schedule-view";
 type ViewMode = "days" | "reps";
 
+/**
+ * Smart default start time for the "+ Add" button on a day cell.
+ *
+ * - If the day already has shifts, start AFTER the latest shift's end
+ *   time, rounded up to the next hour. Stacks new shifts after existing
+ *   ones.
+ * - Else, if the day is today, start at the next round hour (or 09:00,
+ *   whichever is later). Avoids defaulting to a time that's already
+ *   passed.
+ * - Else (any other day, past or future), 09:00.
+ *
+ * Always falls within the same calendar day — clamps at 22:00 so the
+ * +1h end_time on the create page can't roll past midnight.
+ */
+function defaultStartTimeFor(iso: string, dayShifts: ShiftRow[]): string {
+  const ceilHour = (h: number, m: number) => Math.min(22, m === 0 ? h : h + 1);
+  // Day already busy → start after the last end_time.
+  if (dayShifts.length > 0) {
+    const lastEnd = dayShifts
+      .map((s) => s.end_time || "00:00")
+      .sort()
+      .pop()!;
+    const [h, m] = lastEnd.split(":").map((n) => parseInt(n, 10));
+    return `${String(ceilHour(h, m)).padStart(2, "0")}:00`;
+  }
+  const today = isoDate(new Date());
+  if (iso === today) {
+    const now = new Date();
+    const h = ceilHour(now.getHours(), now.getMinutes());
+    const target = Math.max(h, 9);
+    return `${String(target).padStart(2, "0")}:00`;
+  }
+  return "09:00";
+}
+
 export default function SchedulePage() {
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
@@ -508,6 +543,7 @@ function DayCell({
   })();
   const addQs = new URLSearchParams({
     date: iso,
+    start: defaultStartTimeFor(iso, shifts),
     ...(customerScopeForAdd ? { customer: customerScopeForAdd } : {}),
   });
   const addHref = `/schedule/new?${addQs.toString()}`;
@@ -713,6 +749,7 @@ function RepRow({
         const addQs = new URLSearchParams({
           rep: rep.id,
           date: iso,
+          start: defaultStartTimeFor(iso, list),
           ...(customerScopeForAdd ? { customer: customerScopeForAdd } : {}),
         });
         return (

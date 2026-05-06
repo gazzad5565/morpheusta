@@ -36,6 +36,18 @@ function addDaysISO(iso: string, days: number): string {
   return localISO(d);
 }
 
+function isValidHHMM(s: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
+}
+
+/** Add one hour to "HH:MM" — clamps to 23:59 (no day rollover). */
+function addHourHHMM(t: string): string {
+  if (!isValidHHMM(t)) return "10:00";
+  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
+  const h2 = Math.min(23, h + 1);
+  return `${String(h2).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 // Mon=0..Sun=6 (matching WEEKDAYS index above).
 function jsDayToIndex(jsDay: number): number {
@@ -57,6 +69,10 @@ function NewShiftPage() {
   const fromCustomer = params.get("customer") || "";
   const fromRequest = params.get("request") || "";
   const fromDate = params.get("date") || "";
+  // ?start=HH:MM optionally pre-fills the start time. End time always
+  // defaults to start + 1h unless ?end=HH:MM is also supplied.
+  const fromStart = params.get("start") || "";
+  const fromEnd = params.get("end") || "";
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [reps, setReps] = useState<Profile[]>([]);
@@ -66,8 +82,14 @@ function NewShiftPage() {
   const [customerScope, setCustomerScope] = useState<CustomerScope>(null);
   const [repId, setRepId] = useState<string>("");
   const [shiftDate, setShiftDate] = useState<string>(fromDate || todayISO());
-  const [startTime, setStartTime] = useState<string>("08:00");
-  const [endTime, setEndTime] = useState<string>("17:00");
+  const [startTime, setStartTime] = useState<string>(
+    isValidHHMM(fromStart) ? fromStart : "09:00"
+  );
+  const [endTime, setEndTime] = useState<string>(
+    isValidHHMM(fromEnd)
+      ? fromEnd
+      : addHourHHMM(isValidHHMM(fromStart) ? fromStart : "09:00")
+  );
   const [distance, setDistance] = useState<string>("");
   const [tasksTotal, setTasksTotal] = useState<string>("4");
 
