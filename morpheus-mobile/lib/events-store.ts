@@ -5,8 +5,6 @@
  * real time.
  */
 
-import { supabase, isSupabaseConfigured } from "./supabase";
-
 export type EventType =
   | "shift.scheduled"
   | "shift.claimed"
@@ -45,33 +43,10 @@ export interface NewEvent {
   meta?: Record<string, unknown>;
 }
 
-/** Insert a row. Best-effort — failures are silent so they never block UX. */
-export async function logEvent(e: NewEvent): Promise<void> {
-  if (!isSupabaseConfigured() || !supabase) return;
-  try {
-    const { data: userData } = await supabase.auth.getUser();
-    const actorId = userData.user?.id ?? null;
-    let actorLabel: string | null = null;
-    if (actorId) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("name, email")
-        .eq("id", actorId)
-        .maybeSingle();
-      const p = profile as { name?: string | null; email?: string } | null;
-      actorLabel = p?.name?.trim() || p?.email?.split("@")[0] || null;
-    }
-    await supabase.from("shift_events").insert({
-      event_type: e.event_type,
-      actor_id: actorId,
-      actor_label: actorLabel,
-      shift_id: e.shift_id ?? null,
-      customer_id: e.customer_id ?? null,
-      message: e.message ?? null,
-      meta: e.meta ?? null,
-    });
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn("[events] logEvent failed:", err);
-  }
-}
+/**
+ * Insert a row. Best-effort but offline-resilient: if the write fails
+ * (no network, screen sleeping, RLS hiccup) the payload is queued in
+ * localStorage and retried on the next mount or focus. See
+ * lib/event-queue.ts for the implementation.
+ */
+export { logEventReliably as logEvent } from "./event-queue";

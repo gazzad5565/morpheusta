@@ -9,6 +9,7 @@ import { AppHeader, AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@
 import { Glyph, formatTime } from "@/components/Glyph";
 import { getUser } from "@/lib/auth";
 import { logEvent } from "@/lib/events-store";
+import { drainEventQueue } from "@/lib/event-queue";
 import { listMyShiftsToday, subscribeShifts } from "@/lib/shifts-store";
 import { getMyProfile } from "@/lib/profiles-store";
 import { listLibraryFiles } from "@/lib/library-store";
@@ -134,11 +135,19 @@ export default function DashboardPage() {
         }
       );
     load();
+    // Drain any events that failed to send last time the app was open
+    // (no network, screen slept mid-request, etc). Best-effort.
+    void drainEventQueue();
     // Refetch on tab-becomes-visible so a rep who left the PWA open
     // overnight wakes up to today's shifts, not yesterday's. Also covers
-    // the "checked in late last night, opens at 8 AM" case.
+    // the "checked in late last night, opens at 8 AM" case. We also
+    // re-drain here — the rep might have done in-app actions while
+    // backgrounded that queued events.
     const onVis = () => {
-      if (document.visibilityState === "visible") load();
+      if (document.visibilityState === "visible") {
+        load();
+        void drainEventQueue();
+      }
     };
     document.addEventListener("visibilitychange", onVis);
     // Realtime: refetch when ANY shift row changes — covers the case

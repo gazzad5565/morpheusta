@@ -23,6 +23,10 @@ import {
   markTaskComplete,
 } from "@/lib/task-completions-store";
 import { logEvent } from "@/lib/events-store";
+import { drainEventQueue } from "@/lib/event-queue";
+
+/** localStorage key for the in-flight task on /active. Survives app close. */
+const ACTIVE_TASK_LS_KEY = "morpheus.active_task";
 
 interface ShiftData {
   name: string;
@@ -91,13 +95,18 @@ export default function ActiveShiftPage() {
     // Covers manager-deleted, manager-reassigned, auto-checkout sweep —
     // anything that flips the rep out of an in-progress state.
     const unsub = subscribeShifts(load);
+    // Drain any events that failed during the last session — typically
+    // the screen sleeping mid-request. Best-effort; never blocks UI.
+    void drainEventQueue();
     // Mobile browsers aggressively suspend websockets when the screen
     // sleeps, so realtime alone isn't enough — when the page comes
-    // back to the foreground we need to manually re-sync. Without
-    // this a rep who locks their phone for 5 minutes can come back
-    // to a stale shift state.
+    // back to the foreground we need to manually re-sync AND retry
+    // any queued events that failed mid-request while backgrounded.
     const onVis = () => {
-      if (document.visibilityState === "visible") load();
+      if (document.visibilityState === "visible") {
+        load();
+        void drainEventQueue();
+      }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => {
@@ -123,6 +132,42 @@ export default function ActiveShiftPage() {
   const [activeTaskStartedAt, setActiveTaskStartedAt] = useState<number | null>(null);
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
   const [openSheet, setOpenSheet] = useState<{ task: Task } | null>(null);
+
+  // Persist the in-flight task across screen sleep / app close. The
+  // rep starts a task → puts the phone in their pocket → does the
+  // physical work → unlocks → taps Complete. If the browser discarded
+  // the tab in between (which iOS Safari aggressively does), local
+  // state is gone unless we mirror it to localStorage.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(ACTIVE_TASK_LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { id: string; startedAt: number } | null;
+        if (parsed && parsed.id && Number.isFinite(parsed.startedAt)) {
+          setActiveTaskId(parsed.id);
+          setActiveTaskStartedAt(parsed.startedAt);
+        }
+      }
+    } catch {
+      /* SSR / blocked storage */
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (activeTaskId && activeTaskStartedAt) {
+        window.localStorage.setItem(
+          ACTIVE_TASK_LS_KEY,
+          JSON.stringify({ id: activeTaskId, startedAt: activeTaskStartedAt })
+        );
+      } else {
+        window.localStorage.removeItem(ACTIVE_TASK_LS_KEY);
+      }
+    } catch {
+      /* noop */
+    }
+  }, [activeTaskId, activeTaskStartedAt]);
 
   const [tasksOpen, setTasksOpen] = useState(true);
   const [availOpen, setAvailOpen] = useState(false);

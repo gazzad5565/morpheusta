@@ -195,3 +195,42 @@ export async function removeRequestedShift(id: string): Promise<void> {
     console.warn("[shift-store] remove error:", error.message);
   }
 }
+
+/**
+ * Subscribe to realtime changes on requested_shifts. Used by mobile
+ * /shifts so when an admin approves the rep's request (which inserts
+ * a row into shifts AND deletes the row in requested_shifts), the
+ * "Unscheduled" section drops the request immediately instead of
+ * waiting for the rep to navigate away and back.
+ *
+ * Same defensive try/catch + unique channel pattern as subscribeShifts.
+ */
+let _requestedShiftsChannelCounter = 0;
+
+export function subscribeRequestedShifts(onChange: () => void): () => void {
+  if (!isSupabaseConfigured() || !supabase) return () => {};
+  try {
+    _requestedShiftsChannelCounter += 1;
+    const channelName = `mobile_requested_shifts_live_${Date.now()}_${_requestedShiftsChannelCounter}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "requested_shifts" },
+        () => onChange()
+      )
+      .subscribe();
+    return () => {
+      try {
+        supabase!.removeChannel(channel);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[shift-store] removeChannel failed:", err);
+      }
+    };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[shift-store] subscribe failed:", err);
+    return () => {};
+  }
+}

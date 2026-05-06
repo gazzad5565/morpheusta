@@ -5,7 +5,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { type Shift } from "@/lib/mock-data";
-import { listRequestedShifts, removeRequestedShift } from "@/lib/shift-store";
+import {
+  listRequestedShifts,
+  removeRequestedShift,
+  subscribeRequestedShifts,
+} from "@/lib/shift-store";
 import {
   listMyShiftsToday,
   listUnassignedShiftsToday,
@@ -60,17 +64,26 @@ export default function ShiftsListPage() {
   };
   useEffect(() => {
     reload();
-    // Refetch on tab focus (woken-up PWA) and on any shifts table
-    // change (manager assigned / reassigned / removed a shift while
-    // the rep is looking at this page).
+    // Refetch on tab focus + on any change to EITHER shifts or
+    // requested_shifts. The second sub closes the bug where an admin
+    // approval inserted a shift (fired the shifts sub → reload) but
+    // ALSO deleted the request (fired the requests sub → reload), and
+    // without subscribing here the request lingered in the
+    // "Unscheduled" section until the rep navigated away. Belt-and-
+    // braces 60s poll catches the case where realtime drops while the
+    // phone is asleep.
     const onVis = () => {
       if (document.visibilityState === "visible") reload();
     };
     document.addEventListener("visibilitychange", onVis);
-    const unsub = subscribeShifts(reload);
+    const unsubShifts = subscribeShifts(reload);
+    const unsubRequests = subscribeRequestedShifts(reload);
+    const poll = window.setInterval(reload, 60_000);
     return () => {
       document.removeEventListener("visibilitychange", onVis);
-      unsub();
+      unsubShifts();
+      unsubRequests();
+      window.clearInterval(poll);
     };
   }, []);
 
