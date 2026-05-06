@@ -213,8 +213,23 @@ export async function getShiftById(
 }
 
 /**
- * Check in to a shift — sets state='in-progress' and stamps check_in_at.
- * RLS allows update where rep_id = auth.uid() (the rep's own shift).
+ * Check in to a shift — sets state='in-progress', stamps check_in_at,
+ * AND claims the shift (sets rep_id = current user) if it was unassigned.
+ *
+ * Bug previously: this function only flipped state. If a rep tapped
+ * Check in on an unassigned shift via a deep link or similar, rep_id
+ * stayed null, so:
+ *   - getMyActiveShift() (filters by rep_id = me) returned null →
+ *     /active redirected back to "Today's shifts"
+ *   - The location-tracker, which only mounts on /active, never started
+ *     → no rep_locations row → admin map didn't show the rep
+ *   - The admin shifts list rendered the row as "Unassigned" because
+ *     there was no rep_id to resolve against profiles
+ *
+ * Fix: include rep_id in the update so a check-in always claims the
+ * shift to the user. Refuses if the shift is already assigned to a
+ * different rep (the .or filter limits it to "unassigned or already
+ * mine").
  */
 export async function checkInToShift(
   shiftId: string
@@ -222,19 +237,35 @@ export async function checkInToShift(
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) return { ok: false, error: "Not signed in" };
+
   const { data: shiftRow } = await supabase
     .from("shifts")
     .select("customer_id, customers(name)")
     .eq("id", shiftId)
     .maybeSingle();
-  const { error } = await supabase
+
+  const { data: updated, error } = await supabase
     .from("shifts")
     .update({
       state: "in-progress",
       check_in_at: new Date().toISOString(),
+      rep_id: userId,
     })
-    .eq("id", shiftId);
+    .eq("id", shiftId)
+    // Only succeed when the shift is unassigned or already mine.
+    // Postgrest .or() syntax: comma-separated filters in one OR group.
+    .or(`rep_id.is.null,rep_id.eq.${userId}`)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) {
+    return {
+      ok: false,
+      error: "That shift is assigned to another rep — can't check in.",
+    };
+  }
   const customerName =
     (shiftRow as { customers?: { name?: string } } | null)?.customers?.name || "customer";
   await logEvent({

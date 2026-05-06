@@ -63,6 +63,30 @@ export async function setEarlyGraceMinutes(
   return writeSetting("early_grace_minutes", Math.max(0, Math.round(minutes)));
 }
 
+// Cutoff time after which any still-in-progress shift is auto-completed.
+// Stored as HH:MM (24h). Default 23:59 — sweeps everything before midnight
+// so reps who forget to check out don't show as "in shift" the next day.
+export const DEFAULT_AUTO_CHECKOUT_TIME = "23:59";
+
+function isValidHHMM(s: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
+}
+
+export async function getAutoCheckoutTime(): Promise<string> {
+  const v = await readSetting<string>("auto_checkout_time", DEFAULT_AUTO_CHECKOUT_TIME);
+  return typeof v === "string" && isValidHHMM(v) ? v : DEFAULT_AUTO_CHECKOUT_TIME;
+}
+
+export async function setAutoCheckoutTime(
+  time: string
+): Promise<{ ok: boolean; error?: string }> {
+  const t = (time || "").trim();
+  if (!isValidHHMM(t)) {
+    return { ok: false, error: "Time must be in HH:MM (24-hour) format, e.g. 23:59." };
+  }
+  return writeSetting("auto_checkout_time", t);
+}
+
 // Default geofence radius for new customers (per-customer override on
 // each customer's Address tab takes precedence).
 export const DEFAULT_GEOFENCE_RADIUS_M = 100;

@@ -16,6 +16,7 @@ export type EventType =
   | "shift.checked_out"
   | "shift.checked_out_offsite"
   | "shift.checked_out_early"
+  | "shift.auto_checked_out"
   | "shift.deleted"
   | "request.submitted"
   | "request.scheduled"

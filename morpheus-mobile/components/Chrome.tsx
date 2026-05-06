@@ -9,7 +9,6 @@ export function AppHeader({
   title,
   onBack,
   withMenu,
-  onRefresh,
   lastSync,
 }: {
   title: string;
@@ -22,7 +21,6 @@ export function AppHeader({
    * the side menu (Library, Profile, etc.) so users have both options.
    */
   withMenu?: boolean;
-  onRefresh?: () => void;
   lastSync?: string;
 }) {
   const { setOpen } = useMenu();
@@ -78,9 +76,11 @@ export function AppHeader({
             <Glyph name="menu" size={22} color="#fff" />
           </button>
         ) : (
-          <button type="button" onClick={onRefresh} style={iconBtnStyle} aria-label="Refresh">
-            <Glyph name="refresh" size={20} color="#fff" />
-          </button>
+          // Keep an empty placeholder slot so the title stays centred.
+          // The previous "refresh" button was wired to nothing and every
+          // page that needs fresh data refetches automatically on mount
+          // and on visibilitychange. Removing it.
+          <div style={iconBtnStyle} aria-hidden />
         )}
       </div>
       {lastSync && (

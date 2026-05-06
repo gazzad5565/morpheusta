@@ -111,11 +111,6 @@ export default function RequestsPage() {
     <AdminShell
       title="Requests"
       breadcrumbs={["Home", "Requests"]}
-      actions={
-        <Btn size="sm" onClick={reload}>
-          Refresh
-        </Btn>
-      }
     >
       <div style={{ padding: 20 }}>
         <Card padding={0}>

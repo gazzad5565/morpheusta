@@ -18,6 +18,7 @@ export type EventType =
   | "shift.checked_out"
   | "shift.checked_out_offsite"
   | "shift.checked_out_early"
+  | "shift.auto_checked_out"
   | "shift.deleted"
   // Requests
   | "request.submitted"
@@ -152,6 +153,7 @@ export const EVENT_LABEL: Record<EventType, string> = {
   "shift.checked_out": "checked out",
   "shift.checked_out_offsite": "checked out OFF-SITE",
   "shift.checked_out_early": "checked out EARLY",
+  "shift.auto_checked_out": "was auto-checked out",
   "shift.deleted": "removed a shift",
   "request.submitted": "requested a customer",
   "request.scheduled": "approved a request",
@@ -180,7 +182,8 @@ export function eventTone(type: EventType): "ok" | "warn" | "danger" | "info" {
     return "danger";
   if (
     type === "shift.checked_in_late" ||
-    type === "shift.checked_out_early"
+    type === "shift.checked_out_early" ||
+    type === "shift.auto_checked_out"
   )
     return "warn";
   if (type === "request.submitted") return "info";

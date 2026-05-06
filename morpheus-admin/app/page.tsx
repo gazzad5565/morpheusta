@@ -5,6 +5,7 @@ import { KpiStrip } from "@/components/screens/live-ops/KpiStrip";
 import { MapPanel } from "@/components/screens/live-ops/MapPanel";
 import { LiveFeedPanel } from "@/components/screens/live-ops/LiveFeedPanel";
 import { ShiftsList } from "@/components/screens/live-ops/ShiftsList";
+import { StaleShiftSweeper } from "@/components/screens/live-ops/StaleShiftSweeper";
 
 export default function LiveOpsPage() {
   return (
@@ -25,6 +26,7 @@ export default function LiveOpsPage() {
       }
     >
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+        <StaleShiftSweeper />
         <KpiStrip />
         <div
           style={{

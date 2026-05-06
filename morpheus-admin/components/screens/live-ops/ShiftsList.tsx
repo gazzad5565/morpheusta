@@ -74,9 +74,14 @@ export function ShiftsList() {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      // Don't filter profiles by role here — we use this map purely to
+      // resolve rep_id → name on each row, and a manager who's checking
+      // in on the mobile app while testing would silently render as
+      // "Unassigned" otherwise. Use role='rep' only when picking a rep
+      // for a NEW shift / assignment.
       const [shiftRows, profileRows] = await Promise.all([
         listShifts(),
-        listProfiles({ role: "rep" }),
+        listProfiles(),
       ]);
       if (cancelled) return;
       const repMap: Record<string, RepLite> = {};

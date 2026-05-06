@@ -22,12 +22,15 @@ import {
   setEarlyGraceMinutes,
   getDefaultGeofenceRadius,
   setDefaultGeofenceRadius,
+  getAutoCheckoutTime,
+  setAutoCheckoutTime,
 } from "@/lib/settings-store";
 
 export default function CheckInRulesPage() {
   const [lateMin, setLateMin] = useState<string>("10");
   const [earlyMin, setEarlyMin] = useState<string>("15");
   const [defaultRadius, setDefaultRadius] = useState<string>("100");
+  const [autoCheckoutTime, setAutoCheckoutTimeState] = useState<string>("23:59");
   const [loaded, setLoaded] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -37,10 +40,12 @@ export default function CheckInRulesPage() {
       getLateGraceMinutes(),
       getEarlyGraceMinutes(),
       getDefaultGeofenceRadius(),
-    ]).then(([late, early, radius]) => {
+      getAutoCheckoutTime(),
+    ]).then(([late, early, radius, autoTime]) => {
       setLateMin(String(late));
       setEarlyMin(String(early));
       setDefaultRadius(String(radius));
+      setAutoCheckoutTimeState(autoTime);
       setLoaded(true);
     });
   }, []);
@@ -74,6 +79,15 @@ export default function CheckInRulesPage() {
     setSavingKey(null);
     if (!r.ok) return setMessage(r.error || "Couldn't save.");
     setMessage(`Default radius saved (${n} m).`);
+  };
+
+  const saveAutoCheckout = async () => {
+    setMessage(null);
+    setSavingKey("autoCheckout");
+    const r = await setAutoCheckoutTime(autoCheckoutTime);
+    setSavingKey(null);
+    if (!r.ok) return setMessage(r.error || "Couldn't save.");
+    setMessage(`Auto check-out time saved (${autoCheckoutTime}).`);
   };
 
   return (
@@ -135,6 +149,66 @@ export default function CheckInRulesPage() {
             </>
           }
         />
+
+        <div style={{ height: 1, background: AC.line, margin: "20px 0" }} />
+
+        {/* Auto check-out time */}
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              color: AC.mute,
+              fontWeight: 700,
+              letterSpacing: 0.3,
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}
+          >
+            Auto check-out time (24h)
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", maxWidth: 360 }}>
+            <input
+              type="time"
+              value={autoCheckoutTime}
+              disabled={!loaded || savingKey === "autoCheckout"}
+              onChange={(e) => setAutoCheckoutTimeState(e.target.value)}
+              style={{
+                flex: 1,
+                padding: "9px 11px",
+                borderRadius: 10,
+                border: `1px solid ${AC.line}`,
+                background: "#fff",
+                fontFamily: AC.fontMono,
+                fontSize: 14,
+                color: AC.ink,
+              }}
+            />
+            <Btn
+              size="sm"
+              kind="primary"
+              onClick={saveAutoCheckout}
+              disabled={!loaded || savingKey === "autoCheckout"}
+            >
+              {savingKey === "autoCheckout" ? "Saving…" : "Save"}
+            </Btn>
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11.5,
+              color: AC.mute,
+              marginTop: 6,
+              lineHeight: 1.45,
+            }}
+          >
+            Reps sometimes forget to tap Check out. Any shift still in
+            progress past this time is automatically marked complete and the
+            rep's live-map dot is cleared. Default is <b style={{ color: AC.ink2 }}>23:59</b>{" "}
+            (just before midnight local time). Yesterday's stragglers are
+            always swept regardless of this time.
+          </div>
+        </div>
 
         {message && (
           <div

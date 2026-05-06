@@ -142,6 +142,5 @@ export const NAV_ITEMS = [
   { id: "reports", label: "Reports", glyph: "chart", href: "/reports" },
   { id: "library", label: "Library", glyph: "lib", href: "/library" },
   { id: "notify", label: "Notifications", glyph: "send", href: "/notify", comingSoon: true },
-  { id: "audit", label: "Audit log", glyph: "audit", href: "/audit" },
   { id: "settings", label: "Settings", glyph: "settings", href: "/settings" },
 ] as const;

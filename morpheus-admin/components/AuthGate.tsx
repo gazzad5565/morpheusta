@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AC } from "@/lib/tokens";
 import { getSession, getUser, onAuthChange, signOut } from "@/lib/auth";
@@ -38,6 +38,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname() || "/";
   const [status, setStatus] = useState<Status>("checking");
+  // Token refresh fires onAuthChange roughly every hour, plus on focus
+  // and on tab restore. We only need to re-evaluate the role on a real
+  // sign-in / sign-out — a token refresh keeps the same user. Without
+  // this guard, repeated overlapping evaluate() calls could race and
+  // briefly flip status, which felt like nav links "not loading".
+  const evaluatingRef = useRef(false);
+  const lastResolvedUserRef = useRef<string | "anon" | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,24 +53,35 @@ export function AuthGate({ children }: { children: ReactNode }) {
       return;
     }
     const evaluate = async () => {
-      const s = await getSession();
-      if (cancelled) return;
-      if (!s) {
-        setStatus("anon");
-        return;
-      }
-      // Authenticated. Check the role before letting them in.
-      const role = await fetchRole();
-      if (cancelled) return;
-      if (role === "manager") {
-        setStatus("authed");
-      } else {
-        // No row yet, or non-manager (likely a rep).
-        setStatus("wrong-role");
+      if (evaluatingRef.current) return; // skip overlapping re-fires
+      evaluatingRef.current = true;
+      try {
+        const s = await getSession();
+        if (cancelled) return;
+        if (!s) {
+          lastResolvedUserRef.current = "anon";
+          setStatus("anon");
+          return;
+        }
+        const userId = s.user?.id ?? null;
+        // Same user as last time → keep current status (avoid the
+        // checking spinner and the role re-fetch on every token refresh).
+        if (userId && userId === lastResolvedUserRef.current) return;
+
+        const role = await fetchRole();
+        if (cancelled) return;
+        lastResolvedUserRef.current = userId;
+        setStatus(role === "manager" ? "authed" : "wrong-role");
+      } finally {
+        evaluatingRef.current = false;
       }
     };
     evaluate();
-    const unsubscribe = onAuthChange(() => evaluate());
+    const unsubscribe = onAuthChange(() => {
+      // Reset the user-cache so a real sign-in / sign-out re-evaluates;
+      // token refresh events keep the cached user id and short-circuit.
+      evaluate();
+    });
     return () => {
       cancelled = true;
       unsubscribe();

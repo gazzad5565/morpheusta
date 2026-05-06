@@ -7,6 +7,7 @@
 
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent } from "./events-store";
+import { getAutoCheckoutTime } from "./settings-store";
 
 export interface ShiftRow {
   id: string;
@@ -215,4 +216,113 @@ export function subscribeShifts(onChange: () => void): () => void {
     console.warn("[shifts] subscribe failed:", err);
     return () => {};
   }
+}
+
+/**
+ * Sweep any in-progress shifts that have run past their auto-checkout
+ * cutoff and force them to "complete". Reps sometimes forget to tap
+ * Check out — without this, they show as "in shift" on the admin map
+ * forever and the rep_locations dot stays green.
+ *
+ * Cutoff rules:
+ *   - shift_date earlier than today → always stale (yesterdays shifts).
+ *   - shift_date == today AND current local time >= auto_checkout_time
+ *     → stale.
+ *
+ * For each stale shift we:
+ *   1. UPDATE shifts SET state="complete"
+ *   2. DELETE FROM rep_locations WHERE rep_id IN (...) so the green dot
+ *      disappears from the admin map.
+ *   3. logEvent shift.auto_checked_out for the audit trail.
+ *
+ * Returns the number of shifts swept. Designed to be safe to call on
+ * every admin home load — when nothing is stale it does one cheap
+ * SELECT and returns 0.
+ */
+export async function sweepStaleShifts(): Promise<{ swept: number }> {
+  if (!isSupabaseConfigured() || !supabase) return { swept: 0 };
+
+  const cutoff = await getAutoCheckoutTime(); // "HH:MM"
+  const today = todayLocalISO();
+  const now = new Date();
+  const [ch, cm] = cutoff.split(":").map((n) => parseInt(n, 10));
+  const cutoffTodayMs = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    ch,
+    cm,
+    0,
+    0
+  ).getTime();
+  const todayPastCutoff = now.getTime() >= cutoffTodayMs;
+
+  // Pull any in-progress shifts. Filter client-side because the DATE
+  // comparison + cutoff logic is awkward to express in PostgREST.
+  const { data, error } = await supabase
+    .from("shifts")
+    .select("id, rep_id, shift_date, customer_id, customers(name)")
+    .eq("state", "in-progress");
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] sweep select:", error.message);
+    return { swept: 0 };
+  }
+  type Row = {
+    id: string;
+    rep_id: string | null;
+    shift_date: string;
+    customer_id: string;
+    customers: { name?: string } | null;
+  };
+  const rows = (data as Row[]) || [];
+  const stale = rows.filter((r) => {
+    if (r.shift_date < today) return true;
+    if (r.shift_date === today && todayPastCutoff) return true;
+    return false;
+  });
+  if (stale.length === 0) return { swept: 0 };
+
+  const ids = stale.map((s) => s.id);
+  const { error: updErr } = await supabase
+    .from("shifts")
+    .update({ state: "complete" })
+    .in("id", ids);
+  if (updErr) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] sweep update:", updErr.message);
+    return { swept: 0 };
+  }
+
+  // Clear rep_locations rows for any reps whose only in-progress shift
+  // was just swept — best-effort. If the rep has another concurrent
+  // in-progress shift the upcoming admin map subscription will resync
+  // anyway when location-tracker pings again.
+  const repIds = Array.from(
+    new Set(stale.map((s) => s.rep_id).filter((id): id is string => !!id))
+  );
+  if (repIds.length > 0) {
+    const { error: delErr } = await supabase
+      .from("rep_locations")
+      .delete()
+      .in("rep_id", repIds);
+    if (delErr) {
+      // eslint-disable-next-line no-console
+      console.warn("[shifts] sweep clear locations:", delErr.message);
+    }
+  }
+
+  // Audit trail.
+  for (const s of stale) {
+    const customerName = s.customers?.name || "a customer";
+    await logEvent({
+      event_type: "shift.auto_checked_out",
+      shift_id: s.id,
+      customer_id: s.customer_id,
+      message: `Auto checked-out of ${customerName} (past ${cutoff})`,
+      meta: { cutoff, shift_date: s.shift_date },
+    });
+  }
+
+  return { swept: stale.length };
 }
