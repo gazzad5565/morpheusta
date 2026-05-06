@@ -129,22 +129,46 @@ export async function addRequestedShift(
   }
   const rowId = `${userId}-${shift.id}`;
 
-  const { error } = await supabase.from("requested_shifts").upsert(
-    {
-      id: rowId,
-      customer_id: shift.id,
-      customer_name: shift.name,
-      customer_initials: shift.initials,
-      customer_color: shift.color,
-      customer_code: shift.code,
-      status: "pending",
-      // rep_id auto-fills via DEFAULT auth.uid() on the server side
-    },
-    { onConflict: "id", ignoreDuplicates: true }
-  );
+  // ignoreDuplicates was true previously, which translates to
+  // `ON CONFLICT DO NOTHING`. If a stale row existed (status='scheduled'
+  // / 'declined' / anything that wasn't cleaned up) the new insert
+  // silently no-op'd while `logEvent` below still fired — the manager
+  // saw the request in the activity feed but no row in Needs action.
+  //
+  // Now: ON CONFLICT DO UPDATE — re-requesting the same customer
+  // resets the row back to a fresh pending state, bumps requested_at
+  // so it sorts to the top of the inbox, and refreshes the customer
+  // metadata in case anything changed (rename, recoloured, etc).
+  // .select() lets us catch the silent-success case where Postgres
+  // returned 0 rows (RLS block, mostly) and warn the caller instead
+  // of pretending the request landed.
+  const { data, error } = await supabase
+    .from("requested_shifts")
+    .upsert(
+      {
+        id: rowId,
+        customer_id: shift.id,
+        customer_name: shift.name,
+        customer_initials: shift.initials,
+        customer_color: shift.color,
+        customer_code: shift.code,
+        status: "pending",
+        requested_at: new Date().toISOString(),
+        // rep_id auto-fills via DEFAULT auth.uid() on the server side
+      },
+      { onConflict: "id" }
+    )
+    .select("id");
   if (error) {
     // eslint-disable-next-line no-console
     console.warn("[shift-store] add error:", error.message);
+    return;
+  }
+  if (!data || data.length === 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[shift-store] add: insert affected 0 rows — likely an RLS block on requested_shifts. Check the requested_shifts INSERT policy in Supabase."
+    );
     return;
   }
   await logEvent({
