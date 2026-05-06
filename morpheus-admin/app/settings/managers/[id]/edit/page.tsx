@@ -141,7 +141,7 @@ export default function EditManagerPage({
 
   if (loading) {
     return (
-      <AdminShell breadcrumbs={["Home", "Settings", "Managers", "…"]}>
+      <AdminShell breadcrumbs={["Home", "Settings", "Users", "…"]}>
         <div style={{ padding: 32, fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
           Loading user…
         </div>
@@ -151,13 +151,13 @@ export default function EditManagerPage({
 
   if (notFound || !profile) {
     return (
-      <AdminShell breadcrumbs={["Home", "Settings", "Managers", "Not found"]}>
+      <AdminShell breadcrumbs={["Home", "Settings", "Users", "Not found"]}>
         <div style={{ padding: 32 }}>
           <Card padding={24}>
             <div style={{ fontFamily: AC.font, fontSize: 14, color: AC.ink, marginBottom: 8 }}>
               No user found with this ID.
             </div>
-            <Btn onClick={() => router.push("/settings/managers")}>Back to Managers</Btn>
+            <Btn onClick={() => router.push("/settings/managers")}>Back to Users</Btn>
           </Card>
         </div>
       </AdminShell>
@@ -166,7 +166,7 @@ export default function EditManagerPage({
 
   return (
     <AdminShell
-      breadcrumbs={["Home", "Settings", "Managers", { label: displayName(profile) }]}
+      breadcrumbs={["Home", "Settings", "Users", { label: displayName(profile) }]}
       actions={
         <Btn size="sm" onClick={() => router.push("/settings/managers")}>
           Back

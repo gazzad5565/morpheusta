@@ -32,7 +32,11 @@ export interface SettingsSection {
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: "managers",
-    label: "Managers",
+    // Section label shown in the sidebar rail / hub tiles / page heading.
+    // Renamed to "Users" because the page covers both reps and managers
+    // (promote / demote / add user / etc). The /settings/managers route
+    // is preserved for existing links + breadcrumbs.
+    label: "Users",
     href: "/settings/managers",
     glyph: "reps",
     description: "Reps log into the mobile app. Managers log into this console.",

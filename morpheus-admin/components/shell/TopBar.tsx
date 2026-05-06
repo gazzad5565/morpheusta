@@ -41,6 +41,7 @@ const CRUMB_HREF: Record<string, string> = {
   Library: "/library",
   Notifications: "/notify",
   Settings: "/settings",
+  Users: "/settings/managers",
 };
 
 function resolveCrumb(c: Crumb): { label: string; href: string | null } {
