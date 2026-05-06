@@ -82,29 +82,34 @@ function NewShiftPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listCustomers(), listProfiles({ role: "rep" })]).then(
+    // Load EVERY profile (reps + managers) so the dropdown can assign
+    // shifts to anyone with an account. Previously this filtered to
+    // role='rep' which meant a manager couldn't pick up a shift
+    // themselves and couldn't test the rep flow on their own login.
+    // Sorted reps-first because that's the common case.
+    Promise.all([listCustomers(), listProfiles()]).then(
       async ([cs, rs]) => {
         if (cancelled) return;
         setCustomers(cs);
-        // Pre-fill from a rep request when present.
         if (fromCustomer && cs.some((c) => c.id === fromCustomer)) {
           setCustomerScope([fromCustomer]);
         }
-        // If the request came from someone who isn't in the role='rep'
-        // list (e.g. a manager testing the mobile flow on their own
-        // account), back-fill that profile so the dropdown can show +
-        // pre-select them. Without this, repId silently stays empty
-        // and the shift is created as Unassigned.
-        let repList = rs;
-        if (fromRep && !rs.some((r) => r.id === fromRep)) {
+        const sorted = [...rs].sort((a, b) => {
+          // role='rep' first, then by display name
+          if (a.role !== b.role) return a.role === "rep" ? -1 : 1;
+          return (a.name || a.email).localeCompare(b.name || b.email);
+        });
+        setReps(sorted);
+        if (fromRep && sorted.some((r) => r.id === fromRep)) {
+          setRepId(fromRep);
+        } else if (fromRep) {
+          // Edge case: rep id from URL isn't in profiles (deleted user?).
+          // Fall back to the back-fill helper just in case.
           const extra = await getProfileById(fromRep);
           if (extra && !cancelled) {
-            repList = [extra, ...rs];
+            setReps([extra, ...sorted]);
+            setRepId(fromRep);
           }
-        }
-        setReps(repList);
-        if (fromRep && repList.some((r) => r.id === fromRep)) {
-          setRepId(fromRep);
         }
         setLoading(false);
       }
@@ -294,6 +299,7 @@ function NewShiftPage() {
               {reps.map((r) => (
                 <option key={r.id} value={r.id}>
                   {displayName(r)} · {r.email}
+                  {r.role !== "rep" ? ` · ${r.role}` : ""}
                 </option>
               ))}
             </select>

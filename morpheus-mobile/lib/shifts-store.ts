@@ -78,11 +78,12 @@ export async function listMyShiftsToday(): Promise<
   const userId = userData.user?.id;
   if (!userId) return [];
 
+  const today = todayISO();
   const { data, error } = await supabase
     .from("shifts")
     .select("*, customers(id,name,initials,color,code)")
     .eq("rep_id", userId)
-    .eq("shift_date", todayISO())
+    .eq("shift_date", today)
     .order("start_time", { ascending: true });
 
   if (error) {
@@ -90,6 +91,25 @@ export async function listMyShiftsToday(): Promise<
     console.warn("[shifts] listMyShiftsToday:", error.message);
     return [];
   }
+
+  // If we got nothing back, log a one-line diagnostic so the rep
+  // (and us, when they screenshot the console) can see WHY their
+  // dashboard is empty — without the diagnostic the most common
+  // misdiagnosis is "the app is broken" when actually the shifts
+  // were assigned to a different rep or dated something else.
+  if (!data || data.length === 0) {
+    const { count } = await supabase
+      .from("shifts")
+      .select("id", { count: "exact", head: true })
+      .eq("rep_id", userId);
+    // eslint-disable-next-line no-console
+    console.info(
+      `[shifts] listMyShiftsToday: 0 today (${today}). Total shifts assigned to me (any date): ${
+        count ?? "unknown"
+      }. user_id=${userId}`
+    );
+  }
+
   return (data as ShiftRow[]).map(rowToShift);
 }
 
