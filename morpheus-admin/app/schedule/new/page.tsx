@@ -24,6 +24,7 @@ import { createShift } from "@/lib/shifts-store";
 import { listProfiles, getProfileById, displayName, type Profile } from "@/lib/profiles-store";
 import { deleteRequest } from "@/lib/requests-store";
 import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
+import { RepScopePicker, type RepScope } from "@/components/ui/RepScopePicker";
 import { todayLocalISO, localISO } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
@@ -80,7 +81,13 @@ function NewShiftPage() {
 
   // Customer scope: null = all, [...] = specific (one or many).
   const [customerScope, setCustomerScope] = useState<CustomerScope>(null);
-  const [repId, setRepId] = useState<string>("");
+  // Rep scope mirrors the customer pattern:
+  //   null = unassigned (rep_id = NULL on the created shift)
+  //   []   = none picked yet (caller treats as invalid)
+  //   [id, ...] = these reps; cartesian product with customers + dates
+  // Default is null (single shift, claimable) which preserves the
+  // previous form's "leave it blank" behaviour.
+  const [repScope, setRepScope] = useState<RepScope>(null);
   const [shiftDate, setShiftDate] = useState<string>(fromDate || todayISO());
   const [startTime, setStartTime] = useState<string>(
     isValidHHMM(fromStart) ? fromStart : "09:00"
@@ -123,14 +130,14 @@ function NewShiftPage() {
         });
         setReps(sorted);
         if (fromRep && sorted.some((r) => r.id === fromRep)) {
-          setRepId(fromRep);
+          setRepScope([fromRep]);
         } else if (fromRep) {
           // Edge case: rep id from URL isn't in profiles (deleted user?).
           // Fall back to the back-fill helper just in case.
           const extra = await getProfileById(fromRep);
           if (extra && !cancelled) {
             setReps([extra, ...sorted]);
-            setRepId(fromRep);
+            setRepScope([fromRep]);
           }
         }
         setLoading(false);
@@ -178,7 +185,16 @@ function NewShiftPage() {
     return customerScope;
   }, [customerScope, customers]);
 
-  const totalShifts = generatedDates.length * targetedCustomerIds.length;
+  // Resolve the rep ids each shift will be created for. `null` means
+  // "one shift, unassigned" — a single null entry keeps the cartesian
+  // multiplication clean.
+  const targetedRepIds = useMemo<(string | null)[]>(() => {
+    if (repScope === null) return [null];
+    return repScope;
+  }, [repScope]);
+
+  const totalShifts =
+    generatedDates.length * targetedCustomerIds.length * targetedRepIds.length;
 
   const toggleWeekday = (i: number) => {
     setWeekdays((prev) => {
@@ -199,6 +215,9 @@ function NewShiftPage() {
     if (targetedCustomerIds.length === 0) {
       return setError("No customers to schedule against.");
     }
+    if (repScope !== null && repScope.length === 0) {
+      return setError("Pick at least one rep, or switch to 'Unassigned'.");
+    }
     if (!shiftDate) return setError("Pick a start date.");
     if (!startTime || !endTime) return setError("Set start and end times.");
     if (startTime >= endTime) return setError("End time must be after start time.");
@@ -213,10 +232,16 @@ function NewShiftPage() {
     const tasksNum = parseInt(tasksTotal, 10);
     if (Number.isNaN(tasksNum) || tasksNum < 0) return setError("Tasks must be a number.");
 
-    // From-request flow forces single (single customer × single date).
-    if (fromRequest && (targetedCustomerIds.length !== 1 || generatedDates.length !== 1)) {
+    // From-request flow forces a single shift (single customer × single
+    // date × single rep — the requester themselves).
+    if (
+      fromRequest &&
+      (targetedCustomerIds.length !== 1 ||
+        generatedDates.length !== 1 ||
+        targetedRepIds.length !== 1)
+    ) {
       return setError(
-        "Request approvals must be a single shift. Switch off recurrence and pick one customer."
+        "Request approvals must be a single shift. Switch off recurrence and pick one customer + one rep."
       );
     }
 
@@ -226,21 +251,25 @@ function NewShiftPage() {
     let done = 0;
 
     // Insert sequentially so we can show progress and collect errors.
+    // Cartesian product: dates × customers × reps. When the rep scope
+    // is "Unassigned" the rep loop runs once with rep_id = null.
     for (const date of generatedDates) {
       for (const cid of targetedCustomerIds) {
-        const r = await createShift({
-          customer_id: cid,
-          shift_date: date,
-          start_time: startTime,
-          end_time: endTime,
-          distance_label: distance.trim(),
-          tasks_total: tasksNum,
-          rep_id: repId || null,
-        });
-        done += 1;
-        setProgress({ done, total: totalShifts });
-        if (!r.ok) {
-          errs.push(`${date} · ${cid}: ${r.error || "failed"}`);
+        for (const rid of targetedRepIds) {
+          const r = await createShift({
+            customer_id: cid,
+            shift_date: date,
+            start_time: startTime,
+            end_time: endTime,
+            distance_label: distance.trim(),
+            tasks_total: tasksNum,
+            rep_id: rid,
+          });
+          done += 1;
+          setProgress({ done, total: totalShifts });
+          if (!r.ok) {
+            errs.push(`${date} · ${cid}${rid ? ` · ${rid}` : ""}: ${r.error || "failed"}`);
+          }
         }
       }
     }
@@ -309,34 +338,18 @@ function NewShiftPage() {
 
           <Field
             label="Assign to rep"
-            hint="Leave blank to make the shift claimable by any rep."
+            hint="Pick one to assign, several to spawn one shift per rep, or leave as Unassigned for any rep to claim."
           >
-            <select
-              value={repId}
-              onChange={(e) => setRepId(e.target.value)}
-              style={inputStyle}
-              disabled={loading}
-            >
-              <option value="">— Unassigned (claimable) —</option>
-              {reps.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {displayName(r)} · {r.email}
-                  {r.role !== "rep" ? ` · ${r.role}` : ""}
-                </option>
-              ))}
-            </select>
-            {!loading && reps.length === 0 && (
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 11.5,
-                  color: AC.warn,
-                  marginTop: 6,
-                }}
-              >
-                No reps signed up yet.
-              </div>
-            )}
+            <RepScopePicker
+              reps={reps}
+              loading={loading}
+              value={repScope}
+              onChange={setRepScope}
+              unassignedLabel="Unassigned"
+              unassignedSubLabel="Claimable by any rep"
+              specificLabel="Specific reps"
+              specificSubLabel="Pick one or many"
+            />
           </Field>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
@@ -558,7 +571,18 @@ function NewShiftPage() {
             />
             <SummaryRow
               label="Rep"
-              value={repId ? displayName(reps.find((r) => r.id === repId)!) : "Unassigned (claimable)"}
+              value={
+                repScope === null
+                  ? "Unassigned (claimable)"
+                  : repScope.length === 0
+                  ? "—"
+                  : repScope.length === 1
+                  ? (() => {
+                      const r = reps.find((x) => x.id === repScope[0]);
+                      return r ? displayName(r) : "1 rep";
+                    })()
+                  : `${repScope.length} reps selected`
+              }
             />
             <SummaryRow
               label="Dates"
