@@ -127,6 +127,43 @@ export async function getLibraryDownloadUrl(
   return { ok: true, url: data.signedUrl };
 }
 
+/**
+ * Subscribe to realtime changes on the library_files table. Used by the
+ * mobile /library page so new uploads / deletes show up live without
+ * the rep needing to refresh.
+ *
+ * Same defensive try/catch + unique channel pattern as subscribeShifts.
+ */
+let _libraryChannelCounter = 0;
+
+export function subscribeLibrary(onChange: () => void): () => void {
+  if (!isSupabaseConfigured() || !supabase) return () => {};
+  try {
+    _libraryChannelCounter += 1;
+    const channelName = `mobile_library_live_${Date.now()}_${_libraryChannelCounter}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "library_files" },
+        () => onChange()
+      )
+      .subscribe();
+    return () => {
+      try {
+        supabase!.removeChannel(channel);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[library] removeChannel failed:", err);
+      }
+    };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[library] subscribe failed:", err);
+    return () => {};
+  }
+}
+
 export function formatFileSize(bytes: number | null): string {
   if (bytes === null || bytes === undefined) return "—";
   if (bytes < 1024) return `${bytes} B`;

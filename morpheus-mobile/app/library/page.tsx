@@ -16,6 +16,7 @@ import {
   listLibraryFiles,
   getLibraryDownloadUrl,
   formatFileSize,
+  subscribeLibrary,
   LIBRARY_CATEGORIES,
   DEFAULT_CATEGORY,
   type LibraryFile,
@@ -41,10 +42,26 @@ export default function LibraryPage() {
   const [opening, setOpening] = useState<string | null>(null);
 
   useEffect(() => {
-    listLibraryFiles().then((rows) => {
-      setFiles(rows);
-      setLoaded(true);
-    });
+    let cancelled = false;
+    const load = () =>
+      listLibraryFiles().then((rows) => {
+        if (cancelled) return;
+        setFiles(rows);
+        setLoaded(true);
+      });
+    load();
+    // Refetch on tab focus + on any library_files change so a manager's
+    // upload appears on the rep's phone without a manual refresh.
+    const onVis = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    const unsub = subscribeLibrary(load);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVis);
+      unsub();
+    };
   }, []);
 
   const byCategory =

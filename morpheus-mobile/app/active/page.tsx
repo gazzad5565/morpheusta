@@ -15,6 +15,7 @@ import { startLocationTracking } from "@/lib/location-tracker";
 import {
   getMyActiveShift,
   getTasksForCustomer,
+  subscribeShifts,
   type TaskRow,
 } from "@/lib/shifts-store";
 import {
@@ -43,10 +44,15 @@ export default function ActiveShiftPage() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       const s = await getMyActiveShift();
       if (cancelled) return;
       if (!s) {
+        // Shift no longer in-progress / no longer mine — could mean
+        // the manager deleted or reassigned it while the rep was on
+        // this screen. Clear UI; the empty-state below redirects them
+        // to /shifts.
+        setShiftData(null);
         setLoadedShift(true);
         return;
       }
@@ -78,9 +84,15 @@ export default function ActiveShiftPage() {
       // Hydrate completed-state from the DB so closing/reopening the
       // app mid-shift doesn't lose the rep's ticks.
       if (alreadyDone.length > 0) setCompletedTaskIds(alreadyDone);
-    })();
+    };
+    load();
+    // Realtime: re-resolve the active shift on any shifts-table change.
+    // Covers manager-deleted, manager-reassigned, auto-checkout sweep —
+    // anything that flips the rep out of an in-progress state.
+    const unsub = subscribeShifts(load);
     return () => {
       cancelled = true;
+      unsub();
     };
   }, []);
 
