@@ -10,6 +10,7 @@ import {
   listMyShiftsToday,
   listUnassignedShiftsToday,
   claimShift,
+  subscribeShifts,
 } from "@/lib/shifts-store";
 import { AppHeader, AppFooter, CustomerTile, SectionLabel } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
@@ -59,6 +60,18 @@ export default function ShiftsListPage() {
   };
   useEffect(() => {
     reload();
+    // Refetch on tab focus (woken-up PWA) and on any shifts table
+    // change (manager assigned / reassigned / removed a shift while
+    // the rep is looking at this page).
+    const onVis = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    const unsub = subscribeShifts(reload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      unsub();
+    };
   }, []);
 
   const onCheckIn = (shiftId: string) =>

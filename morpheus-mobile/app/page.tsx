@@ -8,7 +8,7 @@ import { type Shift } from "@/lib/mock-data";
 import { AppHeader, AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
 import { Glyph, formatTime } from "@/components/Glyph";
 import { getUser } from "@/lib/auth";
-import { listMyShiftsToday } from "@/lib/shifts-store";
+import { listMyShiftsToday, subscribeShifts } from "@/lib/shifts-store";
 import { getMyProfile } from "@/lib/profiles-store";
 import { listLibraryFiles } from "@/lib/library-store";
 
@@ -92,9 +92,16 @@ export default function DashboardPage() {
       if (document.visibilityState === "visible") load();
     };
     document.addEventListener("visibilitychange", onVis);
+    // Realtime: refetch when ANY shift row changes — covers the case
+    // where a manager assigns / reassigns / removes a shift while the
+    // rep is actively looking at the dashboard. Without this the rep
+    // would only see new assignments after switching tabs and coming
+    // back (visibilitychange).
+    const unsubShifts = subscribeShifts(load);
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVis);
+      unsubShifts();
     };
   }, []);
 

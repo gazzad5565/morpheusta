@@ -330,3 +330,48 @@ export async function checkOutOfShift(
   });
   return { ok: true };
 }
+
+/**
+ * Subscribe to realtime changes on the shifts table. The callback fires
+ * on any insert/update/delete; the caller is expected to refetch its
+ * own shape (listMyShiftsToday, etc).
+ *
+ * Mirror of the admin-side subscribeShifts. Without this, a rep who's
+ * looking at the dashboard right now wouldn't see a freshly-assigned
+ * shift until they switched tabs and came back.
+ *
+ * Each call gets a unique channel name to avoid the supabase-js
+ * collision when two screens subscribe at the same time.
+ *
+ * Wrapped in try/catch so a misbehaving realtime client (publication
+ * not configured, websocket can't open) can never crash the page.
+ */
+let _shiftsChannelCounter = 0;
+
+export function subscribeShifts(onChange: () => void): () => void {
+  if (!isSupabaseConfigured() || !supabase) return () => {};
+  try {
+    _shiftsChannelCounter += 1;
+    const channelName = `mobile_shifts_live_${Date.now()}_${_shiftsChannelCounter}`;
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "shifts" },
+        () => onChange()
+      )
+      .subscribe();
+    return () => {
+      try {
+        supabase!.removeChannel(channel);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[shifts] removeChannel failed:", err);
+      }
+    };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] subscribe failed:", err);
+    return () => {};
+  }
+}
