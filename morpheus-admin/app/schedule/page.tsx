@@ -27,7 +27,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
-import { listShiftsInRange, type ShiftRow } from "@/lib/shifts-store";
+import { listShiftsInRange, shiftHref, type ShiftRow } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listCustomers } from "@/lib/customers-store";
 import { localISO as isoDate, formatTime, initialsFromNameOrEmail } from "@/lib/format";
@@ -892,7 +892,7 @@ function ShiftCard({ shift, repLabel }: { shift: ShiftRow; repLabel: string }) {
 
   return (
     <Link
-      href={`/shifts/${shift.id}`}
+      href={shiftHref(shift)}
       title={`${repLabel} · ${customerName} · ${shift.state}`}
       style={{
         background: `${color}15`,

@@ -9,7 +9,8 @@ import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
 import { supabase } from "@/lib/supabase";
 import { type Profile, displayName } from "@/lib/profiles-store";
-import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
+import Link from "next/link";
 import { listCustomers } from "@/lib/customers-store";
 import {
   listCustomersForRep,
@@ -269,8 +270,9 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
                   }}
                 >
                   {todayShifts.map((s, i) => (
-                    <div
+                    <Link
                       key={s.id}
+                      href={shiftHref(s)}
                       style={{
                         display: "grid",
                         gridTemplateColumns: "1fr 140px 110px",
@@ -280,6 +282,8 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
                         borderBottom:
                           i < todayShifts.length - 1 ? `1px solid ${AC.lineDim}` : "none",
                         background: "#fff",
+                        textDecoration: "none",
+                        color: "inherit",
                       }}
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -339,7 +343,7 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
                       >
                         {s.state.replace("-", " ")}
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               )}

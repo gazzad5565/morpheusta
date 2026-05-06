@@ -86,6 +86,26 @@ export interface NewShift {
   rep_id?: string | null;
 }
 
+/**
+ * Right click-target for a shift card / row. Scheduled shifts are
+ * editable, so we route to the edit form; everything else (in-progress,
+ * late, complete) is locked, so we route to the read-only detail page.
+ *
+ * Centralised here so every list site (week planner, today's shifts,
+ * rep detail, etc) routes consistently — no risk of one place going to
+ * /shifts/[id]/edit while another goes to /shifts/[id] for the same row.
+ */
+export function shiftHref(shift: { id: string; state: string }): string {
+  return shift.state === "scheduled"
+    ? `/shifts/${shift.id}/edit`
+    : `/shifts/${shift.id}`;
+}
+
+/** True when the shift is in a state the admin is allowed to edit. */
+export function isShiftEditable(state: string): boolean {
+  return state === "scheduled";
+}
+
 /** One shift by id, with the joined customer block. Used by the shift
  *  detail page. */
 export async function getShiftById(id: string): Promise<ShiftRow | null> {
@@ -133,6 +153,72 @@ export async function createShift(
     meta: { rep_assigned: s.rep_id ? true : false },
   });
   return { ok: true, id: data?.id };
+}
+
+/**
+ * Update a scheduled shift. Only allowed while state='scheduled' — once
+ * a rep checks in (state='in-progress' / 'late' / 'complete') the row
+ * is read-only from the admin's perspective. The shift detail page
+ * enforces the same rule on the UI side.
+ */
+export interface ShiftPatch {
+  customer_id?: string;
+  rep_id?: string | null;
+  shift_date?: string;
+  start_time?: string;
+  end_time?: string;
+  distance_label?: string;
+  tasks_total?: number;
+}
+
+export async function updateShift(
+  id: string,
+  patch: ShiftPatch
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  // Refuse to update once the shift has progressed past 'scheduled'.
+  // Belt-and-braces — the UI shouldn't expose the form, but a deep
+  // link to /shifts/[id]/edit would otherwise let a manager mutate
+  // an in-progress row.
+  const { data: cur } = await supabase
+    .from("shifts")
+    .select("state, customer_id, customers(name)")
+    .eq("id", id)
+    .maybeSingle();
+  const currentState = (cur as { state?: string } | null)?.state ?? "scheduled";
+  if (currentState !== "scheduled") {
+    return {
+      ok: false,
+      error: `Can't edit a ${currentState} shift. Only scheduled shifts are editable.`,
+    };
+  }
+
+  // Strip undefined keys so we only send the fields the caller actually
+  // wants to change.
+  const cleaned: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    cleaned[k] = v;
+  }
+  if (Object.keys(cleaned).length === 0) return { ok: true };
+
+  const { error } = await supabase.from("shifts").update(cleaned).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+
+  const customerName =
+    (cur as { customers?: { name?: string } } | null)?.customers?.name || "a customer";
+  await logEvent({
+    event_type: "shift.scheduled",
+    shift_id: id,
+    customer_id:
+      (patch.customer_id as string | undefined) ??
+      ((cur as { customer_id?: string } | null)?.customer_id || null),
+    message: `Updated shift at ${customerName}`,
+    meta: { fields: Object.keys(cleaned) },
+  });
+  return { ok: true };
 }
 
 export async function deleteShift(

@@ -18,7 +18,7 @@ import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { RepAvatar } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
-import { listShifts, subscribeShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listShifts, subscribeShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 
 const STATE_MAP: Record<string, { label: string; bg: string; ink: string; dot: string }> = {
@@ -277,7 +277,7 @@ function ShiftRowView({
   // button stops propagation so it doesn't trigger navigation.
   return (
     <a
-      href={`/shifts/${row.id}`}
+      href={shiftHref(row)}
       style={{
         ...shiftRowGrid(),
         textDecoration: "none",

@@ -41,7 +41,7 @@ import {
   formatFileSize,
   type LibraryFile,
 } from "@/lib/library-store";
-import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
 
@@ -1053,8 +1053,9 @@ function ShiftsTab({ shifts, customerId }: { shifts: ShiftRow[]; customerId: str
           <Empty text="No shifts scheduled at this customer today." />
         ) : (
           shifts.map((s, i) => (
-            <div
+            <Link
               key={s.id}
+              href={shiftHref(s)}
               style={{
                 display: "grid",
                 gridTemplateColumns: "140px 1fr 110px",
@@ -1063,6 +1064,8 @@ function ShiftsTab({ shifts, customerId }: { shifts: ShiftRow[]; customerId: str
                 padding: "10px 16px",
                 borderBottom: i < shifts.length - 1 ? `1px solid ${AC.lineDim}` : "none",
                 background: "#fff",
+                textDecoration: "none",
+                color: "inherit",
               }}
             >
               <div
@@ -1111,7 +1114,7 @@ function ShiftsTab({ shifts, customerId }: { shifts: ShiftRow[]; customerId: str
               >
                 {s.state.replace("-", " ")}
               </div>
-            </div>
+            </Link>
           ))
         )}
       </div>

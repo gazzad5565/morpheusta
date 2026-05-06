@@ -17,13 +17,14 @@
 
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import { AC } from "@/lib/tokens";
-import { getShiftById, type ShiftRow } from "@/lib/shifts-store";
+import { getShiftById, isShiftEditable, type ShiftRow } from "@/lib/shifts-store";
 import { listTasksForCustomer, type TaskRow } from "@/lib/tasks-store";
 import { getProfileById, type Profile, displayName } from "@/lib/profiles-store";
 import {
@@ -158,9 +159,37 @@ export default function ShiftDetailPage({
   const doneCount = tasks.filter((t) => compByTaskId.has(t.id)).length;
   const compulsoryDone = compulsory.filter((t) => compByTaskId.has(t.id)).length;
 
+  const editable = isShiftEditable(shift.state);
+
   return (
     <AdminShell
       breadcrumbs={["Home", "Shifts", `${customerName} · ${formatDate(shift.shift_date)}`]}
+      actions={
+        editable ? (
+          <Link href={`/shifts/${shift.id}/edit`} style={{ textDecoration: "none" }}>
+            <Btn icon="edit" kind="primary" size="sm">
+              Edit shift
+            </Btn>
+          </Link>
+        ) : (
+          <span
+            style={{
+              padding: "4px 10px",
+              borderRadius: 99,
+              background: AC.bg,
+              color: AC.mute,
+              fontFamily: AC.font,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+            }}
+            title="Once a rep checks in, the shift becomes read-only."
+          >
+            Locked
+          </span>
+        )
+      }
     >
       <div
         style={{
