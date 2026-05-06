@@ -66,19 +66,8 @@ function rowToShift(
   };
 }
 
-/**
- * "Today" in the user's local timezone, formatted YYYY-MM-DD.
- * Deliberately not toISOString() — that returns UTC, which at e.g. 1 AM
- * local in UTC+2 gives yesterday's date and the rep would see yesterday's
- * shifts as "today's".
- */
-function todayISO(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+// "Today" in local tz — see lib/format.ts for the why.
+import { todayLocalISO as todayISO } from "./format";
 
 /** Shifts assigned to the current user, today. */
 export async function listMyShiftsToday(): Promise<

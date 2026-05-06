@@ -25,6 +25,7 @@ import {
   type ShiftRow,
 } from "@/lib/shifts-store";
 import { listProfiles } from "@/lib/profiles-store";
+import { todayLocalISO, isoDaysAgo } from "@/lib/format";
 
 type Tone = "ok" | "warn" | "danger" | "info";
 
@@ -53,25 +54,6 @@ interface KpiSparks {
   onTimePct: number[];
   exceptions: number[];
   avgCompletion: number[];
-}
-
-/** Today in local tz, formatted YYYY-MM-DD. */
-function todayLocalISO(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-/** ISO date string `daysAgo` calendar days before today (local tz). */
-function isoDaysAgo(daysAgo: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
 
 /** Eight ISO dates ending today, oldest → newest. */

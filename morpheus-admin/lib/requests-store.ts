@@ -11,6 +11,7 @@
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent, type EventType } from "./events-store";
 import { createShift } from "./shifts-store";
+import { todayLocalISO } from "./format";
 
 export interface PendingRequest {
   id: string; // composite "{userId}-{customerId}"
@@ -144,19 +145,6 @@ export function subscribeRequests(onChange: () => void): () => void {
     console.warn("[requests] subscribe failed:", err);
     return () => {};
   }
-}
-
-/**
- * "Today" in the user's local timezone, formatted YYYY-MM-DD. Same
- * helper as in shifts-store; duplicated here to keep this file
- * self-contained.
- */
-function todayLocalISO(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
 
 /**

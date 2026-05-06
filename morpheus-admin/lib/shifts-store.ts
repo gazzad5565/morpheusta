@@ -8,6 +8,7 @@
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent } from "./events-store";
 import { getAutoCheckoutTime } from "./settings-store";
+import { todayLocalISO } from "./format";
 
 export interface ShiftRow {
   id: string;
@@ -28,20 +29,6 @@ export interface ShiftRow {
     color: string;
     code: number;
   } | null;
-}
-
-/**
- * "Today" in the user's local timezone, formatted YYYY-MM-DD.
- * Note: we deliberately don't use toISOString() here — that returns UTC,
- * which means at e.g. 1 AM local in UTC+2 you'd get yesterday's date and
- * the dashboard would show yesterday's shifts as "today's".
- */
-function todayLocalISO(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
 }
 
 export async function listShifts(opts?: {

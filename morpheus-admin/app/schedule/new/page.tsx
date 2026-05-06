@@ -24,16 +24,16 @@ import { createShift } from "@/lib/shifts-store";
 import { listProfiles, getProfileById, displayName, type Profile } from "@/lib/profiles-store";
 import { deleteRequest } from "@/lib/requests-store";
 import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
+import { todayLocalISO, localISO } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+const todayISO = todayLocalISO;
 
 function addDaysISO(iso: string, days: number): string {
-  const d = new Date(iso);
+  // Parse as local-tz date (anchor to noon to avoid DST edge flips).
+  const d = new Date(iso + "T12:00:00");
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return localISO(d);
 }
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -133,11 +133,13 @@ function NewShiftPage() {
     if (!untilDate || untilDate < shiftDate) return [shiftDate];
     if (weekdays.size === 0) return [];
     const out: string[] = [];
-    const start = new Date(shiftDate);
-    const end = new Date(untilDate);
+    // Anchor the date walk at noon-local so DST transitions can't flip
+    // a Sunday into a Saturday and skip the wrong weekday.
+    const start = new Date(shiftDate + "T12:00:00");
+    const end = new Date(untilDate + "T12:00:00");
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       if (weekdays.has(jsDayToIndex(d.getDay()))) {
-        out.push(d.toISOString().slice(0, 10));
+        out.push(localISO(d));
       }
     }
     return out;

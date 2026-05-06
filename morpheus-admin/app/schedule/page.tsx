@@ -30,12 +30,10 @@ import { AC } from "@/lib/tokens";
 import { listShiftsInRange, type ShiftRow } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listCustomers } from "@/lib/customers-store";
+import { localISO as isoDate, formatTime, initialsFromNameOrEmail } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
 // ─── Date helpers (week starts Monday) ──────────────────────────────────
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
 function startOfWeekMonday(d: Date): Date {
   const out = new Date(d);
   out.setHours(0, 0, 0, 0);
@@ -49,18 +47,7 @@ function addDays(d: Date, n: number): Date {
   return out;
 }
 function deriveInitials(p: Profile): string {
-  const src = p.name?.trim() || p.email.split("@")[0] || "?";
-  const parts = src.split(/\s+|[._-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return parts[0]?.slice(0, 2).toUpperCase() || "??";
-}
-function formatTime(t: string): string {
-  if (!t) return "";
-  const [hh, mm] = t.split(":");
-  const h = parseInt(hh, 10);
-  const ampm = h >= 12 ? "PM" : "AM";
-  const h12 = ((h + 11) % 12) + 1;
-  return `${h12}:${mm}${ampm}`;
+  return initialsFromNameOrEmail(p.name, p.email);
 }
 function stateRank(s: ShiftRow): number {
   if (s.state === "in-progress") return 0;
@@ -961,7 +948,8 @@ function ShiftCard({ shift, repLabel }: { shift: ShiftRow; repLabel: string }) {
           flexWrap: "wrap",
         }}
       >
-        {formatTime(shift.start_time)}–{formatTime(shift.end_time)}
+        {formatTime(shift.start_time, { compact: true })}–
+        {formatTime(shift.end_time, { compact: true })}
         {shift.state !== "scheduled" && (
           <span
             style={{

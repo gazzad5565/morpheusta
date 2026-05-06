@@ -11,19 +11,13 @@ import {
   getOrganisationName,
   getOrganisationLogoUrl,
 } from "@/lib/settings-store";
+import { nameFromEmail, initialsFromNameOrEmail } from "@/lib/format";
 
-function nameFromEmail(email: string | null | undefined): { name: string; initials: string } {
-  if (!email) return { name: "", initials: "··" };
-  const local = email.split("@")[0] || "";
-  const parts = local.split(/[._-]/).filter(Boolean);
-  const name = parts.length
-    ? parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(" ")
-    : email;
-  const initials =
-    parts.length >= 2
-      ? (parts[0][0] + parts[1][0]).toUpperCase()
-      : (local.slice(0, 2) || "??").toUpperCase();
-  return { name, initials };
+function userDisplayBits(email: string | null | undefined): { name: string; initials: string } {
+  return {
+    name: nameFromEmail(email),
+    initials: initialsFromNameOrEmail(null, email) || "··",
+  };
 }
 
 export function Sidebar() {
@@ -48,7 +42,7 @@ export function Sidebar() {
       cancelled = true;
     };
   }, []);
-  const { name: userName, initials: userInitials } = nameFromEmail(userEmail);
+  const { name: userName, initials: userInitials } = userDisplayBits(userEmail);
   const userRole = userEmail ? "Field Ops Manager" : "";
   const handleLogout = () => {
     // Fire-and-forget so a slow network can't trap the user. Wipe any
