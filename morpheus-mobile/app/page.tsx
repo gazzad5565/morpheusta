@@ -57,12 +57,60 @@ function nameFromEmail(email: string | null | undefined): string {
   return firstPart.charAt(0).toUpperCase() + firstPart.slice(1);
 }
 
+/**
+ * Local-storage key for the in-flight travel timestamp. Lives outside
+ * React state so closing the app mid-travel doesn't lose the start
+ * marker — and so the timer keeps ticking from the right moment when
+ * the rep reopens the app.
+ */
+const TRAVEL_LS_KEY = "morpheus.travelling_since";
+
 export default function DashboardPage() {
   // Lifted state — UpNextCard reacts to these.
   // directionsOpen: rep tapped "Directions" to preview the route on the map.
   // travellingSince: rep tapped "Start travelling" — route is now live.
+  // Persisted to localStorage so closing the app mid-travel doesn't lose
+  // the timer or leave a dangling shift.travel_started without an end.
   const [directionsOpen, setDirectionsOpen] = useState(false);
-  const [travellingSince, setTravellingSince] = useState<number | null>(null);
+  const [travellingSince, setTravellingSinceRaw] = useState<number | null>(null);
+  // Hydrate from storage once on mount.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(TRAVEL_LS_KEY);
+      if (raw) {
+        const ts = parseInt(raw, 10);
+        if (Number.isFinite(ts) && ts > 0) setTravellingSinceRaw(ts);
+      }
+    } catch {
+      /* SSR or storage blocked */
+    }
+  }, []);
+  // Wrap setter so every transition writes to storage AND fires an event.
+  const setTravellingSince = (v: number | null) => {
+    const wasTravelling = travellingSince !== null;
+    setTravellingSinceRaw(v);
+    try {
+      if (v === null) {
+        window.localStorage.removeItem(TRAVEL_LS_KEY);
+      } else {
+        window.localStorage.setItem(TRAVEL_LS_KEY, String(v));
+      }
+    } catch {
+      /* noop */
+    }
+    if (v !== null && !wasTravelling) {
+      void logEvent({
+        event_type: "shift.travel_started",
+        message: "Started travelling",
+      });
+    } else if (v === null && wasTravelling && travellingSince) {
+      void logEvent({
+        event_type: "shift.travel_ended",
+        message: "Arrived",
+        meta: { elapsed_sec: Math.floor((Date.now() - travellingSince) / 1000) },
+      });
+    }
+  };
 
   // Greeting prefers the profiles.name (set on signup), falls back to email.
   const [displayName, setDisplayName] = useState<string>("");
@@ -597,11 +645,28 @@ const secondaryBtnStyle: React.CSSProperties = {
  * of any active shift; reps can use this between shifts. When active,
  * replaces with a live break timer + Complete button.
  */
+const BREAK_LS_KEY = "morpheus.break_since";
+
 function BreakCard() {
   const PURPLE = "#5b3da5";
   const PURPLE_TINT = "#EDE7F8";
   const [breakSince, setBreakSince] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+
+  // Hydrate from storage on mount so a break started from another
+  // surface (e.g. the post-checkout summary) shows up here as live.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(BREAK_LS_KEY);
+      if (raw) {
+        const ts = parseInt(raw, 10);
+        if (Number.isFinite(ts) && ts > 0) setBreakSince(ts);
+      }
+    } catch {
+      /* SSR / blocked storage */
+    }
+  }, []);
+
   useEffect(() => {
     if (!breakSince) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -616,6 +681,11 @@ function BreakCard() {
   const startBreak = () => {
     const ts = Date.now();
     setBreakSince(ts);
+    try {
+      window.localStorage.setItem(BREAK_LS_KEY, String(ts));
+    } catch {
+      /* noop */
+    }
     void logEvent({
       event_type: "shift.break_started",
       message: "Started a rest break (off-shift)",
@@ -625,6 +695,11 @@ function BreakCard() {
   const endBreak = () => {
     const startedAt = breakSince;
     setBreakSince(null);
+    try {
+      window.localStorage.removeItem(BREAK_LS_KEY);
+    } catch {
+      /* noop */
+    }
     if (startedAt) {
       void logEvent({
         event_type: "shift.break_ended",

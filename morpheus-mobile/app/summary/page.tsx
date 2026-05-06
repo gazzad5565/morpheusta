@@ -10,6 +10,10 @@ import {
   SectionLabel,
 } from "@/components/Chrome";
 import { Glyph, formatTime, type GlyphName } from "@/components/Glyph";
+import { logEvent } from "@/lib/events-store";
+
+const TRAVEL_LS_KEY = "morpheus.travelling_since";
+const BREAK_LS_KEY = "morpheus.break_since";
 
 export default function SummaryPageWrapper() {
   return (
@@ -144,9 +148,56 @@ function SummaryPage() {
         </>
       )}
 
+      {/* What's next? — three optional choices, none blocking. The rep
+          can ignore them and just hit Back to dashboard. */}
+      <div style={{ padding: "8px 16px 0" }}>
+        <SectionLabel>What's next?</SectionLabel>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <NextActionTile
+            icon="pin"
+            color="#2E4FB8"
+            title="Start travelling"
+            sub="Log travel time to your next site. Auto-ends on next check-in."
+            onClick={() => {
+              const ts = Date.now();
+              try {
+                window.localStorage.setItem(TRAVEL_LS_KEY, String(ts));
+              } catch {
+                /* noop */
+              }
+              void logEvent({
+                event_type: "shift.travel_started",
+                message: "Started travelling (post-checkout)",
+              });
+              router.push("/");
+            }}
+          />
+          <NextActionTile
+            icon="clock"
+            color="#5b3da5"
+            title="Take a break"
+            sub="Off-shift rest. Logged separately from paid time."
+            onClick={() => {
+              const ts = Date.now();
+              try {
+                window.localStorage.setItem(BREAK_LS_KEY, String(ts));
+              } catch {
+                /* noop */
+              }
+              void logEvent({
+                event_type: "shift.break_started",
+                message: "Started a rest break (post-checkout)",
+                meta: { kind: "off_shift" },
+              });
+              router.push("/");
+            }}
+          />
+        </div>
+      </div>
+
       <div style={{ padding: "20px 16px 22px" }}>
         <PrimaryButton onClick={() => router.push("/")} icon="arrow-r">
-          Back to dashboard
+          Done — back to dashboard
         </PrimaryButton>
         <div
           style={{
@@ -401,5 +452,84 @@ function ExceptionRow({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Compact tile for the post-checkout "What's next?" choices. Drops a
+ * coloured glyph + title + sublabel into a tappable row. Mirrors the
+ * dashboard's BreakCard idle state visually so the rep recognises
+ * the affordance.
+ */
+function NextActionTile({
+  icon,
+  color,
+  title,
+  sub,
+  onClick,
+}: {
+  icon: GlyphName;
+  color: string;
+  title: string;
+  sub: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        width: "100%",
+        background: MC.card,
+        border: `1px solid ${MC.line}`,
+        borderRadius: MC.radiusCard,
+        padding: 14,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        textAlign: "left",
+      }}
+    >
+      <div
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 10,
+          background: `${color}1f`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <Glyph name={icon} size={20} color={color} strokeWidth={2.2} />
+      </div>
+      <div style={{ flex: 1 }}>
+        <div
+          style={{
+            fontFamily: MC.font,
+            fontSize: 14.5,
+            fontWeight: 700,
+            color: MC.ink,
+            letterSpacing: -0.2,
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            fontFamily: MC.font,
+            fontSize: 12,
+            color: MC.mute,
+            marginTop: 2,
+            lineHeight: 1.4,
+          }}
+        >
+          {sub}
+        </div>
+      </div>
+      <Glyph name="chev-r" size={16} color={MC.hint} />
+    </button>
   );
 }

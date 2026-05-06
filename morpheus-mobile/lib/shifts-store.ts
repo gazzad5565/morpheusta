@@ -277,6 +277,35 @@ export async function checkInToShift(
   }
   const customerName =
     (shiftRow as { customers?: { name?: string } } | null)?.customers?.name || "customer";
+
+  // Auto-end any in-flight travel — if the rep tapped Start travelling
+  // before checking in, this is implicitly their "Arrived" moment.
+  // Saves them a tap + makes sure shift.travel_started has a paired
+  // shift.travel_ended event in the audit trail.
+  try {
+    if (typeof window !== "undefined") {
+      const raw = window.localStorage.getItem("morpheus.travelling_since");
+      if (raw) {
+        const ts = parseInt(raw, 10);
+        if (Number.isFinite(ts) && ts > 0) {
+          const elapsed = Math.floor((Date.now() - ts) / 1000);
+          await logEvent({
+            event_type: "shift.travel_ended",
+            shift_id: shiftId,
+            customer_id:
+              (shiftRow as { customer_id?: string } | null)?.customer_id ||
+              null,
+            message: `Arrived at ${customerName}`,
+            meta: { elapsed_sec: elapsed, auto_ended_by: "check_in" },
+          });
+        }
+        window.localStorage.removeItem("morpheus.travelling_since");
+      }
+    }
+  } catch {
+    /* localStorage / SSR — ignore */
+  }
+
   await logEvent({
     event_type: "shift.checked_in",
     shift_id: shiftId,
