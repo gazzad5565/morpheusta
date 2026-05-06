@@ -1,17 +1,22 @@
 "use client";
 
 /**
- * Schedule (week planner) — real data.
+ * Schedule / Calendar — week view, flat by day.
  *
- * A 7-day grid: rows are reps (plus an "Unassigned" row at the top for
- * claimable shifts), columns are Mon-Sun of the visible week. Each cell
- * shows the rep's shifts on that day; empty cells get a + button that
- * opens /schedule/new pre-filled with the rep id + the date.
+ * One row of 7 columns (Mon→Sun); each cell stacks every shift scheduled
+ * for that day, regardless of which rep it's assigned to. Shift cards
+ * show the rep's name + customer + time + state — same as on the Live
+ * Ops shifts list — so you can identify a shift without needing a
+ * per-rep row.
  *
- * Week navigation: ← / Today / →. Customer filter narrows visible shifts.
+ * The previous version was a per-rep grid (one row per rep × 7 columns).
+ * Gary asked to flatten it: with 30+ reps the table was mostly empty
+ * cells. Use the customer filter or the rep detail page if you need a
+ * per-rep view.
  *
- * Click a shift cell to open the customer detail page (a future step
- * could be a "shift detail" page; for v1 we just route to the customer).
+ *   - Empty day cell  → "+" button to /schedule/new?date=YYYY-MM-DD
+ *   - Click a shift   → /shifts/[id]
+ *   - Customer filter narrows the visible shifts.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -33,7 +38,6 @@ function isoDate(d: Date): string {
 function startOfWeekMonday(d: Date): Date {
   const out = new Date(d);
   out.setHours(0, 0, 0, 0);
-  // getDay() is 0..6 with Sunday = 0; we want Monday = 0 offset
   const dow = (out.getDay() + 6) % 7;
   out.setDate(out.getDate() - dow);
   return out;
@@ -42,12 +46,6 @@ function addDays(d: Date, n: number): Date {
   const out = new Date(d);
   out.setDate(out.getDate() + n);
   return out;
-}
-function deriveInitials(p: Profile): string {
-  const src = p.name?.trim() || p.email.split("@")[0] || "?";
-  const parts = src.split(/\s+|[._-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return parts[0]?.slice(0, 2).toUpperCase() || "??";
 }
 function formatTime(t: string): string {
   if (!t) return "";
@@ -58,11 +56,18 @@ function formatTime(t: string): string {
   return `${h12}:${mm}${ampm}`;
 }
 
-const UNASSIGNED_KEY = "__unassigned__";
+// State sort: in-progress first (active), then scheduled, then complete (done).
+function stateRank(s: ShiftRow): number {
+  if (s.state === "in-progress") return 0;
+  if (s.state === "late") return 1;
+  if (s.state === "scheduled") return 2;
+  if (s.state === "complete") return 3;
+  return 4;
+}
 
 export default function SchedulePage() {
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
-  const [reps, setReps] = useState<Profile[]>([]);
+  const [reps, setReps] = useState<Record<string, string>>({});
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
   const [customerFilter, setCustomerFilter] = useState<string>("All");
@@ -74,16 +79,16 @@ export default function SchedulePage() {
   );
   const todayISO = useMemo(() => isoDate(new Date()), []);
 
-  // Initial load: reps + customers (don't depend on the week).
+  // Initial load: ALL profiles (so manager-as-rep resolves) + customers.
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listProfiles({ role: "rep" }), listCustomers()]).then(
-      ([rs, cs]) => {
-        if (cancelled) return;
-        setReps(rs);
-        setCustomers(cs);
-      }
-    );
+    Promise.all([listProfiles(), listCustomers()]).then(([rs, cs]) => {
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const r of rs as Profile[]) map[r.id] = displayName(r);
+      setReps(map);
+      setCustomers(cs);
+    });
     return () => {
       cancelled = true;
     };
@@ -105,30 +110,29 @@ export default function SchedulePage() {
     };
   }, [weekStart]);
 
-  // Index: { repId-or-unassigned -> dayISO -> shifts[] }
-  const byRepDay = useMemo(() => {
-    const out = new Map<string, Map<string, ShiftRow[]>>();
+  // Index by day, applying the customer filter.
+  const byDay = useMemo(() => {
+    const out = new Map<string, ShiftRow[]>();
     for (const s of shifts) {
       if (customerFilter !== "All" && s.customer_id !== customerFilter) continue;
-      const repKey = s.rep_id ?? UNASSIGNED_KEY;
-      if (!out.has(repKey)) out.set(repKey, new Map());
-      const dayMap = out.get(repKey)!;
-      if (!dayMap.has(s.shift_date)) dayMap.set(s.shift_date, []);
-      dayMap.get(s.shift_date)!.push(s);
+      if (!out.has(s.shift_date)) out.set(s.shift_date, []);
+      out.get(s.shift_date)!.push(s);
+    }
+    // Sort within each day: state-rank first, then by start_time.
+    for (const arr of out.values()) {
+      arr.sort((a, b) => {
+        const r = stateRank(a) - stateRank(b);
+        if (r !== 0) return r;
+        return a.start_time.localeCompare(b.start_time);
+      });
     }
     return out;
   }, [shifts, customerFilter]);
 
-  // Total shifts visible this week (after customer filter), shown as a header pill.
   const totalVisible = useMemo(
-    () => Array.from(byRepDay.values()).reduce(
-      (sum, m) => sum + Array.from(m.values()).reduce((s, arr) => s + arr.length, 0),
-      0
-    ),
-    [byRepDay]
+    () => Array.from(byDay.values()).reduce((sum, arr) => sum + arr.length, 0),
+    [byDay]
   );
-
-  const hasUnassigned = byRepDay.has(UNASSIGNED_KEY);
 
   const goPrev = () => setWeekStart((w) => addDays(w, -7));
   const goNext = () => setWeekStart((w) => addDays(w, 7));
@@ -138,7 +142,7 @@ export default function SchedulePage() {
     const end = addDays(weekStart, 6);
     const startMonth = weekStart.toLocaleDateString(undefined, { month: "short" });
     const endMonth = end.toLocaleDateString(undefined, { month: "short" });
-    if (weekStart.getMonth() === end.getMonth()) {
+    if (startMonth === endMonth) {
       return `${startMonth} ${weekStart.getDate()} – ${end.getDate()}, ${end.getFullYear()}`;
     }
     return `${startMonth} ${weekStart.getDate()} – ${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
@@ -148,25 +152,22 @@ export default function SchedulePage() {
     <AdminShell
       breadcrumbs={["Home", "Schedule"]}
       actions={
-        <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/schedule/new" style={{ textDecoration: "none" }}>
-            <Btn icon="plus" kind="primary" size="sm">
-              New shift
-            </Btn>
-          </Link>
-        </div>
+        <Link href="/schedule/new" style={{ textDecoration: "none" }}>
+          <Btn icon="plus" kind="primary" size="sm">
+            New shift
+          </Btn>
+        </Link>
       }
     >
-      <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
-        {/* Heading + total */}
+      <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div
             style={{
               fontFamily: AC.font,
-              fontSize: 18,
+              fontSize: 22,
               fontWeight: 700,
               color: AC.ink,
-              letterSpacing: -0.3,
+              letterSpacing: -0.4,
             }}
           >
             Week planner
@@ -235,44 +236,31 @@ export default function SchedulePage() {
           </div>
         </Card>
 
-        {/* Grid */}
+        {/* Grid: header + a single body row of 7 day columns */}
         <Card padding={0}>
           <GridHeader days={days} todayISO={todayISO} />
-
-          {/* Unassigned row (if any) */}
-          {hasUnassigned && (
-            <UnassignedRow
-              days={days}
-              todayISO={todayISO}
-              dayMap={byRepDay.get(UNASSIGNED_KEY) || new Map()}
-            />
-          )}
-
-          {/* Rep rows */}
-          {reps.length === 0 && !loading ? (
-            <div
-              style={{
-                padding: 28,
-                textAlign: "center",
-                fontFamily: AC.font,
-                fontSize: 13,
-                color: AC.mute,
-              }}
-            >
-              No reps signed up yet. Reps appear here once they create an account on the mobile
-              app.
-            </div>
-          ) : (
-            reps.map((rep) => (
-              <RepRow
-                key={rep.id}
-                rep={rep}
-                days={days}
-                todayISO={todayISO}
-                dayMap={byRepDay.get(rep.id) || new Map()}
-              />
-            ))
-          )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(7, 1fr)",
+              minHeight: 420,
+            }}
+          >
+            {days.map((d) => {
+              const iso = isoDate(d);
+              const list = byDay.get(iso) || [];
+              return (
+                <DayCell
+                  key={iso}
+                  iso={iso}
+                  isToday={iso === todayISO}
+                  shifts={list}
+                  reps={reps}
+                  customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
+                />
+              );
+            })}
+          </div>
         </Card>
 
         <div
@@ -283,8 +271,8 @@ export default function SchedulePage() {
             textAlign: "center",
           }}
         >
-          Click a + to schedule a shift on that day for that rep. Click a shift to open the
-          customer.
+          Click a + to schedule a shift on that day. Click a shift card to open
+          its detail page.
         </div>
       </div>
     </AdminShell>
@@ -298,25 +286,12 @@ function GridHeader({ days, todayISO }: { days: Date[]; todayISO: string }) {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "180px repeat(7, 1fr)",
+        gridTemplateColumns: "repeat(7, 1fr)",
         borderBottom: `1px solid ${AC.line}`,
         background: AC.bg,
       }}
     >
-      <div
-        style={{
-          padding: "10px 14px",
-          fontFamily: AC.font,
-          fontSize: 11,
-          color: AC.mute,
-          fontWeight: 600,
-          letterSpacing: 0.3,
-          textTransform: "uppercase",
-        }}
-      >
-        Rep / Day
-      </div>
-      {days.map((d) => {
+      {days.map((d, i) => {
         const iso = isoDate(d);
         const isToday = iso === todayISO;
         return (
@@ -324,7 +299,7 @@ function GridHeader({ days, todayISO }: { days: Date[]; todayISO: string }) {
             key={iso}
             style={{
               padding: "10px 12px",
-              borderLeft: `1px solid ${AC.lineDim}`,
+              borderLeft: i === 0 ? "none" : `1px solid ${AC.lineDim}`,
               background: isToday ? AC.brandSoft : "transparent",
             }}
           >
@@ -359,239 +334,79 @@ function GridHeader({ days, todayISO }: { days: Date[]; todayISO: string }) {
   );
 }
 
-function UnassignedRow({
-  days,
-  todayISO,
-  dayMap,
-}: {
-  days: Date[];
-  todayISO: string;
-  dayMap: Map<string, ShiftRow[]>;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "180px repeat(7, 1fr)",
-        borderBottom: `2px solid ${AC.line}`,
-        background: "#FFF8F1",
-      }}
-    >
-      <div
-        style={{
-          padding: "10px 14px",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        <div
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 99,
-            border: `1.5px dashed ${AC.warn}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: AC.warn,
-            flexShrink: 0,
-          }}
-        >
-          <AGlyph name="warn" size={13} color={AC.warn} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 12,
-              fontWeight: 700,
-              color: AC.ink,
-              letterSpacing: -0.1,
-            }}
-          >
-            Unassigned
-          </div>
-          <div style={{ fontFamily: AC.font, fontSize: 10.5, color: AC.mute }}>
-            Claimable by any rep
-          </div>
-        </div>
-      </div>
-      {days.map((d) => {
-        const iso = isoDate(d);
-        const isToday = iso === todayISO;
-        const list = dayMap.get(iso) || [];
-        return (
-          <Cell
-            key={iso}
-            iso={iso}
-            isToday={isToday}
-            shifts={list}
-            // unassigned cells DON'T have a quick-add (use the global New shift CTA)
-            addHref={null}
-            repLabel="Unassigned"
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function RepRow({
-  rep,
-  days,
-  todayISO,
-  dayMap,
-}: {
-  rep: Profile;
-  days: Date[];
-  todayISO: string;
-  dayMap: Map<string, ShiftRow[]>;
-}) {
-  const initials = deriveInitials(rep);
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "180px repeat(7, 1fr)",
-        borderBottom: `1px solid ${AC.lineDim}`,
-      }}
-    >
-      <div
-        style={{
-          padding: "10px 14px",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          background: AC.bg,
-        }}
-      >
-        <div
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 99,
-            background: AC.brandDeep,
-            color: "#fff",
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 700,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >
-          {initials}
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 12,
-              fontWeight: 600,
-              color: AC.ink,
-              letterSpacing: -0.1,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {displayName(rep)}
-          </div>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 10.5,
-              color: AC.mute,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {rep.email}
-          </div>
-        </div>
-      </div>
-      {days.map((d) => {
-        const iso = isoDate(d);
-        const isToday = iso === todayISO;
-        const list = dayMap.get(iso) || [];
-        const addHref = `/schedule/new?rep=${rep.id}&date=${iso}`;
-        return (
-          <Cell
-            key={iso}
-            iso={iso}
-            isToday={isToday}
-            shifts={list}
-            addHref={addHref}
-            repLabel={displayName(rep)}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function Cell({
+function DayCell({
   iso,
   isToday,
   shifts,
-  addHref,
-  repLabel,
+  reps,
+  customerScopeForAdd,
 }: {
   iso: string;
   isToday: boolean;
   shifts: ShiftRow[];
-  addHref: string | null;
-  /** Rep name to display on each shift card. "Unassigned" for the unassigned row. */
-  repLabel: string;
+  reps: Record<string, string>;
+  /** When the customer filter is active, prefilter /schedule/new to that customer too. */
+  customerScopeForAdd: string | null;
 }) {
   const isWeekend = (() => {
     const d = new Date(iso);
     const dow = d.getDay();
     return dow === 0 || dow === 6;
   })();
+  const addQs = new URLSearchParams({
+    date: iso,
+    ...(customerScopeForAdd ? { customer: customerScopeForAdd } : {}),
+  });
+  const addHref = `/schedule/new?${addQs.toString()}`;
   return (
     <div
       style={{
         position: "relative",
-        minHeight: 70,
-        padding: 6,
+        padding: 8,
         borderLeft: `1px solid ${AC.lineDim}`,
         background: isToday ? "#FAFCFD" : isWeekend ? AC.bg : "#fff",
         display: "flex",
         flexDirection: "column",
-        gap: 4,
+        gap: 6,
       }}
     >
-      {shifts.map((s) => (
-        <ShiftCell key={s.id} shift={s} repLabel={repLabel} />
-      ))}
-      {shifts.length === 0 && addHref && (
-        <Link
-          href={addHref}
-          aria-label={`Add shift on ${iso}`}
-          style={{
-            flex: 1,
-            minHeight: 56,
-            borderRadius: 5,
-            border: `1px dashed ${AC.line}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: 0.6,
-            textDecoration: "none",
-          }}
-        >
-          <AGlyph name="plus" size={11} color={AC.faint} />
-        </Link>
-      )}
+      {shifts.map((s) => {
+        const repLabel = s.rep_id
+          ? reps[s.rep_id] || "Rep"
+          : "Unassigned";
+        return <ShiftCard key={s.id} shift={s} repLabel={repLabel} />;
+      })}
+      {/* Add-shift button — always visible on every cell, not just empty
+          ones, so a manager can stack a new shift on a day that already
+          has shifts without having to leave the page. */}
+      <Link
+        href={addHref}
+        aria-label={`Add shift on ${iso}`}
+        style={{
+          marginTop: shifts.length === 0 ? 0 : "auto",
+          minHeight: shifts.length === 0 ? 56 : 28,
+          borderRadius: 6,
+          border: `1px dashed ${AC.line}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: 0.6,
+          textDecoration: "none",
+          color: AC.mute,
+          fontFamily: AC.font,
+          fontSize: 11,
+          fontWeight: 500,
+          gap: 4,
+        }}
+      >
+        <AGlyph name="plus" size={11} color={AC.faint} />
+        {shifts.length === 0 && <span>Add</span>}
+      </Link>
     </div>
   );
 }
 
-function ShiftCell({ shift, repLabel }: { shift: ShiftRow; repLabel: string }) {
+function ShiftCard({ shift, repLabel }: { shift: ShiftRow; repLabel: string }) {
   const c = shift.customers;
   const color = c?.color || "#888";
   const customerName = c?.name || "Unknown customer";
@@ -618,8 +433,6 @@ function ShiftCell({ shift, repLabel }: { shift: ShiftRow; repLabel: string }) {
         opacity: isComplete ? 0.7 : 1,
       }}
     >
-      {/* Rep name — top line so the card is identifiable when the
-          row's left rep column is hidden / the table is scrolled. */}
       <div
         style={{
           fontFamily: AC.font,
@@ -635,7 +448,6 @@ function ShiftCell({ shift, repLabel }: { shift: ShiftRow; repLabel: string }) {
       >
         {repLabel}
       </div>
-      {/* Customer name — second line in the customer's brand colour. */}
       <div
         style={{
           fontFamily: AC.font,
