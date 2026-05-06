@@ -1,5 +1,13 @@
 # Morpheus Field Operations Suite
 
+> **🤖 Reading this from a fresh AI chat?**
+> Latest commit: **`94e1e5e`** (May 6, 2026). Working tree clean.
+> Repo: https://github.com/gazzad5565/morpheusta · Live: https://morpheus-admin.vercel.app + https://morpheusta-khaki-omega.vercel.app · DB: Supabase project `otweltzwwhrvhtvaqsci`
+> **Don't ask the user for context — read this whole file first.** Section "Where things stand right now" (around line 100) is the canonical handover. The "Today's session — what shipped" section lists every commit from May 6 by hash. The "Top of the deferred list" tells you what to start on tomorrow.
+> If you make changes, update this file before you push. Phase 4 RLS is the highest-priority open item; do not deploy to real users without it.
+
+---
+
 Two-app system for field merchandising teams: an **admin console** for Field Ops Managers and a **mobile rep app** for the field. Both share one Supabase backend.
 
 ```
