@@ -13,16 +13,11 @@ export default function LiveOpsPage() {
       title="Live Ops"
       breadcrumbs={["Home", "Live Ops"]}
       actions={
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn icon="filter" kind="secondary" size="sm">
-            Filter
+        <Link href="/schedule/new" style={{ textDecoration: "none" }}>
+          <Btn icon="plus" kind="primary" size="sm">
+            New shift
           </Btn>
-          <Link href="/schedule/new" style={{ textDecoration: "none" }}>
-            <Btn icon="plus" kind="primary" size="sm">
-              New shift
-            </Btn>
-          </Link>
-        </div>
+        </Link>
       }
     >
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
