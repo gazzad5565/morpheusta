@@ -1,12 +1,54 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { AppHeader, CustomerTile, ReasonChip, PrimaryButton } from "@/components/Chrome";
 import { Glyph, type GlyphName } from "@/components/Glyph";
 import { getShiftById, checkInToShift } from "@/lib/shifts-store";
-import type { Shift } from "@/lib/mock-data";
+import { getCustomerById } from "@/lib/customers-store";
+import { getLateGraceMinutes } from "@/lib/settings-store";
+import { logEvent } from "@/lib/events-store";
+import type { Shift, Customer } from "@/lib/mock-data";
+
+// Distance between two lat/lng pairs in meters (Haversine).
+function haversineMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371000;
+  const toRad = (x: number) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function formatDistance(m: number): string {
+  if (m < 1000) return `${Math.round(m)} m`;
+  return `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`;
+}
+
+function formatLateness(minutes: number): string {
+  const m = Math.round(minutes);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
+}
+
+function formatClockTime(d: Date): string {
+  return d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
 
 const LOCATION_REASONS = [
   "Customer site closed",
@@ -39,72 +81,243 @@ function CheckInPage() {
   const shiftId = params.get("shift");
 
   const [shift, setShift] = useState<(Shift & { realId: string }) | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(null);
   const [shiftError, setShiftError] = useState<string | null>(null);
+  const [graceMinutes, setGraceMinutes] = useState<number>(10);
 
-  // Load the shift on mount so we display the real customer and have the
-  // right ID to update on proceed.
+  // Geolocation state
+  const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
+  const [positionError, setPositionError] = useState<string | null>(null);
+  const [positionLoading, setPositionLoading] = useState<boolean>(true);
+
+  // Initial loads: shift, grace minutes.
   useEffect(() => {
     if (!shiftId) {
       setShiftError("No shift specified.");
       return;
     }
     let cancelled = false;
-    getShiftById(shiftId).then((s) => {
-      if (cancelled) return;
-      if (!s) setShiftError("Shift not found.");
-      else setShift(s);
-    });
+    Promise.all([getShiftById(shiftId), getLateGraceMinutes()]).then(
+      async ([s, grace]) => {
+        if (cancelled) return;
+        if (!s) {
+          setShiftError("Shift not found.");
+          return;
+        }
+        setShift(s);
+        setGraceMinutes(grace);
+        // Pull the customer to know its lat/lng + geofence radius.
+        const c = await getCustomerById(s.id);
+        if (cancelled) return;
+        setCustomer(c);
+      }
+    );
     return () => {
       cancelled = true;
     };
   }, [shiftId]);
 
-  const [openException, setOpenException] = useState<"location" | "late" | null>("location");
+  // Get the rep's GPS once. Best-effort; if denied we treat as unknown
+  // location → off-site exception with a "Location unavailable" reason.
+  useEffect(() => {
+    if (typeof window === "undefined" || !navigator.geolocation) {
+      setPositionLoading(false);
+      setPositionError("Geolocation not available on this device.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setPosition({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        setPositionLoading(false);
+      },
+      (err) => {
+        setPositionLoading(false);
+        setPositionError(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission denied."
+            : "Couldn't read your location."
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30_000 }
+    );
+  }, []);
+
+  // ─── Exception detection ─────────────────────────────────────────────
+  // Off-site: rep's GPS distance to the customer > the customer's
+  //   geofence radius (default 100m). If we can't read GPS or the
+  //   customer lacks coords, we flag it as off-site with a more specific
+  //   reason so the admin sees the gap.
+  const offsiteInfo = useMemo(() => {
+    if (!shift) return null;
+    const radius = customer?.geofence_radius_m ?? 100;
+    if (!customer?.latitude || !customer?.longitude) {
+      return {
+        triggered: false as const,
+        reason: "Customer has no address pinned yet — geofence skipped.",
+      };
+    }
+    if (positionLoading) return null;
+    if (!position) {
+      return {
+        triggered: true as const,
+        distanceM: null,
+        radiusM: radius,
+        message: positionError || "Location unavailable.",
+      };
+    }
+    const distanceM = haversineMeters(
+      position.lat,
+      position.lon,
+      customer.latitude,
+      customer.longitude
+    );
+    if (distanceM > radius) {
+      return {
+        triggered: true as const,
+        distanceM,
+        radiusM: radius,
+        message: `${formatDistance(distanceM)} from site (geofence is ${radius} m).`,
+      };
+    }
+    return {
+      triggered: false as const,
+      distanceM,
+      radiusM: radius,
+      reason: `Within geofence (${formatDistance(distanceM)} of site).`,
+    };
+  }, [shift, customer, position, positionLoading, positionError]);
+
+  const lateInfo = useMemo(() => {
+    if (!shift) return null;
+    // Build a Date for today + the shift's start_time. Today might be a
+    // different ISO date than the shift_date if the rep is checking in
+    // before midnight on the previous day; we deliberately use "now"
+    // relative to start_time, ignoring shift_date, because the timer
+    // matters more than calendar date.
+    // The shift's start label is e.g. "8:00 AM" (already display-formatted)
+    // or empty. We'll re-parse it by combining shift_date + the formatted
+    // start. Simpler: store the raw start_time on the row. For now we
+    // approximate via the formatted start label.
+    const startStr = shift.start;
+    // Parse "8:00 AM" → today's Date with that time.
+    const m = startStr.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/);
+    if (!m) return null;
+    let h = parseInt(m[1], 10);
+    const mins = parseInt(m[2], 10);
+    const ampm = (m[3] || "").toLowerCase();
+    if (ampm === "pm" && h < 12) h += 12;
+    if (ampm === "am" && h === 12) h = 0;
+    const now = new Date();
+    const start = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      h,
+      mins,
+      0,
+      0
+    );
+    const minutesLate = (now.getTime() - start.getTime()) / 60000;
+    if (minutesLate > graceMinutes) {
+      return {
+        triggered: true as const,
+        minutesLate,
+        startLabel: startStr,
+        nowLabel: formatClockTime(now),
+        graceMinutes,
+      };
+    }
+    return {
+      triggered: false as const,
+      minutesLate,
+      startLabel: startStr,
+      graceMinutes,
+    };
+  }, [shift, graceMinutes]);
+
+  // Reason state — only relevant when an exception triggers.
+  const [openException, setOpenException] = useState<"location" | "late" | null>(null);
   const [locationReason, setLocationReasonRaw] = useState<string | null>(null);
   const [locationNote, setLocationNote] = useState("");
   const [lateReason, setLateReasonRaw] = useState<string | null>(null);
   const [lateNote, setLateNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const locResolved = !!locationReason;
-  const lateResolved = !!lateReason;
-  const canProceed = locResolved && lateResolved && !!shift && !submitting;
+  const offsiteTriggered = offsiteInfo?.triggered === true;
+  const lateTriggered = lateInfo?.triggered === true;
+  const triggeredCount = (offsiteTriggered ? 1 : 0) + (lateTriggered ? 1 : 0);
 
-  // When a reason is newly selected, auto-collapse this accordion and open
-  // the next still-pending one. When deselected, re-open the current one so
-  // the user can pick again. Mirror behavior for late.
+  // Auto-open the first triggered card on first detection.
+  useEffect(() => {
+    if (openException !== null) return;
+    if (offsiteTriggered) setOpenException("location");
+    else if (lateTriggered) setOpenException("late");
+  }, [offsiteTriggered, lateTriggered, openException]);
+
+  const offsiteResolved = !offsiteTriggered || !!locationReason;
+  const lateResolved = !lateTriggered || !!lateReason;
+  const allResolved = offsiteResolved && lateResolved;
+  const canProceed = !!shift && allResolved && !submitting && !positionLoading;
+
   const handleSetLocationReason = (newValue: string | null) => {
     setLocationReasonRaw(newValue);
-    if (newValue !== null) {
-      setOpenException(lateReason ? null : "late");
-    } else {
-      setOpenException("location");
+    if (newValue !== null && lateTriggered && !lateReason) {
+      setOpenException("late");
     }
   };
   const handleSetLateReason = (newValue: string | null) => {
     setLateReasonRaw(newValue);
-    if (newValue !== null) {
-      setOpenException(locationReason ? null : "location");
-    } else {
-      setOpenException("late");
+    if (newValue !== null && offsiteTriggered && !locationReason) {
+      setOpenException("location");
     }
   };
 
   const onProceed = async () => {
     if (!canProceed || !shift) return;
     setSubmitting(true);
-    // Write to DB: mark shift in-progress with check_in_at = now.
+    // 1. Mark shift in-progress (writes the standard shift.checked_in event).
     const result = await checkInToShift(shift.realId);
     if (!result.ok) {
       setSubmitting(false);
       alert(`Couldn't check in: ${result.error}`);
       return;
     }
+    // 2. Log dedicated exception events alongside the standard check-in.
+    if (offsiteTriggered) {
+      await logEvent({
+        event_type: "shift.checked_in_offsite",
+        shift_id: shift.realId,
+        customer_id: shift.id,
+        message: `Off-site check-in at ${shift.name}`,
+        meta: {
+          distance_m: offsiteInfo?.distanceM ?? null,
+          radius_m: offsiteInfo?.radiusM ?? null,
+          reason: locationReason,
+          note: locationNote || undefined,
+        },
+      });
+    }
+    if (lateTriggered) {
+      await logEvent({
+        event_type: "shift.checked_in_late",
+        shift_id: shift.realId,
+        customer_id: shift.id,
+        message: `Late check-in at ${shift.name} · ${formatLateness(
+          lateInfo!.minutesLate
+        )} late`,
+        meta: {
+          minutes_late: Math.round(lateInfo!.minutesLate),
+          grace_minutes: graceMinutes,
+          start_label: lateInfo!.startLabel,
+          reason: lateReason,
+          note: lateNote || undefined,
+        },
+      });
+    }
+    // 3. Forward the resolved reasons to the success screen for display.
     const sp = new URLSearchParams({
-      locationReason: locationReason!,
-      locationNote,
-      lateReason: lateReason!,
-      lateNote,
+      ...(locationReason ? { locationReason, locationNote } : {}),
+      ...(lateReason ? { lateReason, lateNote } : {}),
     });
     router.push(`/check-in/success?${sp.toString()}`);
   };
@@ -179,144 +392,308 @@ function CheckInPage() {
             alignItems: "center",
           }}
         >
-          <span>Review before check-in</span>
-          <span style={{ color: canProceed ? MC.ok : MC.hint }}>
-            {(locResolved ? 1 : 0) + (lateResolved ? 1 : 0)} / 2 resolved
+          <span>
+            {triggeredCount === 0
+              ? "Review before check-in"
+              : `${triggeredCount} exception${triggeredCount === 1 ? "" : "s"} to resolve`}
           </span>
+          {triggeredCount > 0 && (
+            <span style={{ color: allResolved ? MC.ok : MC.hint }}>
+              {(offsiteTriggered && locationReason ? 1 : 0) +
+                (lateTriggered && lateReason ? 1 : 0)}
+              {" / "}
+              {triggeredCount} resolved
+            </span>
+          )}
         </div>
       </div>
 
       <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-        <ExceptionCard
-          tone="danger"
-          iconName="pin"
-          title="Not at customer location"
-          subtitle={
-            locResolved
-              ? `Reason · ${locationReason}`
-              : `You are 3 km from GreenWave Innovations.`
-          }
-          open={openException === "location"}
-          onToggle={() =>
-            setOpenException(openException === "location" ? null : "location")
-          }
-          resolved={locResolved}
-        >
-          <div style={{ paddingTop: 10 }}>
-            <MapPlaceholder />
-          </div>
+        {/* Loading state — fetching shift / customer / GPS */}
+        {(positionLoading || !shift) && !shiftError && (
           <div
             style={{
+              padding: 16,
+              background: MC.card,
+              border: `1px solid ${MC.line}`,
+              borderRadius: MC.radiusCard,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
               fontFamily: MC.font,
-              fontSize: 12.5,
+              fontSize: 13,
               color: MC.mute,
-              marginTop: 10,
             }}
           >
-            Checking in to GreenWave Innovations <b style={{ color: MC.ink }}>3 km</b> away from
-            site.
+            <Glyph name="target" size={14} color={MC.hint} />
+            <span>
+              {positionLoading
+                ? "Checking your location…"
+                : "Loading shift…"}
+            </span>
           </div>
-          <div style={{ marginTop: 14 }}>
-            <div
-              style={{
-                fontFamily: MC.font,
-                fontSize: 13,
-                fontWeight: 600,
-                color: MC.ink2,
-                marginBottom: 8,
-              }}
-            >
-              Why are you off-site?
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {LOCATION_REASONS.map((r) => (
-                <ReasonChip
-                  key={r}
-                  label={r}
-                  selected={locationReason === r}
-                  onClick={() =>
-                    handleSetLocationReason(locationReason === r ? null : r)
-                  }
-                />
-              ))}
-            </div>
-          </div>
-          {locationReason && (
-            <div style={{ marginTop: 14 }}>
-              <NoteField
-                label="Add a note (optional)"
-                value={locationNote}
-                onChange={setLocationNote}
-                placeholder="Add any context for your manager…"
-              />
-            </div>
-          )}
-        </ExceptionCard>
+        )}
 
-        <ExceptionCard
-          tone="warn"
-          iconName="clock"
-          title="Late check-in"
-          subtitle={
-            lateResolved ? `Reason · ${lateReason}` : `373 min after 8:00 AM start.`
-          }
-          open={openException === "late"}
-          onToggle={() => setOpenException(openException === "late" ? null : "late")}
-          resolved={lateResolved}
-        >
+        {/* No exceptions — clean confirmation state */}
+        {shift && !positionLoading && triggeredCount === 0 && (
           <div
             style={{
-              marginTop: 10,
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: 8,
+              padding: 16,
+              background: MC.okTint,
+              border: `1px solid ${MC.ok}55`,
+              borderRadius: MC.radiusCard,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
             }}
           >
-            <Stat label="Expected" value="8:00 AM" />
-            <Stat label="Now" value="2:13 PM" />
-            <Stat label="Late by" value="6h 13m" tone="warn" />
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                background: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Glyph name="check-circle" size={20} color={MC.ok} strokeWidth={2.4} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#0d6a45",
+                  letterSpacing: -0.1,
+                }}
+              >
+                You&apos;re good to check in
+              </div>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 12,
+                  color: "#0d6a45",
+                  opacity: 0.8,
+                  marginTop: 2,
+                  lineHeight: 1.45,
+                }}
+              >
+                {[
+                  offsiteInfo && offsiteInfo.triggered === false
+                    ? offsiteInfo.reason ||
+                      `Within geofence${
+                        "distanceM" in offsiteInfo && offsiteInfo.distanceM != null
+                          ? ` (${formatDistance(offsiteInfo.distanceM)} of site)`
+                          : ""
+                      }`
+                    : null,
+                  lateInfo && lateInfo.triggered === false
+                    ? lateInfo.minutesLate <= 0
+                      ? `On time (${lateInfo.startLabel} start)`
+                      : `Within ${graceMinutes}-min grace (${formatLateness(
+                          lateInfo.minutesLate
+                        )} after start)`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+            </div>
           </div>
-          <div style={{ marginTop: 14 }}>
+        )}
+
+        {/* Off-site exception — only if triggered */}
+        {offsiteTriggered && (
+          <ExceptionCard
+            tone="danger"
+            iconName="pin"
+            title="Not at customer location"
+            subtitle={
+              offsiteResolved
+                ? `Reason · ${locationReason}`
+                : offsiteInfo!.message
+            }
+            open={openException === "location"}
+            onToggle={() =>
+              setOpenException(openException === "location" ? null : "location")
+            }
+            resolved={offsiteResolved}
+          >
             <div
               style={{
                 fontFamily: MC.font,
-                fontSize: 13,
-                fontWeight: 600,
-                color: MC.ink2,
-                marginBottom: 8,
+                fontSize: 12.5,
+                color: MC.mute,
+                marginTop: 6,
               }}
             >
-              Why are you late?
+              Checking in to <b style={{ color: MC.ink }}>{shift?.name}</b>
+              {offsiteInfo && offsiteInfo.triggered && offsiteInfo.distanceM != null && (
+                <>
+                  {" "}—{" "}
+                  <b style={{ color: MC.ink }}>
+                    {formatDistance(offsiteInfo.distanceM)}
+                  </b>{" "}
+                  away from site (geofence is {offsiteInfo.radiusM} m).
+                </>
+              )}
+              {offsiteInfo && offsiteInfo.triggered && offsiteInfo.distanceM == null && (
+                <> — {offsiteInfo.message}</>
+              )}
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {LATE_REASONS.map((r) => (
-                <ReasonChip
-                  key={r}
-                  label={r}
-                  selected={lateReason === r}
-                  onClick={() => handleSetLateReason(lateReason === r ? null : r)}
-                />
-              ))}
-            </div>
-          </div>
-          {lateReason && (
             <div style={{ marginTop: 14 }}>
-              <NoteField
-                label="Add a note (optional)"
-                value={lateNote}
-                onChange={setLateNote}
-                placeholder="Traffic on M3, expected arrival earlier…"
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: MC.ink2,
+                  marginBottom: 8,
+                }}
+              >
+                Why are you off-site?
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {LOCATION_REASONS.map((r) => (
+                  <ReasonChip
+                    key={r}
+                    label={r}
+                    selected={locationReason === r}
+                    onClick={() =>
+                      handleSetLocationReason(locationReason === r ? null : r)
+                    }
+                  />
+                ))}
+              </div>
+            </div>
+            {locationReason && (
+              <div style={{ marginTop: 14 }}>
+                <NoteField
+                  label="Add a note (optional)"
+                  value={locationNote}
+                  onChange={setLocationNote}
+                  placeholder="Add any context for your manager…"
+                />
+              </div>
+            )}
+          </ExceptionCard>
+        )}
+
+        {/* Late exception — only if triggered */}
+        {lateTriggered && (
+          <ExceptionCard
+            tone="warn"
+            iconName="clock"
+            title="Late check-in"
+            subtitle={
+              lateResolved
+                ? `Reason · ${lateReason}`
+                : `${formatLateness(lateInfo!.minutesLate)} after ${lateInfo!.startLabel} start.`
+            }
+            open={openException === "late"}
+            onToggle={() => setOpenException(openException === "late" ? null : "late")}
+            resolved={lateResolved}
+          >
+            <div
+              style={{
+                marginTop: 10,
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr",
+                gap: 8,
+              }}
+            >
+              <Stat label="Expected" value={lateInfo!.startLabel} />
+              <Stat label="Now" value={lateInfo!.nowLabel} />
+              <Stat
+                label="Late by"
+                value={formatLateness(lateInfo!.minutesLate)}
+                tone="warn"
               />
             </div>
-          )}
-        </ExceptionCard>
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 11.5,
+                color: MC.mute,
+                marginTop: 8,
+              }}
+            >
+              Grace period: {graceMinutes} min.
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: MC.ink2,
+                  marginBottom: 8,
+                }}
+              >
+                Why are you late?
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {LATE_REASONS.map((r) => (
+                  <ReasonChip
+                    key={r}
+                    label={r}
+                    selected={lateReason === r}
+                    onClick={() => handleSetLateReason(lateReason === r ? null : r)}
+                  />
+                ))}
+              </div>
+            </div>
+            {lateReason && (
+              <div style={{ marginTop: 14 }}>
+                <NoteField
+                  label="Add a note (optional)"
+                  value={lateNote}
+                  onChange={setLateNote}
+                  placeholder="Traffic on M3, expected arrival earlier…"
+                />
+              </div>
+            )}
+          </ExceptionCard>
+        )}
+
+        {shiftError && (
+          <div
+            style={{
+              padding: 12,
+              background: MC.dangerTint,
+              color: "#9c1a3c",
+              borderRadius: 12,
+              fontFamily: MC.font,
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
+            {shiftError}
+          </div>
+        )}
       </div>
 
       <div style={{ padding: "20px 16px 16px" }}>
         <PrimaryButton onClick={onProceed} disabled={!canProceed} icon="check">
-          {canProceed
-            ? "Proceed to check in"
-            : `Resolve ${2 - (locResolved ? 1 : 0) - (lateResolved ? 1 : 0)} to continue`}
+          {submitting
+            ? "Checking in…"
+            : !shift
+            ? "Loading…"
+            : positionLoading
+            ? "Locating…"
+            : !allResolved
+            ? `Resolve ${
+                (offsiteTriggered && !offsiteResolved ? 1 : 0) +
+                (lateTriggered && !lateResolved ? 1 : 0)
+              } to continue`
+            : triggeredCount === 0
+            ? "Confirm check-in"
+            : "Proceed to check in"}
         </PrimaryButton>
         <div
           style={{
@@ -327,7 +704,9 @@ function CheckInPage() {
             marginTop: 10,
           }}
         >
-          Reasons are logged and sent to your manager for review.
+          {triggeredCount > 0
+            ? "Reasons are logged and sent to your manager."
+            : "Tap to record your check-in."}
         </div>
       </div>
     </div>

@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
-import { type Shift } from "@/lib/mock-data";
+import { type Shift, type Customer } from "@/lib/mock-data";
 import {
   AppHeader,
   AppFooter,
@@ -19,6 +19,9 @@ import {
   checkOutOfShift,
   getTasksForCustomer,
 } from "@/lib/shifts-store";
+import { getCustomerById } from "@/lib/customers-store";
+import { getEarlyGraceMinutes } from "@/lib/settings-store";
+import { logEvent } from "@/lib/events-store";
 
 const OFFSITE_REASONS = [
   "Wrong location pinned",
@@ -33,6 +36,35 @@ const EARLY_REASONS = [
   "Sick / not feeling well",
   "Other",
 ];
+
+// Distance in meters between two lat/lng pairs (Haversine).
+function haversineMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371000;
+  const toRad = (x: number) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+function formatDistance(m: number): string {
+  if (m < 1000) return `${Math.round(m)} m`;
+  return `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`;
+}
+function formatMinutes(minutes: number): string {
+  const m = Math.round(minutes);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
+}
 
 export default function CheckOutPageWrapper() {
   return (
@@ -53,22 +85,59 @@ function CheckOutPage() {
   >(null);
   const [shiftLoaded, setShiftLoaded] = useState(false);
   const [compulsoryTaskIds, setCompulsoryTaskIds] = useState<string[]>([]);
+  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [graceMinutes, setGraceMinutes] = useState<number>(15);
+
+  // Geolocation
+  const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
+  const [positionLoading, setPositionLoading] = useState<boolean>(true);
+  const [positionError, setPositionError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const s = await getMyActiveShift();
+      const [s, grace] = await Promise.all([getMyActiveShift(), getEarlyGraceMinutes()]);
       if (cancelled) return;
       setShift(s);
       setShiftLoaded(true);
+      setGraceMinutes(grace);
       if (s) {
-        const tasks = await getTasksForCustomer(s.id);
+        const [tasks, cust] = await Promise.all([
+          getTasksForCustomer(s.id),
+          getCustomerById(s.id),
+        ]);
         if (cancelled) return;
         setCompulsoryTaskIds(tasks.filter((t) => t.compulsory).map((t) => t.id));
+        setCustomer(cust);
       }
     })();
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Best-effort GPS read for the off-site check.
+  useEffect(() => {
+    if (typeof window === "undefined" || !navigator.geolocation) {
+      setPositionLoading(false);
+      setPositionError("Geolocation not available on this device.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setPosition({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        setPositionLoading(false);
+      },
+      (err) => {
+        setPositionLoading(false);
+        setPositionError(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission denied."
+            : "Couldn't read your location."
+        );
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30_000 }
+    );
   }, []);
 
   // Read completed task IDs from URL (set by /active page on Check Out tap).
@@ -88,17 +157,98 @@ function CheckOutPage() {
   const [offsiteOpen, setOffsiteOpen] = useState(true);
   const [earlyOpen, setEarlyOpen] = useState(true);
 
-  const offsiteResolved = !!offsiteReason;
-  const earlyResolved = !!earlyReason;
-  const canProceed = compulsoryDone && offsiteResolved && earlyResolved;
+  // ─── Exception detection ─────────────────────────────────────────────
+  // Off-site: same Haversine logic as /check-in.
+  const offsiteInfo = useMemo(() => {
+    if (!shift) return null;
+    const radius = customer?.geofence_radius_m ?? 100;
+    if (!customer?.latitude || !customer?.longitude) {
+      return { triggered: false as const, reason: "Customer has no address pinned." };
+    }
+    if (positionLoading) return null;
+    if (!position) {
+      return {
+        triggered: true as const,
+        distanceM: null,
+        radiusM: radius,
+        message: positionError || "Location unavailable.",
+      };
+    }
+    const distanceM = haversineMeters(
+      position.lat,
+      position.lon,
+      customer.latitude,
+      customer.longitude
+    );
+    if (distanceM > radius) {
+      return {
+        triggered: true as const,
+        distanceM,
+        radiusM: radius,
+        message: `${formatDistance(distanceM)} from site (geofence is ${radius} m).`,
+      };
+    }
+    return {
+      triggered: false as const,
+      distanceM,
+      radiusM: radius,
+      reason: `Within geofence (${formatDistance(distanceM)} of site).`,
+    };
+  }, [shift, customer, position, positionLoading, positionError]);
+
+  // Early: now is more than `graceMinutes` before the shift's end_time.
+  const earlyInfo = useMemo(() => {
+    if (!shift) return null;
+    const endStr = shift.end;
+    const m = endStr.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/);
+    if (!m) return null;
+    let h = parseInt(m[1], 10);
+    const mins = parseInt(m[2], 10);
+    const ampm = (m[3] || "").toLowerCase();
+    if (ampm === "pm" && h < 12) h += 12;
+    if (ampm === "am" && h === 12) h = 0;
+    const now = new Date();
+    const end = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      h,
+      mins,
+      0,
+      0
+    );
+    const minutesEarly = (end.getTime() - now.getTime()) / 60000;
+    if (minutesEarly > graceMinutes) {
+      return {
+        triggered: true as const,
+        minutesEarly,
+        endLabel: endStr,
+        graceMinutes,
+      };
+    }
+    return {
+      triggered: false as const,
+      minutesEarly,
+      endLabel: endStr,
+      graceMinutes,
+    };
+  }, [shift, graceMinutes]);
+
+  const offsiteTriggered = offsiteInfo?.triggered === true;
+  const earlyTriggered = earlyInfo?.triggered === true;
+  const triggeredCount = (offsiteTriggered ? 1 : 0) + (earlyTriggered ? 1 : 0);
+
+  const offsiteResolved = !offsiteTriggered || !!offsiteReason;
+  const earlyResolved = !earlyTriggered || !!earlyReason;
+  const canProceed =
+    compulsoryDone && offsiteResolved && earlyResolved && !positionLoading;
 
   const [submitting, setSubmitting] = useState(false);
 
   const onProceed = async () => {
     if (submitting) return;
     setSubmitting(true);
-    // 1. Mark the shift complete in the DB (so admin Live Ops shows
-    //    "Complete" instead of stale "In progress").
+    // 1. Mark the shift complete in the DB.
     if (shift) {
       const result = await checkOutOfShift(shift.realId, completedIds.length);
       if (!result.ok) {
@@ -106,16 +256,46 @@ function CheckOutPage() {
         alert(`Couldn't check out: ${result.error}`);
         return;
       }
+      // 2. Log dedicated exception events alongside the standard checkout.
+      if (offsiteTriggered) {
+        await logEvent({
+          event_type: "shift.checked_out_offsite",
+          shift_id: shift.realId,
+          customer_id: shift.id,
+          message: `Off-site check-out at ${shift.name}`,
+          meta: {
+            distance_m: offsiteInfo?.triggered ? offsiteInfo.distanceM : null,
+            radius_m: offsiteInfo?.radiusM ?? null,
+            reason: offsiteReason,
+            note: offsiteNote || undefined,
+          },
+        });
+      }
+      if (earlyTriggered) {
+        await logEvent({
+          event_type: "shift.checked_out_early",
+          shift_id: shift.realId,
+          customer_id: shift.id,
+          message: `Early check-out at ${shift.name} · ${formatMinutes(
+            earlyInfo!.minutesEarly
+          )} before scheduled end`,
+          meta: {
+            minutes_early: Math.round(earlyInfo!.minutesEarly),
+            grace_minutes: graceMinutes,
+            end_label: earlyInfo!.endLabel,
+            reason: earlyReason,
+            note: earlyNote || undefined,
+          },
+        });
+      }
     }
-    // 2. Drop our pin from the admin map. Awaited so the realtime broadcast
-    //    fires before the user navigates away.
+    // 3. Drop our pin from the admin map. Awaited so the realtime
+    //    broadcast fires before the user navigates away.
     await clearRepLocation();
 
     const params = new URLSearchParams({
-      offsiteReason: offsiteReason!,
-      offsiteNote,
-      earlyReason: earlyReason!,
-      earlyNote,
+      ...(offsiteReason ? { offsiteReason, offsiteNote } : {}),
+      ...(earlyReason ? { earlyReason, earlyNote } : {}),
     });
     router.push(`/summary?${params.toString()}`);
   };
@@ -273,102 +453,227 @@ function CheckOutPage() {
         </div>
       )}
 
-      <div style={{ padding: "12px 16px 0" }}>
-        <FauxMap pinColor={shift.color} />
-        <div
-          style={{
-            marginTop: 8,
-            fontFamily: MC.font,
-            fontSize: 12.5,
-            color: MC.mute,
-            padding: "0 4px",
-          }}
-        >
-          You&apos;re checking out <b style={{ color: MC.ink }}>3 km</b> away from {shift.name}&apos;s
-          location.
+      {/* Loading state — fetching customer / GPS */}
+      {(positionLoading || !shiftLoaded) && (
+        <div style={{ padding: "12px 16px 0" }}>
+          <div
+            style={{
+              padding: 14,
+              background: MC.card,
+              border: `1px solid ${MC.line}`,
+              borderRadius: MC.radiusCard,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontFamily: MC.font,
+              fontSize: 13,
+              color: MC.mute,
+            }}
+          >
+            <Glyph name="target" size={14} color={MC.hint} />
+            <span>
+              {positionLoading ? "Checking your location…" : "Loading shift…"}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
-      <SectionLabel>Exceptions to resolve</SectionLabel>
-
-      <div style={{ padding: "0 16px" }}>
-        <ExceptionBlock
-          tone="danger"
-          icon="pin"
-          title="Not at customer location"
-          subtitle="3 km away from check-out"
-          resolved={offsiteResolved}
-          resolvedSummary={offsiteResolved ? offsiteReason : null}
-          open={offsiteOpen}
-          onToggle={() => setOffsiteOpen((o) => !o)}
-        >
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {OFFSITE_REASONS.map((r) => (
-              <ReasonChip
-                key={r}
-                label={r}
-                selected={offsiteReason === r}
-                onClick={() => setOffsiteReason(r)}
-              />
-            ))}
+      {/* No exceptions — clean confirmation */}
+      {!positionLoading && shiftLoaded && triggeredCount === 0 && compulsoryDone && (
+        <div style={{ padding: "12px 16px 0" }}>
+          <div
+            style={{
+              padding: 14,
+              background: MC.okTint,
+              border: `1px solid ${MC.ok}55`,
+              borderRadius: MC.radiusCard,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                background: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Glyph name="check-circle" size={20} color={MC.ok} strokeWidth={2.4} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#0d6a45",
+                  letterSpacing: -0.1,
+                }}
+              >
+                Ready to check out
+              </div>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 12,
+                  color: "#0d6a45",
+                  opacity: 0.85,
+                  marginTop: 2,
+                  lineHeight: 1.45,
+                }}
+              >
+                {[
+                  offsiteInfo && offsiteInfo.triggered === false
+                    ? "distanceM" in offsiteInfo && offsiteInfo.distanceM != null
+                      ? `Within geofence (${formatDistance(offsiteInfo.distanceM)} of site)`
+                      : offsiteInfo.reason || "Within geofence"
+                    : null,
+                  earlyInfo && earlyInfo.triggered === false
+                    ? earlyInfo.minutesEarly <= 0
+                      ? `Past scheduled end (${earlyInfo.endLabel})`
+                      : `Within ${graceMinutes}-min grace (${formatMinutes(
+                          earlyInfo.minutesEarly
+                        )} before end)`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+            </div>
           </div>
-          <NoteField
-            value={offsiteNote}
-            onChange={setOffsiteNote}
-            placeholder="Add a note (optional)"
-          />
-        </ExceptionBlock>
-      </div>
+        </div>
+      )}
 
-      <div style={{ padding: "12px 16px 0" }}>
-        <ExceptionBlock
-          tone="warn"
-          icon="clock"
-          title="Early check-out"
-          subtitle="5h 47m before your scheduled end (05:00 PM)"
-          resolved={earlyResolved}
-          resolvedSummary={earlyResolved ? earlyReason : null}
-          open={earlyOpen}
-          onToggle={() => setEarlyOpen((o) => !o)}
-        >
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {EARLY_REASONS.map((r) => (
-              <ReasonChip
-                key={r}
-                label={r}
-                selected={earlyReason === r}
-                onClick={() => setEarlyReason(r)}
+      {/* Off-site exception — only if triggered */}
+      {offsiteTriggered && (
+        <>
+          <SectionLabel>Exceptions to resolve</SectionLabel>
+          <div style={{ padding: "0 16px" }}>
+            <ExceptionBlock
+              tone="danger"
+              icon="pin"
+              title="Not at customer location"
+              subtitle={
+                offsiteResolved && offsiteReason
+                  ? offsiteReason
+                  : offsiteInfo!.message
+              }
+              resolved={offsiteResolved}
+              resolvedSummary={offsiteResolved ? offsiteReason : null}
+              open={offsiteOpen}
+              onToggle={() => setOffsiteOpen((o) => !o)}
+            >
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {OFFSITE_REASONS.map((r) => (
+                  <ReasonChip
+                    key={r}
+                    label={r}
+                    selected={offsiteReason === r}
+                    onClick={() => setOffsiteReason(r)}
+                  />
+                ))}
+              </div>
+              <NoteField
+                value={offsiteNote}
+                onChange={setOffsiteNote}
+                placeholder="Add a note (optional)"
               />
-            ))}
+            </ExceptionBlock>
           </div>
-          <NoteField
-            value={earlyNote}
-            onChange={setEarlyNote}
-            placeholder="Add a note (optional)"
-          />
-        </ExceptionBlock>
-      </div>
+        </>
+      )}
+
+      {/* Early-out exception — only if triggered */}
+      {earlyTriggered && (
+        <>
+          {!offsiteTriggered && <SectionLabel>Exceptions to resolve</SectionLabel>}
+          <div style={{ padding: offsiteTriggered ? "12px 16px 0" : "0 16px" }}>
+            <ExceptionBlock
+              tone="warn"
+              icon="clock"
+              title="Early check-out"
+              subtitle={`${formatMinutes(earlyInfo!.minutesEarly)} before scheduled end (${earlyInfo!.endLabel})`}
+              resolved={earlyResolved}
+              resolvedSummary={earlyResolved ? earlyReason : null}
+              open={earlyOpen}
+              onToggle={() => setEarlyOpen((o) => !o)}
+            >
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 11.5,
+                  color: MC.mute,
+                  marginBottom: 8,
+                }}
+              >
+                Grace period: {graceMinutes} min.
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {EARLY_REASONS.map((r) => (
+                  <ReasonChip
+                    key={r}
+                    label={r}
+                    selected={earlyReason === r}
+                    onClick={() => setEarlyReason(r)}
+                  />
+                ))}
+              </div>
+              <NoteField
+                value={earlyNote}
+                onChange={setEarlyNote}
+                placeholder="Add a note (optional)"
+              />
+            </ExceptionBlock>
+          </div>
+        </>
+      )}
 
       <div style={{ padding: "18px 16px 22px" }}>
-        <div
-          style={{
-            fontFamily: MC.font,
-            fontSize: 12,
-            color: MC.hint,
-            textAlign: "right",
-            marginBottom: 8,
-          }}
-        >
-          {[offsiteResolved, earlyResolved].filter(Boolean).length}/2 resolved
-          {!compulsoryDone && ` · ${compulsoryRemaining.length} task${compulsoryRemaining.length === 1 ? "" : "s"} pending`}
-        </div>
+        {triggeredCount > 0 && (
+          <div
+            style={{
+              fontFamily: MC.font,
+              fontSize: 12,
+              color: MC.hint,
+              textAlign: "right",
+              marginBottom: 8,
+            }}
+          >
+            {(offsiteTriggered && offsiteReason ? 1 : 0) +
+              (earlyTriggered && earlyReason ? 1 : 0)}
+            /{triggeredCount} resolved
+            {!compulsoryDone &&
+              ` · ${compulsoryRemaining.length} task${compulsoryRemaining.length === 1 ? "" : "s"} pending`}
+          </div>
+        )}
+        {triggeredCount === 0 && !compulsoryDone && (
+          <div
+            style={{
+              fontFamily: MC.font,
+              fontSize: 12,
+              color: MC.warn,
+              textAlign: "right",
+              marginBottom: 8,
+            }}
+          >
+            {compulsoryRemaining.length} task{compulsoryRemaining.length === 1 ? "" : "s"} pending
+          </div>
+        )}
         <PrimaryButton
           disabled={!canProceed}
           onClick={canProceed ? onProceed : undefined}
           icon={canProceed ? "arrow-r" : null}
         >
           {canProceed
-            ? "Confirm check-out"
+            ? triggeredCount === 0
+              ? "Confirm check-out"
+              : "Confirm check-out"
             : !compulsoryDone
             ? "Complete tasks first"
             : "Resolve to continue"}

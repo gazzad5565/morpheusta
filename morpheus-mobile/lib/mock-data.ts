@@ -45,6 +45,7 @@ export interface Customer {
   city: string;
   latitude?: number | null;
   longitude?: number | null;
+  geofence_radius_m?: number | null;
 }
 
 const ALL_CUSTOMERS_RAW: Omit<Customer, "color">[] = [

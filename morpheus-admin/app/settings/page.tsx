@@ -28,6 +28,12 @@ import {
   type CustomField,
   type FieldEntity,
 } from "@/lib/custom-fields-store";
+import {
+  getLateGraceMinutes,
+  setLateGraceMinutes,
+  getEarlyGraceMinutes,
+  setEarlyGraceMinutes,
+} from "@/lib/settings-store";
 
 const ENTITY_GLYPH: Record<FieldEntity, GlyphName> = {
   customer: "customer",
@@ -42,6 +48,13 @@ export default function SettingsPage() {
   const [loaded, setLoaded] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Check-in rules (grace periods)
+  const [lateMin, setLateMin] = useState<string>("10");
+  const [earlyMin, setEarlyMin] = useState<string>("15");
+  const [graceLoaded, setGraceLoaded] = useState(false);
+  const [savingGrace, setSavingGrace] = useState<"late" | "early" | null>(null);
+  const [graceMessage, setGraceMessage] = useState<string | null>(null);
+
   const reload = () => {
     listCustomFields().then((rows) => {
       setFields(rows);
@@ -50,7 +63,45 @@ export default function SettingsPage() {
   };
   useEffect(() => {
     reload();
+    Promise.all([getLateGraceMinutes(), getEarlyGraceMinutes()]).then(([late, early]) => {
+      setLateMin(String(late));
+      setEarlyMin(String(early));
+      setGraceLoaded(true);
+    });
   }, []);
+
+  const saveLate = async () => {
+    setGraceMessage(null);
+    const n = parseInt(lateMin, 10);
+    if (Number.isNaN(n) || n < 0) {
+      setGraceMessage("Late grace must be a number ≥ 0.");
+      return;
+    }
+    setSavingGrace("late");
+    const r = await setLateGraceMinutes(n);
+    setSavingGrace(null);
+    if (!r.ok) {
+      setGraceMessage(r.error || "Couldn't save.");
+      return;
+    }
+    setGraceMessage(`Late grace saved (${n} min).`);
+  };
+  const saveEarly = async () => {
+    setGraceMessage(null);
+    const n = parseInt(earlyMin, 10);
+    if (Number.isNaN(n) || n < 0) {
+      setGraceMessage("Early grace must be a number ≥ 0.");
+      return;
+    }
+    setSavingGrace("early");
+    const r = await setEarlyGraceMinutes(n);
+    setSavingGrace(null);
+    if (!r.ok) {
+      setGraceMessage(r.error || "Couldn't save.");
+      return;
+    }
+    setGraceMessage(`Early grace saved (${n} min).`);
+  };
 
   const grouped = useMemo(() => {
     const map = new Map<FieldEntity, CustomField[]>();
@@ -182,6 +233,173 @@ export default function SettingsPage() {
             </Card>
           </div>
         </div>
+
+        {/* Check-in rules */}
+        <Card padding={20}>
+          <SectionTitle>Check-in rules</SectionTitle>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12.5,
+              color: AC.mute,
+              marginTop: 4,
+              marginBottom: 16,
+              lineHeight: 1.55,
+            }}
+          >
+            Grace periods that gate when the mobile app shows an exception card on{" "}
+            <b style={{ color: AC.ink }}>check-in</b> /{" "}
+            <b style={{ color: AC.ink }}>check-out</b>. Below the threshold, no exception
+            UI appears and the rep can proceed straight away.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  color: AC.mute,
+                  fontWeight: 700,
+                  letterSpacing: 0.3,
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                Late check-in grace (min)
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="number"
+                  min={0}
+                  value={lateMin}
+                  disabled={!graceLoaded || savingGrace === "late"}
+                  onChange={(e) => setLateMin(e.target.value.replace(/[^0-9]/g, ""))}
+                  style={{
+                    flex: 1,
+                    padding: "9px 11px",
+                    borderRadius: 10,
+                    border: `1px solid ${AC.line}`,
+                    background: "#fff",
+                    fontFamily: AC.fontMono,
+                    fontSize: 14,
+                    color: AC.ink,
+                  }}
+                />
+                <Btn
+                  size="sm"
+                  kind="primary"
+                  onClick={saveLate}
+                  disabled={!graceLoaded || savingGrace !== null}
+                >
+                  {savingGrace === "late" ? "Saving…" : "Save"}
+                </Btn>
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  color: AC.mute,
+                  marginTop: 6,
+                  lineHeight: 1.45,
+                }}
+              >
+                Reps checking in within {lateMin || 0} minutes of the shift's start time
+                see no exception. After that, the late-check-in card appears and a reason
+                is required.
+              </div>
+            </div>
+            <div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  color: AC.mute,
+                  fontWeight: 700,
+                  letterSpacing: 0.3,
+                  textTransform: "uppercase",
+                  marginBottom: 6,
+                }}
+              >
+                Early check-out grace (min)
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="number"
+                  min={0}
+                  value={earlyMin}
+                  disabled={!graceLoaded || savingGrace === "early"}
+                  onChange={(e) => setEarlyMin(e.target.value.replace(/[^0-9]/g, ""))}
+                  style={{
+                    flex: 1,
+                    padding: "9px 11px",
+                    borderRadius: 10,
+                    border: `1px solid ${AC.line}`,
+                    background: "#fff",
+                    fontFamily: AC.fontMono,
+                    fontSize: 14,
+                    color: AC.ink,
+                  }}
+                />
+                <Btn
+                  size="sm"
+                  kind="primary"
+                  onClick={saveEarly}
+                  disabled={!graceLoaded || savingGrace !== null}
+                >
+                  {savingGrace === "early" ? "Saving…" : "Save"}
+                </Btn>
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  color: AC.mute,
+                  marginTop: 6,
+                  lineHeight: 1.45,
+                }}
+              >
+                Reps checking out within {earlyMin || 0} minutes of the scheduled end see
+                no exception. Earlier than that, the early-check-out card appears and a
+                reason is required.
+              </div>
+            </div>
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12,
+              color: AC.mute,
+              marginTop: 14,
+              padding: "8px 10px",
+              background: AC.bg,
+              borderRadius: 8,
+              lineHeight: 1.5,
+            }}
+          >
+            <b style={{ color: AC.ink }}>Off-site (geofence) exceptions</b> are
+            controlled per-customer via the geofence radius slider on
+            <Link href="/customers" style={{ color: AC.brandDeep, textDecoration: "none" }}>
+              {" "}each customer's Address tab
+            </Link>
+            . Default is 100m.
+          </div>
+          {graceMessage && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: "8px 10px",
+                background: AC.brandSoft,
+                color: AC.brandInk,
+                borderRadius: 8,
+                fontFamily: AC.font,
+                fontSize: 12,
+                fontWeight: 500,
+              }}
+            >
+              {graceMessage}
+            </div>
+          )}
+        </Card>
 
         <Card padding={16}>
           <SectionTitle>Custom fields</SectionTitle>

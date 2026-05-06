@@ -13,7 +13,11 @@ export type EventType =
   | "shift.scheduled"
   | "shift.claimed"
   | "shift.checked_in"
+  | "shift.checked_in_offsite"
+  | "shift.checked_in_late"
   | "shift.checked_out"
+  | "shift.checked_out_offsite"
+  | "shift.checked_out_early"
   | "shift.deleted"
   // Requests
   | "request.submitted"
@@ -143,7 +147,11 @@ export const EVENT_LABEL: Record<EventType, string> = {
   "shift.scheduled": "scheduled a shift",
   "shift.claimed": "claimed a shift",
   "shift.checked_in": "checked in",
+  "shift.checked_in_offsite": "checked in OFF-SITE",
+  "shift.checked_in_late": "checked in LATE",
   "shift.checked_out": "checked out",
+  "shift.checked_out_offsite": "checked out OFF-SITE",
+  "shift.checked_out_early": "checked out EARLY",
   "shift.deleted": "removed a shift",
   "request.submitted": "requested a customer",
   "request.scheduled": "approved a request",
@@ -162,12 +170,19 @@ export const EVENT_LABEL: Record<EventType, string> = {
 export function eventTone(type: EventType): "ok" | "warn" | "danger" | "info" {
   if (type === "shift.checked_in" || type === "shift.checked_out") return "ok";
   if (
+    type === "shift.checked_in_offsite" ||
+    type === "shift.checked_out_offsite" ||
     type === "shift.deleted" ||
     type === "customer.deleted" ||
     type === "library.deleted" ||
     type === "task.deleted"
   )
     return "danger";
+  if (
+    type === "shift.checked_in_late" ||
+    type === "shift.checked_out_early"
+  )
+    return "warn";
   if (type === "request.submitted") return "info";
   return "ok";
 }
