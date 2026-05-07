@@ -3,8 +3,12 @@
 /**
  * /shifts/[id]/edit — edit a scheduled shift before the rep checks in.
  *
- * Editable: customer, rep, date, start/end times, distance label,
- *           tasks_total.
+ * Editable: customer, rep, date, start/end times. Distance label was
+ * removed from this form (the rep app derives "X km away" from the
+ * customer's saved coords + the rep's live position). Total tasks
+ * is now display-only — derived from customer_tasks count for the
+ * shift's customer (specific + universal). The shifts.tasks_total
+ * column is still updated on save so existing reports stay aligned.
  *
  * Locking rule: once the rep checks in (state moves to 'in-progress',
  * 'late' or 'complete'), this page redirects to the read-only detail
@@ -36,6 +40,7 @@ import {
   displayName,
   type Profile,
 } from "@/lib/profiles-store";
+import { countTasksForCustomers } from "@/lib/tasks-store";
 import type { Customer } from "@/lib/types";
 
 export default function EditShiftPage({
@@ -59,8 +64,12 @@ export default function EditShiftPage({
   const [shiftDate, setShiftDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
-  const [distance, setDistance] = useState("");
-  const [tasksTotal, setTasksTotal] = useState("4");
+  // Live count of customer_tasks rows for the currently-selected
+  // customer (specific + universal). Derived; not editable. Falls
+  // back to the row's stored tasks_total while we wait for the
+  // first count to arrive.
+  const [liveTaskCount, setLiveTaskCount] = useState<number | null>(null);
+  const [storedTasksTotal, setStoredTasksTotal] = useState<number>(0);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,8 +104,7 @@ export default function EditShiftPage({
       // wants "HH:MM".
       setStartTime((shift.start_time || "").slice(0, 5));
       setEndTime((shift.end_time || "").slice(0, 5));
-      setDistance(shift.distance_label || "");
-      setTasksTotal(String(shift.tasks_total ?? 4));
+      setStoredTasksTotal(shift.tasks_total ?? 0);
       setOriginalState(shift.state);
       setCustomers(cs);
 
@@ -124,6 +132,26 @@ export default function EditShiftPage({
     [customers, customerId]
   );
 
+  // Recompute the live task count whenever the customer changes —
+  // including the initial hydrate. Falls back to the row's stored
+  // value if the count call fails for any reason.
+  useEffect(() => {
+    if (!customerId) {
+      setLiveTaskCount(null);
+      return;
+    }
+    let cancelled = false;
+    countTasksForCustomers([customerId]).then((m) => {
+      if (cancelled) return;
+      setLiveTaskCount(m.get(customerId) ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  const effectiveTaskTotal = liveTaskCount ?? storedTasksTotal;
+
   const onSave = async () => {
     if (busy) return;
     setError(null);
@@ -131,9 +159,6 @@ export default function EditShiftPage({
     if (!shiftDate) return setError("Pick a date.");
     if (!startTime || !endTime) return setError("Set start and end times.");
     if (startTime >= endTime) return setError("End time must be after start time.");
-    const tasksNum = parseInt(tasksTotal, 10);
-    if (Number.isNaN(tasksNum) || tasksNum < 0)
-      return setError("Tasks must be a number.");
 
     setBusy(true);
     const r = await updateShift(id, {
@@ -142,8 +167,11 @@ export default function EditShiftPage({
       shift_date: shiftDate,
       start_time: startTime,
       end_time: endTime,
-      distance_label: distance.trim(),
-      tasks_total: tasksNum,
+      // Distance label is no longer surfaced in the form. We
+      // intentionally do NOT pass distance_label here so the existing
+      // value (if any) stays untouched. The rep app derives a live
+      // distance from the customer coords + rep location.
+      tasks_total: effectiveTaskTotal,
     });
     setBusy(false);
     if (!r.ok) {
@@ -285,27 +313,71 @@ export default function EditShiftPage({
             </Field>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
-            <Field
-              label="Distance label"
-              hint="Display only — what the rep sees on their card."
+          {/* Distance label removed — derived live from customer coords
+              + rep location on the mobile card. Total tasks is now
+              auto-derived from customer_tasks; we surface the count as
+              a read-only chip so the manager can see what the shift
+              will display, but they edit it via the Tasks page,
+              not here. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 12px",
+              borderRadius: 10,
+              background: AC.bg,
+              border: `1px solid ${AC.lineDim}`,
+              marginBottom: 16,
+            }}
+          >
+            <AGlyph name="tasks" size={14} color={AC.mute} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  color: AC.mute,
+                  fontWeight: 700,
+                  letterSpacing: 0.3,
+                  textTransform: "uppercase",
+                }}
+              >
+                Tasks
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 13,
+                  color: AC.ink,
+                  fontWeight: 600,
+                  marginTop: 2,
+                }}
+              >
+                {effectiveTaskTotal} task{effectiveTaskTotal === 1 ? "" : "s"}{" "}
+                <span
+                  style={{
+                    color: AC.mute,
+                    fontWeight: 500,
+                    fontSize: 12,
+                  }}
+                >
+                  · auto-counted from customer
+                </span>
+              </div>
+            </div>
+            <Link
+              href="/tasks"
+              style={{
+                fontFamily: AC.font,
+                fontSize: 12,
+                fontWeight: 600,
+                color: AC.brandDeep,
+                textDecoration: "none",
+              }}
             >
-              <input
-                value={distance}
-                onChange={(e) => setDistance(e.target.value)}
-                placeholder="e.g. 3 km away"
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Total tasks" hint="How many tasks at this site.">
-              <input
-                value={tasksTotal}
-                onChange={(e) =>
-                  setTasksTotal(e.target.value.replace(/\D/g, ""))
-                }
-                style={{ ...inputStyle, fontFamily: AC.fontMono }}
-              />
-            </Field>
+              Manage tasks →
+            </Link>
           </div>
 
           {error && (
@@ -388,8 +460,8 @@ export default function EditShiftPage({
               }}
             >
               The shift becomes read-only the moment the rep checks in.
-              Until then, you can change customer, rep, date, time, distance
-              label, and total tasks here.{" "}
+              Until then, you can change customer, rep, date, and time
+              here.{" "}
               <Link
                 href={`/shifts/${id}`}
                 style={{

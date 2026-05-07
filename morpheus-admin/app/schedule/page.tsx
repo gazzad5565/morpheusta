@@ -29,6 +29,7 @@ import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
 import {
+  deleteShift,
   listShiftsInRange,
   shiftHref,
   updateShift,
@@ -1000,6 +1001,13 @@ function DayColumnContents({
               left: `calc(${lanePct}% + 2px)`,
               right: 2,
               zIndex: 3,
+              // While a drag is in flight, let pointer events pass
+              // through so the day-column underneath still gets
+              // dragOver / drop events. Without this the pill sat on
+              // top of the column and silently swallowed drops on
+              // any day with overflow — which was exactly the
+              // "drag doesn't work on busy days" bug the user hit.
+              pointerEvents: drag ? "none" : "auto",
             }}
           >
             <button
@@ -1241,11 +1249,10 @@ function DayColumn({
 }) {
   const router = useRouter();
   const colRef = useRef<HTMLDivElement | null>(null);
-  const isWeekend = (() => {
-    const d = new Date(iso);
-    const dow = d.getDay();
-    return dow === 0 || dow === 6;
-  })();
+  // Weekend columns used to render with a grey background so they
+  // looked "off" — but field-ops reps absolutely work weekends, so
+  // dimming them is misleading. Treat every day the same; today
+  // still gets its faint highlight.
   const slots: number[] = [];
   for (let m = HOUR_START * 60; m < HOUR_END * 60; m += SLOT_MIN) slots.push(m);
 
@@ -1311,7 +1318,7 @@ function DayColumn({
         position: "relative",
         height: DAY_TOTAL_PX,
         borderLeft: `1px solid ${AC.lineDim}`,
-        background: isToday ? "#FAFCFD" : isWeekend ? AC.bg : "#fff",
+        background: isToday ? "#FAFCFD" : "#fff",
         cursor: drag ? "default" : "copy",
       }}
     >
@@ -1488,7 +1495,9 @@ function DraggableShiftCard({
   const isComplete = shift.state === "complete";
   const isDraggable = shift.state === "scheduled";
 
-  const handleDragStart = (e: React.DragEvent<HTMLAnchorElement>) => {
+  const [popoverOpen, setPopoverOpen] = useState(false);
+
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
     if (!isDraggable) {
       e.preventDefault();
       return;
@@ -1504,8 +1513,15 @@ function DraggableShiftCard({
   };
 
   return (
-    <Link
-      href={shiftHref(shift)}
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        // Stop the click from bubbling up to the day column's
+        // click-to-add handler. The card is its own clickable target.
+        e.stopPropagation();
+        setPopoverOpen(true);
+      }}
       title={`${repLabel} · ${customerName}${
         isDraggable ? " · drag to move" : ""
       }`}
@@ -1601,7 +1617,308 @@ function DraggableShiftCard({
           )}
         </div>
       )}
-    </Link>
+
+      {/* Quick-info popover — opens on click, anchored as a centered
+          modal because cards can be very narrow (lane-divided) and a
+          card-anchored bubble would clip badly in those cases. */}
+      {popoverOpen && (
+        <ShiftQuickPopover
+          shift={shift}
+          repLabel={repLabel}
+          onClose={() => setPopoverOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Click-a-shift popover. Mounted as a fixed-position overlay so it can
+ * never get clipped by the day column's bounds even on narrow lanes.
+ * Action buttons:
+ *   View / Edit  → routes via shiftHref (scheduled goes to /edit,
+ *                  everything else goes to the read-only detail).
+ *   Delete       → only on scheduled shifts. Confirms inline before
+ *                  calling deleteShift; the realtime sub on this page
+ *                  refetches automatically once the row is gone.
+ */
+function ShiftQuickPopover({
+  shift,
+  repLabel,
+  onClose,
+}: {
+  shift: ShiftRow;
+  repLabel: string;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const c = shift.customers;
+  const color = c?.color || "#888";
+  const customerName = c?.name || "Unknown customer";
+  const stateColors: Record<string, { bg: string; ink: string }> = {
+    "in-progress": { bg: AC.okTint, ink: "#0F5A38" },
+    travelling: { bg: AC.warnTint, ink: "#7A560A" },
+    "on-break": { bg: "#E6E9F8", ink: "#241B5A" },
+    late: { bg: AC.dangerTint, ink: "#6E1430" },
+    scheduled: { bg: AC.bg, ink: AC.mute },
+    complete: { bg: AC.okTint, ink: "#0F5A38" },
+  };
+  const sp = stateColors[shift.state] || stateColors.scheduled;
+  const canDelete = shift.state === "scheduled";
+
+  const onConfirmDelete = async () => {
+    setDeleting(true);
+    setError(null);
+    const r = await deleteShift(shift.id);
+    setDeleting(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't delete.");
+      return;
+    }
+    onClose();
+  };
+
+  const dateLabel = new Date(shift.shift_date + "T12:00:00").toLocaleDateString(
+    undefined,
+    { weekday: "short", month: "short", day: "numeric" }
+  );
+
+  return (
+    <>
+      <div
+        onMouseDown={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(10,15,30,.32)",
+          zIndex: 200,
+        }}
+      />
+      <div
+        role="dialog"
+        aria-label={`${customerName} shift`}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 320,
+          maxWidth: "calc(100vw - 32px)",
+          background: "#fff",
+          border: `1px solid ${AC.line}`,
+          borderRadius: 14,
+          boxShadow: "0 20px 50px rgba(10,15,30,.22)",
+          zIndex: 201,
+          padding: 18,
+          fontFamily: AC.font,
+          animation: "shift-quick-pop .2s cubic-bezier(.22, 1, .36, 1) both",
+        }}
+      >
+        <style>{`
+          @keyframes shift-quick-pop {
+            from { transform: translate(-50%, -48%) scale(.96); opacity: 0; }
+            to   { transform: translate(-50%, -50%) scale(1);    opacity: 1; }
+          }
+        `}</style>
+
+        {/* Customer + close */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: color,
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            {c?.initials || "?"}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: AC.ink,
+                letterSpacing: -0.2,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {customerName}
+            </div>
+            <div style={{ fontSize: 11.5, color: AC.mute, marginTop: 1 }}>
+              #{c?.code ?? "—"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <AGlyph name="x" size={14} color={AC.mute} />
+          </button>
+        </div>
+
+        {/* Detail rows */}
+        <div
+          style={{
+            marginTop: 14,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            fontSize: 12.5,
+          }}
+        >
+          <PopRow label="Rep" value={repLabel} />
+          <PopRow
+            label="When"
+            value={`${dateLabel} · ${formatTime(shift.start_time, {
+              compact: true,
+            })}–${formatTime(shift.end_time, { compact: true })}`}
+          />
+          <PopRow
+            label="Tasks"
+            value={`${shift.tasks_done} / ${shift.tasks_total}`}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: AC.mute,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+                width: 56,
+                flexShrink: 0,
+              }}
+            >
+              State
+            </div>
+            <span
+              style={{
+                padding: "2px 8px",
+                borderRadius: 99,
+                background: sp.bg,
+                color: sp.ink,
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: "capitalize",
+              }}
+            >
+              {shift.state.replace("-", " ")}
+            </span>
+          </div>
+        </div>
+
+        {error && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: "8px 10px",
+              background: AC.dangerTint,
+              color: "#9c1a3c",
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 500,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div
+          style={{
+            marginTop: 14,
+            display: "flex",
+            gap: 8,
+            justifyContent: "flex-end",
+          }}
+        >
+          {canDelete && !confirmDelete && (
+            <Btn
+              kind="danger"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
+              disabled={deleting}
+            >
+              Delete
+            </Btn>
+          )}
+          {canDelete && confirmDelete && (
+            <>
+              <Btn size="sm" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                Cancel
+              </Btn>
+              <Btn
+                kind="danger"
+                size="sm"
+                onClick={onConfirmDelete}
+                disabled={deleting}
+              >
+                {deleting ? "Deleting…" : "Yes, delete"}
+              </Btn>
+            </>
+          )}
+          {!confirmDelete && (
+            <Btn
+              kind="primary"
+              size="sm"
+              icon="chev-r"
+              onClick={() => router.push(shiftHref(shift))}
+            >
+              {shift.state === "scheduled" ? "Edit" : "View"}
+            </Btn>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PopRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+      <div
+        style={{
+          fontSize: 11,
+          color: AC.mute,
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          width: 56,
+          flexShrink: 0,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ flex: 1, color: AC.ink, fontWeight: 500 }}>{value}</div>
+    </div>
   );
 }
 

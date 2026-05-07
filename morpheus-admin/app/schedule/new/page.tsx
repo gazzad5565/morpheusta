@@ -389,20 +389,10 @@ function NewShiftPage() {
                 />
               </Field>
               <Field label="Start" required>
-                <input
-                  type="time"
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  style={inputStyle}
-                />
+                <TimeSelect value={startTime} onChange={setStartTime} />
               </Field>
               <Field label="End" required>
-                <input
-                  type="time"
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                  style={inputStyle}
-                />
+                <TimeSelect value={endTime} onChange={setEndTime} />
               </Field>
             </div>
 
@@ -1032,4 +1022,56 @@ function PreviewSentence({
       .
     </span>
   );
+}
+
+
+/**
+ * TimeSelect — clean 30-minute-increment dropdown for start / end
+ * times. Replaces the native `<input type="time">` which feels fiddly
+ * on desktop (steppers + manual typing). Pre-populates the visible
+ * range (06:00–22:00 in 30-min steps); if the current value falls
+ * outside that range we still show it as the selected option so
+ * historical shifts at unusual times (06:15 or 22:30) round-trip
+ * correctly.
+ */
+function TimeSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const opts: string[] = [];
+  for (let m = 6 * 60; m <= 22 * 60; m += 30) {
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    opts.push(`${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+  }
+  // Keep the current value in the list even when it does not fall on
+  // a 30-minute boundary inside our default range.
+  if (value && !opts.includes(value)) opts.unshift(value);
+
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ ...inputStyle, fontFamily: AC.fontMono }}
+    >
+      {opts.map((t) => (
+        <option key={t} value={t}>
+          {formatTimeLabel(t)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** "08:00" → "8:00 AM". Easier to scan than 24h in the dropdown. */
+function formatTimeLabel(t: string): string {
+  const [hh, mm] = t.split(":");
+  const h = parseInt(hh, 10);
+  if (Number.isNaN(h)) return t;
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${mm} ${ampm}`;
 }
