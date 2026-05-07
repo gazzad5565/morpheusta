@@ -89,6 +89,14 @@ export interface NewShift {
   tasks_total?: number;
   /** Optional. If null/undefined, the shift is claimable by any rep. */
   rep_id?: string | null;
+  /**
+   * Optional series id. When the schedule form generates N shifts in
+   * one submission (e.g. recurring weekly across multiple customers)
+   * every row gets the same series_id so we can later offer
+   * "edit / cancel this and future" actions across the group. Single
+   * one-off shifts leave this null.
+   */
+  series_id?: string | null;
 }
 
 /**
@@ -144,6 +152,7 @@ export async function createShift(
       distance_label: s.distance_label || "",
       tasks_total: s.tasks_total ?? 4,
       rep_id: s.rep_id || null,
+      series_id: s.series_id ?? null,
     })
     .select("id, customers(name)")
     .single();

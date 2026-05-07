@@ -10,6 +10,14 @@ export function AppHeader({
   onBack,
   withMenu,
   lastSync,
+  /**
+   * When true, the dark header strip is rendered as a compact band
+   * with NO title text — useful on top-level destinations (dashboard)
+   * where the title is implicit and the page itself supplies the
+   * greeting/brand below. Frees up vertical space without breaking
+   * iOS safe-area insets.
+   */
+  compact,
 }: {
   title: string;
   onBack?: () => void;
@@ -22,6 +30,7 @@ export function AppHeader({
    */
   withMenu?: boolean;
   lastSync?: string;
+  compact?: boolean;
 }) {
   const { setOpen } = useMenu();
   const showLeftBack = !!onBack;
@@ -36,7 +45,11 @@ export function AppHeader({
       style={{
         background: MC.header,
         color: MC.headerInk,
-        padding: "56px 14px 14px",
+        // Top padding respects the iOS safe-area inset (notch / dynamic
+        // island) but stays tight on browsers and non-notched devices.
+        // Bottom padding is smaller in compact mode since there's no
+        // title text underneath to pad away from.
+        padding: `max(env(safe-area-inset-top, 0px), 16px) 14px ${compact ? 6 : 12}px`,
         position: "relative",
       }}
     >
@@ -62,6 +75,7 @@ export function AppHeader({
             fontWeight: 600,
             fontSize: 17,
             letterSpacing: -0.1,
+            opacity: compact ? 0 : 1,
           }}
         >
           {title}

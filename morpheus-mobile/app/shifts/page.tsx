@@ -146,65 +146,38 @@ export default function ShiftsListPage() {
     <div style={{ background: MC.bg, minHeight: "100%" }}>
       <AppHeader title="Today's Shifts" onBack={() => router.push("/")} withMenu />
 
-      {/* Top-anchored CTA — used to live at the bottom of the page,
-          which meant a rep with many shifts had to scroll past
-          everything to find it. Now it's right under the header so
-          "I want to add a shift" is one tap from any state. */}
-      <div style={{ padding: "12px 16px 0" }}>
+      {/* Compact "Request a customer" pill — pinned to the top so a
+          rep with many shifts doesn't need to scroll, but quiet
+          enough that it doesn't dominate the page. Single-line,
+          icon-led, brand-tinted. Tap → /add-shift. */}
+      <div
+        style={{
+          padding: "12px 16px 0",
+          display: "flex",
+          justifyContent: "flex-end",
+        }}
+      >
         <Link
           href="/add-shift"
+          aria-label="Request a customer"
           style={{
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
-            gap: 10,
-            padding: "11px 14px",
-            borderRadius: 12,
-            background: MC.card,
+            gap: 6,
+            padding: "7px 12px 7px 9px",
+            borderRadius: 999,
+            background: MC.brandTint,
             border: `1px solid ${MC.brand}33`,
-            borderLeft: `3px solid ${MC.brand}`,
-            color: MC.ink,
+            color: MC.brandDeep,
             textDecoration: "none",
-            boxShadow: "0 1px 2px rgba(10,15,30,.04)",
+            fontFamily: MC.font,
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: -0.1,
           }}
         >
-          <span
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: MC.brandTint,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-            }}
-          >
-            <Glyph name="plus" size={15} color={MC.brand} strokeWidth={2.4} />
-          </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontFamily: MC.font,
-                fontSize: 13.5,
-                fontWeight: 700,
-                color: MC.ink,
-                letterSpacing: -0.1,
-              }}
-            >
-              Request a customer
-            </div>
-            <div
-              style={{
-                fontFamily: MC.font,
-                fontSize: 11.5,
-                color: MC.mute,
-                marginTop: 1,
-              }}
-            >
-              Pick from your customer list — your manager is notified.
-            </div>
-          </div>
-          <Glyph name="chev-r" size={16} color={MC.hint} />
+          <Glyph name="plus" size={14} color={MC.brand} strokeWidth={2.6} />
+          Request a customer
         </Link>
       </div>
 

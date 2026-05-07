@@ -416,12 +416,28 @@ export async function setShiftBreakState(
     .maybeSingle();
   const currentState = (row as { state?: string } | null)?.state || "";
   const targetState = onBreak ? "on-break" : "in-progress";
-  const requiredCurrent = onBreak ? "in-progress" : "on-break";
-  if (currentState !== requiredCurrent) {
-    // No-op, not an error — the shift was already in some other
-    // terminal state (probably checked out) so don't reanimate it.
+  // Permissive transition rules:
+  //   onBreak=true   → allowed from any "live" state
+  //                    (in-progress / travelling / on-break-already)
+  //   onBreak=false  → allowed only from on-break
+  // We refuse from terminal states (complete / late) so a stale
+  // event after check-out can't reanimate the shift. Earlier this
+  // helper required `in-progress` strictly, which silently dropped
+  // the flip when a rep started a break straight after travelling
+  // (state still 'travelling', not 'in-progress') — admin's "On
+  // break" tab stayed empty even though the rep was on break.
+  const liveStates = new Set(["in-progress", "travelling", "on-break"]);
+  const allowed = onBreak
+    ? liveStates.has(currentState)
+    : currentState === "on-break";
+  if (!allowed) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[shifts] setShiftBreakState skipped: shift ${shiftId} state="${currentState}" cannot flip to "${targetState}"`
+    );
     return { ok: true };
   }
+  if (currentState === targetState) return { ok: true }; // already there
   const { error } = await supabase
     .from("shifts")
     .update({ state: targetState })

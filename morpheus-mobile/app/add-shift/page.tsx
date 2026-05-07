@@ -180,11 +180,13 @@ export default function AddShiftPage() {
         </div>
       </div>
 
-      {/* Results — bottom padding leaves room for the sticky "View N
-          requested" CTA so it can never cover the last card. */}
+      {/* Results — extra bottom padding leaves room for the global
+          floating PendingRequestPill (mounted at layout level, lives
+          bottom-right above the AppFooter) so it never covers the
+          last card. */}
       <div
         style={{
-          padding: requestedIds.length > 0 ? "12px 16px 96px" : "12px 16px 22px",
+          padding: "12px 16px 80px",
           display: "flex",
           flexDirection: "column",
           gap: 8,
@@ -293,55 +295,12 @@ export default function AddShiftPage() {
         })}
       </div>
 
-      {/* Sticky CTA — pinned to the bottom of the phone-frame so the
-          rep always has a clear "what happens next" path: take me to
-          where I can see the pending request, instead of being stuck
-          on a long scrolling list of customers. Only renders if
-          there's at least one request to view. */}
-      {requestedIds.length > 0 && (
-        <div
-          style={{
-            position: "fixed",
-            left: 0,
-            right: 0,
-            bottom: 60, // sit above the AppFooter
-            zIndex: 30,
-            padding: "10px 14px 12px",
-            background:
-              "linear-gradient(to bottom, rgba(247,248,250,0) 0%, rgba(247,248,250,0.92) 30%, rgba(247,248,250,1) 100%)",
-            pointerEvents: "none",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => router.push("/shifts")}
-            style={{
-              pointerEvents: "auto",
-              width: "100%",
-              padding: "13px 16px",
-              borderRadius: 14,
-              background: MC.ink,
-              color: "#fff",
-              border: "none",
-              cursor: "pointer",
-              fontFamily: MC.font,
-              fontSize: 14,
-              fontWeight: 600,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              letterSpacing: -0.1,
-              boxShadow: "0 8px 22px rgba(10,15,30,.22)",
-            }}
-          >
-            <Glyph name="check-circle" size={16} color="#fff" strokeWidth={2.2} />
-            View {requestedIds.length} pending{" "}
-            {requestedIds.length === 1 ? "request" : "requests"}
-            <Glyph name="arrow-r" size={16} color="#fff" strokeWidth={2.2} />
-          </button>
-        </div>
-      )}
+      {/* Used to render a chunky black "View N pending requests" bar
+          here. Removed — the global floating PendingRequestPill
+          mounted at layout level already does this job from every
+          screen. The post-tap toast above gives the immediate
+          confirmation, the pill gives ongoing reassurance, and
+          neither one shouts at the rep with a full-width black bar. */}
 
       {/* Confirmation toast — drops in from the top after each Request
           tap. Tells the rep that (a) the request reached the manager,

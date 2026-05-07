@@ -212,10 +212,14 @@ export default function DashboardPage() {
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
-      <AppHeader title="Dashboard" lastSync={nowLabel} />
+      <AppHeader title="Dashboard" lastSync={nowLabel} compact />
 
-      {/* Welcome — extra top padding so it clears the absolute-positioned LAST SYNC label */}
-      <div style={{ padding: "32px 20px 6px" }}>
+      {/* Welcome — sits right under the compact header. The greeting
+          IS the page title here, so we don't need a separate dark
+          "Dashboard" band above. Top padding clears the
+          absolute-positioned LAST SYNC label that lives on the
+          header. */}
+      <div style={{ padding: "26px 20px 6px" }}>
         <div
           style={{
             fontFamily: MC.font,

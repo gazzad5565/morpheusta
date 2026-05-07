@@ -257,6 +257,16 @@ function NewShiftPage() {
     // simply show no tasks until the customer is given some).
     const tasksByCustomer = await countTasksForCustomers(targetedCustomerIds);
 
+    // Series id — every shift created in this single submission shares
+    // one uuid so we can later offer "edit / cancel this AND future
+    // in the series" actions. Single one-off shifts (one date × one
+    // customer × one rep) leave it null since "series of 1" is not a
+    // useful concept.
+    const seriesId =
+      totalShifts > 1 && typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : null;
+
     // Insert sequentially so we can show progress and collect errors.
     // Cartesian product: dates × customers × reps. When the rep scope
     // is "Unassigned" the rep loop runs once with rep_id = null.
@@ -274,6 +284,7 @@ function NewShiftPage() {
             distance_label: "",
             tasks_total: tasksByCustomer.get(cid) ?? 0,
             rep_id: rid,
+            series_id: seriesId,
           });
           done += 1;
           setProgress({ done, total: totalShifts });
