@@ -175,6 +175,19 @@ const STATE_DOT: Record<string, { color: string; label: string }> = {
  */
 const MAX_VISIBLE_LANES = 2;
 
+/**
+ * Per-day shift count threshold above which the column collapses
+ * to a "N shifts" summary chip instead of trying to render every
+ * card as a lane. Lanes break down past 4–5 simultaneous shifts
+ * (each card becomes a 30px strip nobody can read) so we punt to
+ * a dedicated day-detail panel instead. Click the chip → modal
+ * lists every shift with full text + drag-to-move + edit/delete.
+ *
+ * Set high enough that ordinary days (1–3 shifts) still render
+ * as the slot grid you can scan at a glance.
+ */
+const DAY_SHIFT_LIMIT = 4;
+
 interface OverflowGroup {
   /** Anchor shifts (top of cluster, used to position the +N pill). */
   startMin: number;
@@ -1417,19 +1430,27 @@ function DayColumn({
         );
       })}
 
-      {/* Shift cards positioned by start_time / duration. Overlapping
-          shifts are split into lanes (max 3 visible) so they render
-          side-by-side instead of stacking on top of each other. Past
-          MAX_VISIBLE_LANES the rightmost slot becomes a "+N more" pill
-          showing how many shifts are hidden — clicking it reveals
-          them in a popover. */}
-      <DayColumnContents
-        shifts={shifts}
-        repNameMap={repNameMap}
-        drag={drag}
-        onBeginDrag={onBeginDrag}
-        onEndDrag={onEndDrag}
-      />
+      {/* Render mode depends on how busy this day is:
+            ≤ DAY_SHIFT_LIMIT  →  full slot-grid lane layout (cards
+                                  positioned by start/end time, draggable,
+                                  side-by-side lanes for overlaps).
+            >  DAY_SHIFT_LIMIT →  count summary chip near the top of the
+                                  column. Click → DayDetailPanel modal
+                                  with the full list + edit/delete /
+                                  drag-to-move from there. Keeps very
+                                  busy days legible without trying to
+                                  cram 8+ slivers into one column. */}
+      {shifts.length <= DAY_SHIFT_LIMIT ? (
+        <DayColumnContents
+          shifts={shifts}
+          repNameMap={repNameMap}
+          drag={drag}
+          onBeginDrag={onBeginDrag}
+          onEndDrag={onEndDrag}
+        />
+      ) : (
+        <DaySummaryChip iso={iso} shifts={shifts} repNameMap={repNameMap} />
+      )}
 
       {/* Hover preview while dragging over this column */}
       {hover && drag && (
@@ -1516,6 +1537,423 @@ function DayColumnAdd({
       <AGlyph name="plus" size={11} color={AC.faint} />
       <span>Add</span>
     </Link>
+  );
+}
+
+/**
+ * Count-only summary used when a day has more shifts than fit
+ * comfortably in the slot grid. Replaces the lane chaos with a
+ * single readable chip — click to open the day-detail panel.
+ *
+ * Counts are broken down by state so the manager gets a flavour of
+ * the day at a glance: "8 shifts · 3 in progress · 2 unassigned".
+ */
+function DaySummaryChip({
+  iso,
+  shifts,
+  repNameMap,
+}: {
+  iso: string;
+  shifts: ShiftRow[];
+  repNameMap: Record<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const inProgress = shifts.filter((s) => s.state === "in-progress").length;
+  const unassigned = shifts.filter((s) => !s.rep_id).length;
+  const complete = shifts.filter((s) => s.state === "complete").length;
+  const dateLabel = new Date(iso + "T12:00:00").toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          // The day column has a click-anywhere-to-add handler that
+          // listens to clicks on its own background. Stop propagation
+          // so opening the day panel doesn't ALSO route to /schedule/new.
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        title={`${shifts.length} shifts on ${dateLabel} — click to view all`}
+        style={{
+          position: "absolute",
+          top: 8,
+          left: 6,
+          right: 6,
+          padding: "12px 10px",
+          background: "#fff",
+          border: `1px solid ${AC.line}`,
+          borderLeft: `3px solid ${AC.brand}`,
+          borderRadius: 8,
+          cursor: "pointer",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "stretch",
+          gap: 6,
+          boxShadow: "0 2px 6px rgba(10,15,30,.06)",
+          zIndex: 4,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 22,
+            fontWeight: 800,
+            color: AC.ink,
+            letterSpacing: -0.6,
+            lineHeight: 1,
+          }}
+        >
+          {shifts.length}
+        </div>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 10.5,
+            fontWeight: 700,
+            color: AC.mute,
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+          }}
+        >
+          shifts
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 3,
+            marginTop: 4,
+            fontFamily: AC.font,
+            fontSize: 11,
+            color: AC.ink2,
+            fontWeight: 500,
+          }}
+        >
+          {inProgress > 0 && (
+            <SummaryDotRow color="#1FA971" label={`${inProgress} in progress`} />
+          )}
+          {unassigned > 0 && (
+            <SummaryDotRow color={AC.warn} label={`${unassigned} unassigned`} />
+          )}
+          {complete > 0 && (
+            <SummaryDotRow color={AC.faint} label={`${complete} complete`} />
+          )}
+        </div>
+        <div
+          style={{
+            marginTop: 4,
+            paddingTop: 4,
+            borderTop: `1px solid ${AC.lineDim}`,
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 700,
+            color: AC.brandDeep,
+            letterSpacing: 0.3,
+            textTransform: "uppercase",
+            textAlign: "center",
+          }}
+        >
+          View all →
+        </div>
+      </button>
+      {open && (
+        <DayDetailPanel
+          iso={iso}
+          shifts={shifts}
+          repNameMap={repNameMap}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function SummaryDotRow({ color, label }: { color: string; label: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 99,
+          background: color,
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Modal that lists every shift on a given day with full text +
+ * Edit / Delete actions. Mounted via portal to escape stacking
+ * contexts (same reason as the click-shift popover).
+ */
+function DayDetailPanel({
+  iso,
+  shifts,
+  repNameMap,
+  onClose,
+}: {
+  iso: string;
+  shifts: ShiftRow[];
+  repNameMap: Record<string, string>;
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  useEffect(() => setMounted(true), []);
+  if (!mounted || typeof document === "undefined") return null;
+
+  const dateLabel = new Date(iso + "T12:00:00").toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const onDeleteShift = async (s: ShiftRow) => {
+    if (s.state !== "scheduled") {
+      alert(
+        `Can't delete a ${s.state} shift. Only scheduled shifts are deletable.`
+      );
+      return;
+    }
+    if (!confirm(`Delete this shift?`)) return;
+    setBusyId(s.id);
+    const r = await deleteShift(s.id);
+    setBusyId(null);
+    if (!r.ok) {
+      alert(`Couldn't delete: ${r.error}`);
+    }
+    // The page's realtime sub will refetch; the panel stays open with
+    // the remaining shifts listed.
+  };
+
+  const sortedShifts = [...shifts].sort((a, b) =>
+    a.start_time.localeCompare(b.start_time)
+  );
+
+  return createPortal(
+    <>
+      <div
+        onMouseDown={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(10,15,30,.42)",
+          zIndex: 250,
+        }}
+      />
+      <div
+        role="dialog"
+        aria-label={`${shifts.length} shifts on ${dateLabel}`}
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 540,
+          maxWidth: "calc(100vw - 32px)",
+          maxHeight: "calc(100vh - 80px)",
+          display: "flex",
+          flexDirection: "column",
+          background: "#fff",
+          border: `1px solid ${AC.line}`,
+          borderRadius: 14,
+          boxShadow: "0 24px 60px rgba(10,15,30,.24)",
+          zIndex: 251,
+          fontFamily: AC.font,
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "16px 18px 14px",
+            borderBottom: `1px solid ${AC.line}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: AC.mute,
+                fontWeight: 700,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+              }}
+            >
+              {shifts.length} shifts
+            </div>
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 700,
+                color: AC.ink,
+                letterSpacing: -0.3,
+                marginTop: 2,
+              }}
+            >
+              {dateLabel}
+            </div>
+          </div>
+          <Link
+            href={`/schedule/new?date=${iso}`}
+            style={{ textDecoration: "none" }}
+          >
+            <Btn size="sm" kind="primary" icon="plus">
+              Add
+            </Btn>
+          </Link>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <AGlyph name="x" size={14} color={AC.mute} />
+          </button>
+        </div>
+        {/* List */}
+        <div style={{ overflowY: "auto", padding: 12 }}>
+          {sortedShifts.map((s) => {
+            const c = s.customers;
+            const color = c?.color || "#888";
+            const repLabel = s.rep_id
+              ? repNameMap[s.rep_id] || "Rep"
+              : "Unassigned";
+            const isComplete = s.state === "complete";
+            const stateInfo = STATE_DOT[s.state];
+            return (
+              <div
+                key={s.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: 12,
+                  borderRadius: 10,
+                  background:
+                    STATE_BODY_TINT[s.state] || `${color}10`,
+                  borderLeft: `3px solid ${color}`,
+                  marginBottom: 8,
+                  opacity: isComplete ? 0.7 : 1,
+                }}
+              >
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 8,
+                    background: color,
+                    color: "#fff",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {c?.initials || "?"}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: AC.ink,
+                      letterSpacing: -0.2,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      textDecoration: isComplete ? "line-through" : "none",
+                    }}
+                  >
+                    {c?.name || "Unknown customer"}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: AC.ink2,
+                      marginTop: 2,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <span style={{ fontWeight: 600 }}>{repLabel}</span>
+                    <span style={{ color: AC.faint }}>·</span>
+                    <span style={{ fontFamily: AC.fontMono, fontSize: 11.5 }}>
+                      {(s.start_time || "").slice(0, 5)}–
+                      {(s.end_time || "").slice(0, 5)}
+                    </span>
+                    {stateInfo && (
+                      <span
+                        style={{
+                          padding: "1px 7px",
+                          borderRadius: 99,
+                          background: `${stateInfo.color}22`,
+                          color: stateInfo.color,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: 0.3,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {stateInfo.label}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Btn
+                    size="sm"
+                    onClick={() => router.push(shiftHref(s))}
+                  >
+                    {s.state === "scheduled" ? "Edit" : "View"}
+                  </Btn>
+                  {s.state === "scheduled" && (
+                    <Btn
+                      size="sm"
+                      kind="danger"
+                      onClick={() => onDeleteShift(s)}
+                      disabled={busyId === s.id}
+                    >
+                      {busyId === s.id ? "…" : "Delete"}
+                    </Btn>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>,
+    document.body
   );
 }
 

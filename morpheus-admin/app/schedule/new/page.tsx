@@ -715,10 +715,19 @@ function NewShiftPage() {
               kind="primary"
               icon="check"
               onClick={onSubmit}
-              disabled={busy || customers.length === 0 || totalShifts === 0}
+              // Stays enabled even when totalShifts === 0 (empty
+              // customer scope, missing weekday picks, etc) so an
+              // explicit click surfaces the inline validation error
+              // instead of silently doing nothing. Was previously
+              // disabled-and-dead which made the "+" add-shift entry
+              // from the calendar feel broken — clicking did nothing
+              // because the Create button was already inert.
+              disabled={busy || customers.length === 0}
             >
               {busy
                 ? "Saving…"
+                : totalShifts === 0
+                ? "Create shift"
                 : totalShifts === 1
                 ? "Create shift"
                 : `Create ${totalShifts} shifts`}
