@@ -29,8 +29,12 @@ import {
   listShiftSeries,
   cancelShiftSeries,
   updateShiftSeries,
+  listStandaloneShifts,
+  bulkDeleteShifts,
+  deleteAllUpcomingShifts,
   subscribeShifts,
   type ShiftSeriesSummary,
+  type OneOffShiftRow,
 } from "@/lib/shifts-store";
 import { listCustomers } from "@/lib/customers-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
@@ -39,6 +43,10 @@ import type { Customer } from "@/lib/types";
 
 export default function ManageShiftsPage() {
   const [series, setSeries] = useState<ShiftSeriesSummary[]>([]);
+  // Pre-`series_id` shifts + any one-off shift created with no
+  // recurrence. They're invisible on the series list, so without
+  // this list the manager couldn't bulk-clean them up.
+  const [standalone, setStandalone] = useState<OneOffShiftRow[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [reps, setReps] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
@@ -46,14 +54,17 @@ export default function ManageShiftsPage() {
   const [search, setSearch] = useState("");
   // Series being edited via the Edit-future modal. Null = closed.
   const [editTarget, setEditTarget] = useState<ShiftSeriesSummary | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   const refresh = async () => {
-    const [s, cs, ps] = await Promise.all([
+    const [s, st, cs, ps] = await Promise.all([
       listShiftSeries(),
+      listStandaloneShifts({ upcomingOnly: true }),
       listCustomers(),
       listProfiles(),
     ]);
     setSeries(s);
+    setStandalone(st);
     setCustomers(cs);
     const repMap: Record<string, Profile> = {};
     for (const p of ps) repMap[p.id] = p;
@@ -126,6 +137,55 @@ export default function ManageShiftsPage() {
     const r = await cancelShiftSeries(s.series_id);
     setBusyId(null);
     if (!r.ok) alert(`Couldn't cancel: ${r.error}`);
+  };
+
+  const onDeleteStandalone = async (s: OneOffShiftRow) => {
+    if (
+      !confirm(
+        `Delete this shift on ${s.shift_date} (${s.start_time}–${s.end_time}) at ${
+          s.customer?.name || "this customer"
+        }?`
+      )
+    ) {
+      return;
+    }
+    setBusyId(`oneoff-${s.id}`);
+    const r = await bulkDeleteShifts([s.id]);
+    setBusyId(null);
+    if (!r.ok) alert(`Couldn't delete: ${r.error}`);
+  };
+
+  const onDeleteAllStandalone = async () => {
+    if (standalone.length === 0) return;
+    if (
+      !confirm(
+        `Delete all ${standalone.length} standalone upcoming shifts?\n\nOnly state='scheduled' rows are touched. Running and complete shifts are kept. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setBusyId("standalone-all");
+    const r = await bulkDeleteShifts(standalone.map((s) => s.id));
+    setBusyId(null);
+    if (!r.ok) alert(`Couldn't delete: ${r.error}`);
+  };
+
+  const onResetSchedule = async () => {
+    // Two-step confirm to dodge an accidental nuke. The button copy
+    // already says "Reset upcoming schedule" so the manager knows
+    // the scope, but a typed confirm makes it deliberate.
+    const typed = window.prompt(
+      `This will delete EVERY upcoming scheduled shift in the database.\n\nRunning shifts and complete shifts are kept (audit integrity), but everything else from today forward is gone.\n\nType RESET to confirm.`
+    );
+    if (typed !== "RESET") return;
+    setResetting(true);
+    const r = await deleteAllUpcomingShifts();
+    setResetting(false);
+    if (!r.ok) {
+      alert(`Couldn't reset: ${r.error}`);
+      return;
+    }
+    alert(`Schedule reset. ${r.deleted ?? 0} shifts deleted.`);
   };
 
   return (
@@ -259,6 +319,224 @@ export default function ManageShiftsPage() {
               ))}
             </div>
           )}
+        </Card>
+
+        {/* Standalone (non-series) upcoming shifts. Pre-`series_id`
+            shifts and any one-off /schedule/new submission with no
+            recurrence end up here — invisible on the series list
+            above, so without this section the manager has no way to
+            see-or-delete them in bulk. */}
+        <Card padding={0}>
+          <div
+            style={{
+              padding: "12px 16px",
+              borderBottom: `1px solid ${AC.line}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <SectionTitle>Standalone shifts</SectionTitle>
+            <span
+              style={{
+                padding: "2px 8px",
+                borderRadius: 99,
+                background: AC.bg,
+                color: AC.mute,
+                fontFamily: AC.font,
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              {standalone.length} upcoming
+            </span>
+            <div style={{ flex: 1 }} />
+            {standalone.length > 0 && (
+              <Btn
+                size="sm"
+                kind="danger"
+                onClick={onDeleteAllStandalone}
+                disabled={busyId === "standalone-all"}
+              >
+                {busyId === "standalone-all"
+                  ? "Deleting…"
+                  : `Delete all ${standalone.length}`}
+              </Btn>
+            )}
+          </div>
+          {standalone.length === 0 ? (
+            <Empty
+              text={
+                loading
+                  ? "Loading…"
+                  : "No standalone upcoming shifts. One-offs from /schedule/new with no recurrence (and any pre-series legacy rows) would land here."
+              }
+            />
+          ) : (
+            <div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1.6fr 1.4fr 1fr 100px 90px 110px",
+                  gap: 14,
+                  padding: "10px 16px",
+                  background: AC.bg,
+                  borderBottom: `1px solid ${AC.line}`,
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  color: AC.mute,
+                  fontWeight: 600,
+                  letterSpacing: 0.3,
+                  textTransform: "uppercase",
+                }}
+              >
+                <div>Customer</div>
+                <div>Rep</div>
+                <div>Date</div>
+                <div>Time</div>
+                <div>State</div>
+                <div></div>
+              </div>
+              {standalone.map((s) => (
+                <div
+                  key={s.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1.6fr 1.4fr 1fr 100px 90px 110px",
+                    gap: 14,
+                    alignItems: "center",
+                    padding: "10px 16px",
+                    borderBottom: `1px solid ${AC.lineDim}`,
+                    fontFamily: AC.font,
+                    fontSize: 12.5,
+                    color: AC.ink,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    {s.customer ? (
+                      <div
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: 6,
+                          background: s.customer.color,
+                          color: "#fff",
+                          fontFamily: AC.font,
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {s.customer.initials}
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          width: 24,
+                          height: 24,
+                          borderRadius: 6,
+                          background: AC.bg,
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    <span
+                      style={{
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {s.customer?.name || "—"}
+                    </span>
+                  </div>
+                  <div style={{ color: AC.ink2 }}>
+                    {s.rep_id ? reps[s.rep_id] && displayName(reps[s.rep_id]) : "Unassigned"}
+                  </div>
+                  <div style={{ color: AC.ink2, fontFamily: AC.fontMono, fontSize: 11.5 }}>
+                    {s.shift_date}
+                  </div>
+                  <div style={{ color: AC.ink2, fontFamily: AC.fontMono, fontSize: 11.5 }}>
+                    {s.start_time}–{s.end_time}
+                  </div>
+                  <div>
+                    <span
+                      style={{
+                        padding: "1px 7px",
+                        borderRadius: 99,
+                        background: AC.bg,
+                        color: AC.mute,
+                        fontFamily: AC.font,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: 0.3,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {s.state}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <Btn
+                      size="sm"
+                      kind="danger"
+                      onClick={() => onDeleteStandalone(s)}
+                      disabled={busyId === `oneoff-${s.id}`}
+                    >
+                      {busyId === `oneoff-${s.id}` ? "…" : "Delete"}
+                    </Btn>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Nuclear "reset everything" affordance. Kept distinct from
+            the per-series / per-row deletes and gated by a typed
+            "RESET" prompt because there's no undo. */}
+        <Card padding={20}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 240 }}>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: AC.ink,
+                  letterSpacing: -0.1,
+                }}
+              >
+                Reset upcoming schedule
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 12,
+                  color: AC.mute,
+                  marginTop: 4,
+                  lineHeight: 1.5,
+                }}
+              >
+                Deletes every still-scheduled shift from today forward — series
+                and standalone, all reps, all customers. Running and complete
+                shifts stay put for the audit trail. There&apos;s no undo.
+              </div>
+            </div>
+            <Btn kind="danger" onClick={onResetSchedule} disabled={resetting}>
+              {resetting ? "Resetting…" : "Reset upcoming schedule"}
+            </Btn>
+          </div>
         </Card>
       </div>
 

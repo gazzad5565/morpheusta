@@ -272,6 +272,145 @@ export async function deleteShift(
   return { ok: true };
 }
 
+// ─── One-off shifts management ─────────────────────────────────────────
+
+export interface OneOffShiftRow {
+  id: string;
+  customer_id: string;
+  rep_id: string | null;
+  shift_date: string;
+  start_time: string;
+  end_time: string;
+  state: string;
+  customer: { name: string; initials: string; color: string } | null;
+}
+
+/**
+ * List shifts NOT part of a series (series_id IS NULL). These are
+ * either one-off shifts created via /schedule/new with no recurrence,
+ * OR legacy shifts created before the series_id column existed —
+ * either way they're invisible on /schedule/manage's series list and
+ * can pile up if the manager doesn't clean them up. By default we
+ * only return upcoming + scheduled rows so the cleanup affordance
+ * doesn't try to delete shifts already in flight.
+ */
+export async function listStandaloneShifts(opts?: {
+  /** When true, restrict to shift_date >= today AND state='scheduled'. Default true. */
+  upcomingOnly?: boolean;
+}): Promise<OneOffShiftRow[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const upcomingOnly = opts?.upcomingOnly ?? true;
+  let q = supabase
+    .from("shifts")
+    .select(
+      "id, customer_id, rep_id, shift_date, start_time, end_time, state, customers(name,initials,color)"
+    )
+    .is("series_id", null)
+    .order("shift_date", { ascending: true })
+    .order("start_time", { ascending: true });
+  if (upcomingOnly) {
+    q = q.gte("shift_date", todayLocalISO()).eq("state", "scheduled");
+  }
+  const { data, error } = await q;
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] listStandaloneShifts:", error.message);
+    return [];
+  }
+  type Row = {
+    id: string;
+    customer_id: string;
+    rep_id: string | null;
+    shift_date: string;
+    start_time: string;
+    end_time: string;
+    state: string;
+    // PostgREST returns array shape for embedded resources; we know
+    // the FK is to-one so it's always 0 or 1 entries.
+    customers:
+      | { name: string; initials: string; color: string }
+      | { name: string; initials: string; color: string }[]
+      | null;
+  };
+  return ((data as unknown as Row[]) || []).map((r) => {
+    const customer = Array.isArray(r.customers)
+      ? r.customers[0] ?? null
+      : r.customers;
+    return {
+      id: r.id,
+      customer_id: r.customer_id,
+      rep_id: r.rep_id,
+      shift_date: r.shift_date,
+      start_time: (r.start_time || "").slice(0, 5),
+      end_time: (r.end_time || "").slice(0, 5),
+      state: r.state,
+      customer,
+    };
+  });
+}
+
+/**
+ * Bulk-delete shifts by ids. Refuses to touch anything that isn't
+ * still 'scheduled' so an admin can't accidentally nuke a row mid-
+ * shift or rewrite history. Returns the count actually deleted.
+ */
+export async function bulkDeleteShifts(
+  ids: string[]
+): Promise<{ ok: boolean; error?: string; deleted?: number }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  if (ids.length === 0) return { ok: true, deleted: 0 };
+  const { error, count } = await supabase
+    .from("shifts")
+    .delete({ count: "exact" })
+    .in("id", ids)
+    .eq("state", "scheduled");
+  if (error) {
+    notifySaveError(error.message, "shifts");
+    return { ok: false, error: error.message };
+  }
+  await logEvent({
+    event_type: "shift.deleted",
+    message: `Bulk-deleted ${count ?? 0} shifts`,
+    meta: { count: count ?? 0 },
+  });
+  notifySaved("shifts removed");
+  return { ok: true, deleted: count ?? 0 };
+}
+
+/**
+ * Nuke every still-scheduled shift in the database from today
+ * forward — both series and standalone. Used by the "Reset
+ * upcoming schedule" affordance on /schedule/manage. Past +
+ * running + complete shifts are untouched.
+ */
+export async function deleteAllUpcomingShifts(): Promise<{
+  ok: boolean;
+  error?: string;
+  deleted?: number;
+}> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { error, count } = await supabase
+    .from("shifts")
+    .delete({ count: "exact" })
+    .gte("shift_date", todayLocalISO())
+    .eq("state", "scheduled");
+  if (error) {
+    notifySaveError(error.message, "schedule");
+    return { ok: false, error: error.message };
+  }
+  await logEvent({
+    event_type: "shift.deleted",
+    message: `Reset schedule — deleted ${count ?? 0} upcoming shifts`,
+    meta: { count: count ?? 0, source: "deleteAllUpcomingShifts" },
+  });
+  notifySaved("schedule reset");
+  return { ok: true, deleted: count ?? 0 };
+}
+
 // ─── Shift series (recurring / bulk-created) ──────────────────────────
 
 /** A summary row for the /schedule/manage list — one per series. */

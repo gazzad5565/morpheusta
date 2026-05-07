@@ -139,12 +139,41 @@ function shiftOverlapsRange(
  *      occlusion entirely.
  */
 /**
- * Maximum number of overlapping shift lanes we render before bailing
- * out to a "+N more" overflow pill. Beyond this each card becomes a
- * 20-px strip nobody can read; better to surface the count and let
- * the manager click in for the full list.
+ * State-color palette used by shift cards on the calendar. Body
+ * tint is the soft hue (used for the card background); rail / dot
+ * is the saturated counterpart. Customer-color is still the left
+ * rail of every card, so the customer is always identifiable —
+ * these tints just give the manager a quick visual on whether a
+ * shift is live, on-break, late, etc. Scheduled is intentionally
+ * absent from this map so scheduled cards keep their per-customer
+ * tint (otherwise every scheduled shift looks identical).
  */
-const MAX_VISIBLE_LANES = 3;
+const STATE_BODY_TINT: Record<string, string> = {
+  "in-progress": "rgba(31, 169, 113, 0.18)",
+  travelling: "rgba(245, 167, 0, 0.20)",
+  "on-break": "rgba(91, 61, 165, 0.18)",
+  late: "rgba(213, 63, 80, 0.18)",
+  complete: "rgba(31, 169, 113, 0.10)",
+};
+const STATE_DOT: Record<string, { color: string; label: string }> = {
+  "in-progress": { color: "#1FA971", label: "Live" },
+  travelling: { color: "#F5A700", label: "Travelling" },
+  "on-break": { color: "#5b3da5", label: "On break" },
+  late: { color: "#d53f50", label: "Late" },
+  complete: { color: "#1FA971", label: "Done" },
+};
+
+/**
+ * Maximum number of overlapping shift lanes we render before bailing
+ * out to a "+N more" overflow pill. With 7 day columns at typical
+ * desktop widths each column is ~150–200px; splitting into 2 lanes
+ * leaves ~75–100px per card — wide enough for the customer name to
+ * actually read. Was 3 originally, but cards became unreadable
+ * letter-strips on busy days. Anything past 2 lanes goes into the
+ * overflow popover, which is the affordance designed for "show me
+ * the rest".
+ */
+const MAX_VISIBLE_LANES = 2;
 
 interface OverflowGroup {
   /** Anchor shifts (top of cluster, used to position the +N pill). */
@@ -1065,6 +1094,8 @@ function DayColumnContents({
                 shifts={g.hidden}
                 repNameMap={repNameMap}
                 onClose={() => setOpenOverflowIdx(null)}
+                onBeginDrag={onBeginDrag}
+                onEndDrag={onEndDrag}
               />
             )}
           </div>
@@ -1083,10 +1114,16 @@ function OverflowPopover({
   shifts,
   repNameMap,
   onClose,
+  onBeginDrag,
+  onEndDrag,
 }: {
   shifts: ShiftRow[];
   repNameMap: Record<string, string>;
   onClose: () => void;
+  /** Forwarded so cards inside the popover can be dragged onto any
+   *  day column — same as cards in the main grid. */
+  onBeginDrag: (shift: ShiftRow, pickupOffsetMin: number) => void;
+  onEndDrag: () => void;
 }) {
   // Close on outside click. Mounted via a small effect on the
   // backdrop instead of a portal — good enough for a small popover.
@@ -1167,19 +1204,45 @@ function OverflowPopover({
             const c = s.customers;
             const color = c?.color || "#888";
             const isComplete = s.state === "complete";
+            const isDraggable = s.state === "scheduled";
+            const popoverDragStart = (e: React.DragEvent<HTMLAnchorElement>) => {
+              if (!isDraggable) {
+                e.preventDefault();
+                return;
+              }
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", s.id);
+              // Pickup offset is meaningless inside the popover (it's
+              // a list, not a time-axis), so anchor at 0 — the
+              // dropped block lands exactly where the cursor sits
+              // in the destination column.
+              onBeginDrag(s, 0);
+              // Close the popover so it doesn't follow the drag and
+              // visually clip whatever column the user's hovering.
+              onClose();
+            };
             return (
               <Link
                 key={s.id}
                 href={shiftHref(s)}
+                draggable={isDraggable}
+                onDragStart={popoverDragStart}
+                onDragEnd={onEndDrag}
+                title={
+                  isDraggable
+                    ? "Drag to a day column to move · click to open"
+                    : undefined
+                }
                 style={{
                   display: "block",
                   padding: "6px 8px",
                   borderRadius: 6,
-                  background: `${color}10`,
+                  background: STATE_BODY_TINT[s.state] || `${color}10`,
                   borderLeft: `3px solid ${color}`,
                   textDecoration: "none",
                   color: "inherit",
                   opacity: isComplete ? 0.7 : 1,
+                  cursor: isDraggable ? "grab" : "pointer",
                 }}
               >
                 <div
@@ -1496,13 +1559,15 @@ function DraggableShiftCard({
   const c = shift.customers;
   const color = c?.color || "#888";
   const customerName = c?.name || "Unknown customer";
-  const stateColors: Record<string, string> = {
-    "in-progress": AC.brand,
-    complete: AC.ok,
-    late: AC.danger,
-    scheduled: color,
-  };
-  const accent = stateColors[shift.state] || color;
+  // Body tint = STATE color so a manager can scan "what's happening
+  // right now" at a glance. Customer color stays as the left rail
+  // so the WHO is still identifiable at a glance.
+  //
+  // Scheduled is the only state that uses the customer color for
+  // both — there's no separate state hue for plain scheduled work,
+  // and we'd lose customer identity entirely if we tinted every
+  // scheduled shift the same neutral grey.
+  const stateBodyTint = STATE_BODY_TINT[shift.state] || `${color}18`;
   const isComplete = shift.state === "complete";
   const isDraggable = shift.state === "scheduled";
 
@@ -1545,8 +1610,8 @@ function DraggableShiftCard({
         height,
         left: `calc(${lanePct}% + 2px)`,
         right: `calc(${remainingPct}% + 2px)`,
-        background: `${color}18`,
-        borderLeft: `3px solid ${accent}`,
+        background: stateBodyTint,
+        borderLeft: `3px solid ${color}`,
         borderRadius: 5,
         padding: "4px 7px",
         textDecoration: "none",
@@ -1579,6 +1644,29 @@ function DraggableShiftCard({
       >
         {repLabel}
       </div>
+
+      {/* Corner state dot — always visible, even on cards too short
+          to render the time row at the bottom. Lets a manager spot
+          live / on-break / late shifts at a glance from the calendar
+          without having to read each card. Hidden for plain
+          'scheduled' since that's the resting state and a dot would
+          just be noise. */}
+      {STATE_DOT[shift.state] && (
+        <div
+          style={{
+            position: "absolute",
+            top: 4,
+            right: 4,
+            width: 7,
+            height: 7,
+            borderRadius: 99,
+            background: STATE_DOT[shift.state].color,
+            boxShadow: `0 0 0 2px ${stateBodyTint}`,
+          }}
+          title={STATE_DOT[shift.state].label}
+        />
+      )}
+
       <div
         style={{
           fontFamily: AC.font,
@@ -1610,20 +1698,20 @@ function DraggableShiftCard({
         >
           {formatTime(shift.start_time, { compact: true })}–
           {formatTime(shift.end_time, { compact: true })}
-          {shift.state !== "scheduled" && (
+          {STATE_DOT[shift.state] && (
             <span
               style={{
                 padding: "0 5px",
                 borderRadius: 99,
-                background: `${accent}22`,
-                color: accent,
+                background: `${STATE_DOT[shift.state].color}22`,
+                color: STATE_DOT[shift.state].color,
                 fontSize: 9,
                 fontWeight: 700,
                 letterSpacing: 0.3,
                 textTransform: "uppercase",
               }}
             >
-              {shift.state}
+              {STATE_DOT[shift.state].label}
             </span>
           )}
         </div>
