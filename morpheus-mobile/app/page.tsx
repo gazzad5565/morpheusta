@@ -17,6 +17,7 @@ import {
 } from "@/lib/shifts-store";
 import { getMyProfile } from "@/lib/profiles-store";
 import { listLibraryFiles } from "@/lib/library-store";
+import { getOrganisationName, getOrganisationLogoUrl } from "@/lib/settings-store";
 
 // MapLibre needs `window`; defer to client-only.
 const DashboardMap = dynamic(
@@ -149,6 +150,8 @@ export default function DashboardPage() {
 
   // Greeting prefers the profiles.name (set on signup), falls back to email.
   const [displayName, setDisplayName] = useState<string>("");
+  const [orgName, setOrgName] = useState<string>("");
+  const [orgLogoUrl, setOrgLogoUrl] = useState<string>("");
   // Real shifts-today list, used for the count + the progress bar.
   const [shifts, setShifts] = useState<DbShift[]>([]);
   const [shiftsLoaded, setShiftsLoaded] = useState(false);
@@ -158,16 +161,23 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
     const load = () =>
-      Promise.all([getMyProfile(), getUser(), listMyShiftsToday(), listLibraryFiles()]).then(
-        ([profile, user, myShifts, libFiles]) => {
-          if (cancelled) return;
-          const fromProfile = profile?.name?.trim();
-          setDisplayName(fromProfile || nameFromEmail(user?.email));
-          setShifts(myShifts);
-          setShiftsLoaded(true);
-          setLibraryCount(libFiles.length);
-        }
-      );
+      Promise.all([
+        getMyProfile(),
+        getUser(),
+        listMyShiftsToday(),
+        listLibraryFiles(),
+        getOrganisationName(),
+        getOrganisationLogoUrl(),
+      ]).then(([profile, user, myShifts, libFiles, oName, oLogo]) => {
+        if (cancelled) return;
+        const fromProfile = profile?.name?.trim();
+        setDisplayName(fromProfile || nameFromEmail(user?.email));
+        setShifts(myShifts);
+        setShiftsLoaded(true);
+        setLibraryCount(libFiles.length);
+        setOrgName(oName);
+        setOrgLogoUrl(oLogo);
+      });
     load();
     // Drain any events that failed to send last time the app was open
     // (no network, screen slept mid-request, etc). Best-effort.
@@ -210,41 +220,32 @@ export default function DashboardPage() {
   const inProgressCount = shifts.filter((s) => s.state === "in-progress").length;
   const totalCount = shifts.length;
 
+  // First-name only — "Welcome back, Gary" reads better than full name.
+  const firstName = displayName.split(/[\s_]/)[0] || displayName;
+  const greeting = greetingForNow();
+
   return (
-    <div style={{ background: MC.bg, minHeight: "100%" }}>
+    <div
+      style={{
+        background: MC.bg,
+        minHeight: "100%",
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+      }}
+    >
       <AppHeader title="Dashboard" lastSync={nowLabel} compact />
 
-      {/* Welcome — sits right under the compact header. The greeting
-          IS the page title here, so we don't need a separate dark
-          "Dashboard" band above. Top padding clears the
-          absolute-positioned LAST SYNC label that lives on the
-          header. */}
-      <div style={{ padding: "26px 20px 6px" }}>
-        <div
-          style={{
-            fontFamily: MC.font,
-            fontSize: 12,
-            fontWeight: 600,
-            color: MC.hint,
-            letterSpacing: 1,
-            textTransform: "uppercase",
-          }}
-        >
-          {todayHeader}
-        </div>
-        <div
-          style={{
-            fontFamily: MC.fontDisplay,
-            fontSize: 26,
-            fontWeight: 700,
-            color: MC.ink,
-            letterSpacing: -0.6,
-            marginTop: 4,
-          }}
-        >
-          Welcome back{displayName ? `, ${displayName}` : ""}
-        </div>
-      </div>
+      {/* Welcome strip — thin, glassy, branded. Org logo (if uploaded
+          in admin /settings/organisation) sits left for personalised
+          feel; subtle gradient wash uses the Morpheus brand cyan. */}
+      <WelcomeStrip
+        firstName={firstName}
+        greeting={greeting}
+        todayHeader={todayHeader}
+        orgName={orgName}
+        orgLogoUrl={orgLogoUrl}
+      />
 
       {/* Shifts-today summary — real data */}
       <div style={{ padding: "14px 20px 8px" }}>
@@ -336,8 +337,13 @@ export default function DashboardPage() {
         inProgressCount={inProgressCount}
       />
 
-      {/* Break — usable between shifts too, not just during */}
-      <BreakCard />
+      {/* Break or travel — combined affordance. The chooser sheet lets
+          the rep pick break length OR start a travel timer without
+          first opening a shift card. */}
+      <BreakOrTravelCard
+        travellingSince={travellingSince}
+        setTravellingSince={setTravellingSince}
+      />
 
       {/* Library shortcut — count is real */}
       <Link
@@ -441,8 +447,69 @@ function UpNextCard({
   const s = elapsed % 60;
   const elapsedLabel = `${m}:${String(s).padStart(2, "0")}`;
 
-  // Empty state: no shift assigned today → nudge them to /shifts to claim one.
+  // Empty state: distinguish "no shifts at all" vs "all shifts done today".
+  // A rep who completed every shift shouldn't be told "no shift assigned".
   if (loaded && !next) {
+    const totalToday = shifts.length;
+    const allDone = totalToday > 0 && shifts.every((s) => s.state === "complete");
+    if (allDone) {
+      return (
+        <div style={{ padding: "12px 16px 0" }}>
+          <div
+            style={{
+              background: `linear-gradient(135deg, ${MC.okTint} 0%, #ffffff 80%)`,
+              borderRadius: MC.radiusCard,
+              padding: 18,
+              border: `1px solid ${MC.ok}33`,
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              boxShadow: `0 6px 20px ${MC.ok}1a`,
+            }}
+          >
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                background: MC.ok,
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: `0 4px 12px ${MC.ok}55`,
+                flexShrink: 0,
+              }}
+            >
+              <Glyph name="check" size={22} color="#fff" strokeWidth={2.6} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div
+                style={{
+                  fontFamily: MC.fontDisplay,
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: MC.ink,
+                  letterSpacing: -0.2,
+                }}
+              >
+                All shifts done — nice work.
+              </div>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  color: MC.mute,
+                  marginTop: 2,
+                }}
+              >
+                {totalToday} shift{totalToday === 1 ? "" : "s"} completed today.
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div style={{ padding: "12px 16px 0" }}>
         <Link href="/shifts" style={{ textDecoration: "none" }}>
@@ -696,21 +763,148 @@ const secondaryBtnStyle: React.CSSProperties = {
 };
 
 /**
- * BreakCard — compact "Take a break" affordance on the dashboard. Independent
- * of any active shift; reps can use this between shifts. When active,
- * replaces with a live break timer + Complete button.
+ * Greeting that adapts to time of day. Keeps the welcome strip from
+ * always saying the same thing — small touch, big "this app pays
+ * attention" feel.
+ */
+function greetingForNow(): string {
+  const h = new Date().getHours();
+  if (h < 5) return "Working late";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/**
+ * WelcomeStrip — branded header that replaces the old plain "Welcome
+ * back, X" line. Shows org logo (if uploaded) on the left, time-aware
+ * greeting + first name big in the middle, and date subtle below.
+ * Uses the Morpheus brand cyan as a subtle gradient wash so it pops
+ * without being loud.
+ */
+function WelcomeStrip({
+  firstName,
+  greeting,
+  todayHeader,
+  orgName,
+  orgLogoUrl,
+}: {
+  firstName: string;
+  greeting: string;
+  todayHeader: string;
+  orgName: string;
+  orgLogoUrl: string;
+}) {
+  return (
+    <div
+      style={{
+        position: "relative",
+        margin: "16px 14px 4px",
+        padding: "12px 14px 14px",
+        borderRadius: 18,
+        background: `linear-gradient(135deg, ${MC.brand} 0%, ${MC.brandDeep} 60%, #073B47 110%)`,
+        color: "#fff",
+        boxShadow: `0 10px 30px ${MC.brand}33, inset 0 1px 0 rgba(255,255,255,.18)`,
+        overflow: "hidden",
+      }}
+    >
+      {/* Subtle grid pattern overlay — gives it depth without being noisy */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage:
+            "radial-gradient(circle at 20% 0%, rgba(255,255,255,.18), transparent 40%), radial-gradient(circle at 90% 100%, rgba(0,0,0,.18), transparent 35%)",
+          pointerEvents: "none",
+        }}
+      />
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 10,
+            background: "rgba(255,255,255,.16)",
+            border: "1px solid rgba(255,255,255,.25)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            overflow: "hidden",
+          }}
+        >
+          {orgLogoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={orgLogoUrl}
+              alt={orgName || "Org"}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          ) : (
+            <Glyph name="sparkle" size={18} color="#fff" strokeWidth={2.2} />
+          )}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: MC.font,
+              fontSize: 10.5,
+              fontWeight: 600,
+              letterSpacing: 1.2,
+              textTransform: "uppercase",
+              color: "rgba(255,255,255,.75)",
+            }}
+          >
+            {orgName || "Morpheus"} · {todayHeader}
+          </div>
+          <div
+            style={{
+              fontFamily: MC.fontDisplay,
+              fontSize: 20,
+              fontWeight: 700,
+              color: "#fff",
+              letterSpacing: -0.4,
+              marginTop: 2,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {greeting}
+            {firstName ? `, ${firstName}` : ""}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * BreakOrTravelCard — combined "pause your day" affordance on the
+ * dashboard. Tapping opens a chooser sheet with break-length options
+ * AND a travel-now option, so reps can start either timer in one
+ * place. Travel state is owned by the dashboard (lifted) so the
+ * UpNextCard's travel button stays in sync.
  */
 const BREAK_LS_KEY = "morpheus.break_since";
 
-function BreakCard() {
+function BreakOrTravelCard({
+  travellingSince,
+  setTravellingSince,
+}: {
+  travellingSince: number | null;
+  setTravellingSince: (v: number | null) => void;
+}) {
   const PURPLE = "#5b3da5";
   const PURPLE_TINT = "#EDE7F8";
   const [breakSince, setBreakSince] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
-  // Whether the duration-chooser sheet is open. Tapping "Take a break"
-  // no longer auto-starts the break — it now opens this sheet so the
-  // rep picks 15 / 30 / 60 / open-ended first. Stops the "I tapped and
-  // suddenly I'm on break" surprise.
+  // Whether the duration-chooser sheet is open. Tapping the card no
+  // longer auto-starts anything — it opens this sheet so the rep picks
+  // break length OR travel first. Stops the "I tapped and suddenly
+  // I'm on break" surprise.
   const [chooserOpen, setChooserOpen] = useState(false);
 
   // Hydrate from storage on mount so a break started from another
@@ -793,7 +987,7 @@ function BreakCard() {
 
   return (
     <div style={{ padding: "12px 16px 0" }}>
-      {breakSince === null ? (
+      {breakSince === null && !travellingSince ? (
         <button
           type="button"
           onClick={() => setChooserOpen(true)}
@@ -834,7 +1028,7 @@ function BreakCard() {
                 letterSpacing: -0.2,
               }}
             >
-              Take a break
+              Take a break or travel now
             </div>
             <div
               style={{
@@ -844,12 +1038,12 @@ function BreakCard() {
                 marginTop: 2,
               }}
             >
-              Pause your day · 15 min, 30 min or custom
+              Pause your day · 15 / 30 / 60 min · or start a travel timer
             </div>
           </div>
           <Glyph name="chev-r" size={18} color={MC.hint} />
         </button>
-      ) : (
+      ) : breakSince ? (
         <div
           style={{
             background: MC.card,
@@ -943,20 +1137,146 @@ function BreakCard() {
             </button>
           </div>
         </div>
-      )}
+      ) : travellingSince ? (
+        <TravelTimerInline
+          travellingSince={travellingSince}
+          onStop={() => setTravellingSince(null)}
+        />
+      ) : null}
 
-      {/* Duration chooser — slide-up sheet anchored to the phone-frame.
-          Tap outside or "Cancel" to dismiss without starting anything.
-          Picking a duration logs target_minutes in the event meta so
-          the manager can later see "this rep took a 30-min break". */}
-      {chooserOpen && breakSince === null && (
+      {/* Chooser sheet — break length + travel-now option.
+          Picking a break logs target_minutes in the event meta so the
+          manager can later see "this rep took a 30-min break". */}
+      {chooserOpen && breakSince === null && !travellingSince && (
         <BreakChooserSheet
           purple={PURPLE}
           purpleTint={PURPLE_TINT}
           onPick={(mins) => startBreak(mins)}
+          onTravel={() => {
+            setChooserOpen(false);
+            setTravellingSince(Date.now());
+          }}
           onClose={() => setChooserOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Inline travel timer used by BreakOrTravelCard when the rep started
+ * a travel timer from the dashboard chooser. Mirrors the styling of
+ * the break timer so both states feel like the same component.
+ */
+function TravelTimerInline({
+  travellingSince,
+  onStop,
+}: {
+  travellingSince: number;
+  onStop: () => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  void now;
+  const elapsed = Math.max(0, Math.floor((Date.now() - travellingSince) / 1000));
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+  return (
+    <div
+      style={{
+        background: MC.card,
+        border: `1px solid ${MC.brand}55`,
+        borderRadius: MC.radiusCard,
+        padding: 16,
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: `linear-gradient(135deg, ${MC.brandTint} 0%, transparent 70%)`,
+          pointerEvents: "none",
+        }}
+      />
+      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 14,
+            background: MC.brand,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            boxShadow: `0 6px 16px ${MC.brand}55`,
+          }}
+        >
+          <Glyph name="pin" size={20} color="#fff" strokeWidth={2.2} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: MC.font,
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: 0.8,
+              textTransform: "uppercase",
+              color: MC.brandDeep,
+            }}
+          >
+            Travelling
+          </div>
+          <div
+            style={{
+              fontFamily: MC.fontDisplay,
+              fontSize: 22,
+              fontWeight: 700,
+              color: MC.ink,
+              letterSpacing: -0.5,
+              lineHeight: 1.05,
+              marginTop: 2,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {m}:{String(s).padStart(2, "0")}
+          </div>
+          <div
+            style={{
+              fontFamily: MC.font,
+              fontSize: 12,
+              color: MC.mute,
+              marginTop: 2,
+            }}
+          >
+            started {formatTime(travellingSince)}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onStop}
+          style={{
+            background: MC.brand,
+            color: "#fff",
+            border: "none",
+            padding: "10px 14px",
+            borderRadius: 11,
+            cursor: "pointer",
+            fontFamily: MC.font,
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: -0.1,
+            boxShadow: `0 4px 12px ${MC.brand}55`,
+          }}
+        >
+          Arrived
+        </button>
+      </div>
     </div>
   );
 }
@@ -972,11 +1292,13 @@ function BreakChooserSheet({
   purple,
   purpleTint,
   onPick,
+  onTravel,
   onClose,
 }: {
   purple: string;
   purpleTint: string;
   onPick: (minutes: number | null) => void;
+  onTravel: () => void;
   onClose: () => void;
 }) {
   const options: { label: string; sub: string; minutes: number | null }[] = [
@@ -1027,7 +1349,7 @@ function BreakChooserSheet({
             marginBottom: 4,
           }}
         >
-          Take a break
+          Take a break or travel
         </div>
         <div
           style={{
@@ -1038,8 +1360,61 @@ function BreakChooserSheet({
             lineHeight: 1.45,
           }}
         >
-          Pick a length — your timer counts up so it&apos;s fine to run over.
+          Pick a break length, or start a travel timer. Both count up — fine
+          to run over.
         </div>
+        {/* Travel option — visually distinct from break, uses Morpheus
+            brand cyan so it stands out as the "go" path. */}
+        <button
+          type="button"
+          onClick={onTravel}
+          style={{
+            width: "100%",
+            background: `linear-gradient(135deg, ${MC.brand} 0%, ${MC.brandDeep} 100%)`,
+            border: "none",
+            borderRadius: 12,
+            padding: "11px 14px",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            textAlign: "left",
+            color: "#fff",
+            marginBottom: 10,
+            boxShadow: `0 6px 18px ${MC.brand}55`,
+          }}
+        >
+          <div
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 9,
+              background: "rgba(255,255,255,.18)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Glyph name="pin" size={16} color="#fff" strokeWidth={2.4} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: MC.font, fontSize: 14, fontWeight: 700, letterSpacing: -0.1 }}>
+              Travel now
+            </div>
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 12,
+                color: "rgba(255,255,255,.85)",
+                marginTop: 2,
+              }}
+            >
+              Start a travel timer between shifts
+            </div>
+          </div>
+          <Glyph name="chev-r" size={16} color="rgba(255,255,255,.85)" />
+        </button>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {options.map((o) => (
             <button

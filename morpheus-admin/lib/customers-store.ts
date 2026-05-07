@@ -129,6 +129,10 @@ export async function createCustomer(
 
 export interface CustomerPatch {
   name?: string;
+  code?: string;
+  initials?: string;
+  color?: string;
+  region?: string | null;
   address?: string | null;
   latitude?: number | null;
   longitude?: number | null;

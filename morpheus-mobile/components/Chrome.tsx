@@ -131,12 +131,19 @@ const iconBtnStyle: React.CSSProperties = {
 };
 
 export function AppFooter() {
+  // marginTop: auto pushes the footer to the bottom whenever its
+  // parent is a flex column. Pages set their outer wrapper to
+  // `display: flex; flex-direction: column; min-height: 100%`, so
+  // short pages (Profile, Library with no files) no longer leave
+  // the footer floating mid-screen.
   return (
     <div
       style={{
+        marginTop: "auto",
         background: MC.header,
         color: "rgba(255,255,255,.7)",
-        padding: "14px 16px 18px",
+        padding:
+          "14px 16px calc(env(safe-area-inset-bottom, 0px) + 18px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

@@ -40,6 +40,18 @@ input, textarea, select {
   flex-direction: column;
 }
 
+/* Every page is a direct child of .phone-content. Make that child
+   itself a flex column with flex: 1 so AppFooter (which uses
+   margin-top: auto) gets pushed to the bottom of the viewport on
+   short pages — Profile, Library with no files, etc. The selector
+   targets the page <div> regardless of its inline styles.            */
+.phone-content > * {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
 @media (min-width: 600px) {
   .phone-frame {
     max-width: 440px;

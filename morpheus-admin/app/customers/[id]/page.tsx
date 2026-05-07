@@ -269,17 +269,29 @@ export default function CustomerDetailPage() {
           <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
             <CustomerSwatch customer={c} size={56} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div
+              <button
+                type="button"
+                onClick={() => router.push(`/customers/${id}/edit`)}
+                title="Edit customer"
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: 0,
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
                   fontFamily: AC.font,
                   fontSize: 19,
                   fontWeight: 700,
                   color: AC.ink,
                   letterSpacing: -0.4,
+                  textAlign: "left",
                 }}
               >
-                {c.name}
-              </div>
+                <span>{c.name}</span>
+                <AGlyph name="edit" size={13} color={AC.hint} />
+              </button>
               <div
                 style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute, marginTop: 2 }}
               >

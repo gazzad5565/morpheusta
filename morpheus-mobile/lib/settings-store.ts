@@ -39,3 +39,18 @@ export async function getShiftRequestAutoApprove(): Promise<boolean> {
   const v = await readSetting<boolean>("shift_request_auto_approve", false);
   return Boolean(v);
 }
+
+/**
+ * Org name / logo — set by admin in /settings/organisation. Used on
+ * the rep dashboard to personalise the welcome banner. Both are
+ * optional; the UI falls back gracefully when they're empty.
+ */
+export async function getOrganisationName(): Promise<string> {
+  const v = await readSetting<string>("organisation_name", "");
+  return typeof v === "string" ? v : "";
+}
+
+export async function getOrganisationLogoUrl(): Promise<string> {
+  const v = await readSetting<string>("organisation_logo_url", "");
+  return typeof v === "string" ? v : "";
+}

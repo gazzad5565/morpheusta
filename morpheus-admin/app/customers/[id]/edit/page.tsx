@@ -1,41 +1,90 @@
 "use client";
 
-import { useEffect, useState } from "react";
+/**
+ * Edit customer — full CRUD form. Earlier versions only let you edit
+ * the address; reps + admins kept hitting "I can't change the name."
+ * Every field on the customer entity is editable here:
+ *   name, code, initials, color swatch, region, address (geocoded),
+ *   geofence radius. Save round-trips through updateCustomer.
+ */
+
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
+import { Combobox } from "@/components/ui/Combobox";
+import { inputStyle } from "@/components/ui/Filters";
+import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
 import { getCustomer, updateCustomer } from "@/lib/customers-store";
 import type { Customer } from "@/lib/types";
+
+const SWATCHES = [
+  "#D9493D",
+  "#E2A434",
+  "#2E9C82",
+  "#2E4FB8",
+  "#C55A2E",
+  "#8E4ECC",
+  "#1FA971",
+  "#5B7DC2",
+];
+const REGIONS: Customer["region"][] = ["North", "South", "East", "West"];
+
+function deriveInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
+}
 
 export default function EditCustomerPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
 
-  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [original, setOriginal] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [initials, setInitials] = useState("");
+  const [initialsTouched, setInitialsTouched] = useState(false);
+  const [color, setColor] = useState(SWATCHES[0]);
+  const [region, setRegion] = useState<Customer["region"]>("North");
   const [address, setAddress] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [geofenceM, setGeofenceM] = useState<number>(100);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+
+  // Auto-derive initials from name until the user manually edits the
+  // initials field. Same behaviour as /customers/new.
+  useEffect(() => {
+    if (!initialsTouched) setInitials(deriveInitials(name));
+  }, [name, initialsTouched]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const c = await getCustomer(id);
       if (cancelled) return;
-      setCustomer(c);
+      setOriginal(c);
       if (c) {
+        setName(c.name ?? "");
+        setCode(c.code ?? "");
+        setInitials(c.initials ?? deriveInitials(c.name ?? ""));
+        setColor(c.color ?? SWATCHES[0]);
+        setRegion((c.region as Customer["region"]) ?? "North");
         setAddress(c.address ?? "");
         if (c.latitude != null && c.longitude != null) {
           setCoords({ lat: c.latitude, lng: c.longitude });
         }
+        setGeofenceM(c.geofence ?? 100);
       }
       setLoading(false);
     })();
@@ -44,21 +93,36 @@ export default function EditCustomerPage() {
     };
   }, [id]);
 
-  const onSave = async () => {
+  const previewCustomer = useMemo<Customer | null>(() => {
+    if (!original) return null;
+    return {
+      ...original,
+      name: name || original.name,
+      code: code || original.code,
+      initials: initials || original.initials,
+      color,
+    };
+  }, [original, name, code, initials, color]);
+
+  async function onSave() {
     if (busy) return;
     setError(null);
     setNote(null);
+    if (!name.trim()) {
+      setError("Name is required.");
+      return;
+    }
     setBusy(true);
 
-    let latitude: number | null = null;
-    let longitude: number | null = null;
+    let latitude: number | null = coords?.lat ?? null;
+    let longitude: number | null = coords?.lng ?? null;
     const trimmed = address.trim();
 
-    if (trimmed) {
+    if (trimmed && trimmed !== (original?.address ?? "")) {
+      // Address changed — re-geocode (or use the picked match).
       if (pickedCoords) {
         latitude = pickedCoords.lat;
         longitude = pickedCoords.lng;
-        setCoords({ lat: latitude, lng: longitude });
       } else {
         try {
           const res = await fetch(`/api/geocode?q=${encodeURIComponent(trimmed)}`);
@@ -66,20 +130,32 @@ export default function EditCustomerPage() {
             const data = (await res.json()) as { latitude: number; longitude: number };
             latitude = data.latitude;
             longitude = data.longitude;
-            setCoords({ lat: latitude, lng: longitude });
           } else {
-            setNote("Could not geocode this address — saved without coordinates.");
+            setNote("Could not geocode the new address — saved without coordinates.");
+            latitude = null;
+            longitude = null;
           }
         } catch {
           setNote("Geocoder unreachable — saved without coordinates.");
+          latitude = null;
+          longitude = null;
         }
       }
+    } else if (!trimmed) {
+      latitude = null;
+      longitude = null;
     }
 
     const result = await updateCustomer(id, {
+      name: name.trim(),
+      code: code.trim(),
+      initials: (initials || deriveInitials(name)).trim().toUpperCase(),
+      color,
+      region,
       address: trimmed || null,
       latitude,
       longitude,
+      geofence_radius_m: geofenceM,
     });
     setBusy(false);
     if (!result.ok) {
@@ -87,7 +163,7 @@ export default function EditCustomerPage() {
       return;
     }
     router.push(`/customers/${id}`);
-  };
+  }
 
   if (loading) {
     return (
@@ -96,8 +172,7 @@ export default function EditCustomerPage() {
       </AdminShell>
     );
   }
-
-  if (!customer) {
+  if (!original) {
     return (
       <AdminShell breadcrumbs={["Home", "Customers", "Edit"]}>
         <div style={{ padding: 20, color: AC.danger, fontFamily: AC.font }}>
@@ -108,24 +183,92 @@ export default function EditCustomerPage() {
   }
 
   return (
-    <AdminShell breadcrumbs={["Home", "Customers", customer.name, "Edit address"]}>
-      <div style={{ padding: 20, maxWidth: 720 }}>
+    <AdminShell breadcrumbs={["Home", "Customers", original.name, "Edit"]}>
+      <div
+        style={{
+          padding: 20,
+          maxWidth: 920,
+          display: "grid",
+          gridTemplateColumns: "1fr 320px",
+          gap: 16,
+          alignItems: "start",
+        }}
+      >
         <Card padding={20}>
-          <SectionTitle>Address & location</SectionTitle>
-          <div style={{ marginBottom: 12, color: AC.mute, fontFamily: AC.font, fontSize: 12.5 }}>
-            Editing <b style={{ color: AC.ink }}>{customer.name}</b> · {customer.code}
+          <SectionTitle>Edit customer</SectionTitle>
+
+          <Field label="Name" required>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={inputStyle}
+              autoFocus
+            />
+          </Field>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Field label="Code">
+              <input value={code} onChange={(e) => setCode(e.target.value)} style={inputStyle} />
+            </Field>
+            <Field label="Initials" hint="Shown on the avatar tile.">
+              <input
+                value={initials}
+                onChange={(e) => {
+                  setInitialsTouched(true);
+                  setInitials(e.target.value.toUpperCase().slice(0, 3));
+                }}
+                style={inputStyle}
+                maxLength={3}
+              />
+            </Field>
           </div>
+
+          <Field label="Avatar colour">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {SWATCHES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setColor(s)}
+                  aria-label={s}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    background: s,
+                    cursor: "pointer",
+                    border:
+                      color === s
+                        ? `3px solid ${AC.ink}`
+                        : "1px solid rgba(0,0,0,.08)",
+                    padding: 0,
+                  }}
+                />
+              ))}
+            </div>
+          </Field>
+
+          <Field label="Region">
+            <Combobox
+              value={region}
+              onChange={(v) => setRegion((v ?? REGIONS[0]) as Customer["region"])}
+              triggerIcon="pin"
+              clearable={false}
+              options={REGIONS.map((r) => ({ value: r as string, label: r as string }))}
+            />
+          </Field>
 
           <Field
             label="Address"
             hint={
               pickedCoords
-                ? `Coordinates locked: ${pickedCoords.lat.toFixed(5)}, ${pickedCoords.lng.toFixed(5)}`
-                : "Start typing — pick a match from the list to lock coordinates."
+                ? `New coordinates: ${pickedCoords.lat.toFixed(5)}, ${pickedCoords.lng.toFixed(5)}`
+                : coords
+                ? `Current: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
+                : "Start typing — pick a match to lock coordinates."
             }
           >
             <AddressAutocomplete
-              autoFocus
               value={address}
               onChange={(v) => {
                 setAddress(v);
@@ -138,18 +281,42 @@ export default function EditCustomerPage() {
             />
           </Field>
 
-          {coords && (
-            <div
-              style={{
-                fontFamily: AC.fontMono,
-                fontSize: 11,
-                color: AC.mute,
-                marginBottom: 12,
-              }}
-            >
-              Current coordinates: {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
+          <Field
+            label={`Geofence radius · ${geofenceM} m`}
+            hint="Reps must be inside this radius to check in without an off-site exception."
+          >
+            <input
+              type="range"
+              min={25}
+              max={500}
+              step={5}
+              value={geofenceM}
+              onChange={(e) => setGeofenceM(parseInt(e.target.value, 10))}
+              style={{ width: "100%" }}
+            />
+            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+              {[50, 75, 100, 150, 250].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setGeofenceM(m)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    border: `1px solid ${geofenceM === m ? AC.ink : AC.line}`,
+                    background: geofenceM === m ? AC.ink : "#fff",
+                    color: geofenceM === m ? "#fff" : AC.ink2,
+                    fontFamily: AC.font,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {m} m
+                </button>
+              ))}
             </div>
-          )}
+          </Field>
 
           {note && (
             <div
@@ -167,7 +334,6 @@ export default function EditCustomerPage() {
               {note}
             </div>
           )}
-
           {error && (
             <div
               style={{
@@ -190,10 +356,51 @@ export default function EditCustomerPage() {
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <Btn onClick={() => router.push(`/customers/${id}`)}>Cancel</Btn>
-            <Btn kind="primary" icon="check" onClick={onSave}>
-              {busy ? "Saving…" : "Save"}
+            <Btn kind="primary" icon="check" onClick={onSave} disabled={busy}>
+              {busy ? "Saving…" : "Save changes"}
             </Btn>
           </div>
+        </Card>
+
+        {/* Live preview — mirrors the header card on the detail page. */}
+        <Card padding={18}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              color: AC.mute,
+              fontWeight: 700,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              marginBottom: 12,
+            }}
+          >
+            Preview
+          </div>
+          {previewCustomer && (
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <CustomerSwatch customer={previewCustomer} size={48} />
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: AC.ink,
+                    letterSpacing: -0.3,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {previewCustomer.name}
+                </div>
+                <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute, marginTop: 2 }}>
+                  #{previewCustomer.code} · {region}
+                </div>
+              </div>
+            </div>
+          )}
         </Card>
       </div>
     </AdminShell>
@@ -203,10 +410,12 @@ export default function EditCustomerPage() {
 function Field({
   label,
   hint,
+  required,
   children,
 }: {
   label: string;
   hint?: string;
+  required?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -223,17 +432,11 @@ function Field({
         }}
       >
         {label}
+        {required && <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>}
       </div>
       {children}
       {hint && (
-        <div
-          style={{
-            fontFamily: AC.font,
-            fontSize: 11,
-            color: AC.mute,
-            marginTop: 4,
-          }}
-        >
+        <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, marginTop: 4 }}>
           {hint}
         </div>
       )}
