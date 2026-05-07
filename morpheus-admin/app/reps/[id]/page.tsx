@@ -138,21 +138,14 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
     <AdminShell
       breadcrumbs={["Home", "Reps", name]}
       actions={
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn icon="mail" size="sm">Message</Btn>
-          {/* Edit routes to the existing user editor under settings —
-              same form handles reps + managers (name / email / role /
-              password / delete). One source of truth instead of a
-              second copy here. */}
-          <Btn
-            icon="edit"
-            kind="primary"
-            size="sm"
-            onClick={() => router.push(`/settings/managers/${id}/edit`)}
-          >
-            Edit
-          </Btn>
-        </div>
+        <Btn
+          icon="edit"
+          kind="primary"
+          size="sm"
+          onClick={() => router.push(`/settings/managers/${id}/edit`)}
+        >
+          Edit
+        </Btn>
       }
     >
       <div

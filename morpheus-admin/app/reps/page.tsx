@@ -15,7 +15,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/shell/AdminShell";
-import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { RepAvatar } from "@/components/ui/Avatars";
@@ -121,16 +120,7 @@ export default function RepsPage() {
   return (
     <AdminShell
       breadcrumbs={["Home", "Reps"]}
-      actions={
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn icon="upload" size="sm">
-            Import CSV
-          </Btn>
-          <Btn icon="plus" kind="primary" size="sm">
-            Invite rep
-          </Btn>
-        </div>
-      }
+      actions={null}
     >
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Filter row */}
