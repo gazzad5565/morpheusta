@@ -380,10 +380,12 @@ export async function bulkDeleteShifts(
 }
 
 /**
- * Nuke every still-scheduled shift in the database from today
- * forward — both series and standalone. Used by the "Reset
- * upcoming schedule" affordance on /schedule/manage. Past +
- * running + complete shifts are untouched.
+ * Nuke every shift dated today or later — regardless of state.
+ * Used by the typed-RESET confirm on /schedule/manage. Past
+ * shifts (history) are preserved; everything from today forward
+ * goes, including stranded in_progress / complete / late /
+ * cancelled rows that previous "scheduled-only" filters left
+ * behind. The typed-RESET prompt is the safety net.
  */
 export async function deleteAllUpcomingShifts(): Promise<{
   ok: boolean;
@@ -396,8 +398,7 @@ export async function deleteAllUpcomingShifts(): Promise<{
   const { error, count } = await supabase
     .from("shifts")
     .delete({ count: "exact" })
-    .gte("shift_date", todayLocalISO())
-    .eq("state", "scheduled");
+    .gte("shift_date", todayLocalISO());
   if (error) {
     notifySaveError(error.message, "schedule");
     return { ok: false, error: error.message };

@@ -183,10 +183,11 @@ const MAX_VISIBLE_LANES = 2;
  * a dedicated day-detail panel instead. Click the chip → modal
  * lists every shift with full text + drag-to-move + edit/delete.
  *
- * Set high enough that ordinary days (1–3 shifts) still render
- * as the slot grid you can scan at a glance.
+ * Aligned with MAX_VISIBLE_LANES — the moment a day would need
+ * an overflow "+N more" pill, we switch to the count chip instead.
+ * Same treatment for every busy day, no mixed UX.
  */
-const DAY_SHIFT_LIMIT = 4;
+const DAY_SHIFT_LIMIT = MAX_VISIBLE_LANES;
 
 interface OverflowGroup {
   /** Anchor shifts (top of cluster, used to position the +N pill). */
