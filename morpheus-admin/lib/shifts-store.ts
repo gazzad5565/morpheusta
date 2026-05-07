@@ -27,6 +27,10 @@ export interface ShiftRow {
   check_out_at: string | null;
   tasks_done: number;
   tasks_total: number;
+  /** Set by /schedule/new when one submission produces multiple shifts.
+   *  Null on one-off shifts. Used by /schedule/manage to group shifts
+   *  back into the series they were created from. */
+  series_id: string | null;
   customers: {
     id: string;
     name: string;
@@ -266,6 +270,126 @@ export async function deleteShift(
   });
   notifySaved("shift removed");
   return { ok: true };
+}
+
+// ─── Shift series (recurring / bulk-created) ──────────────────────────
+
+/** A summary row for the /schedule/manage list — one per series. */
+export interface ShiftSeriesSummary {
+  series_id: string;
+  shiftCount: number;
+  /** Earliest shift_date in the series. */
+  firstDate: string;
+  /** Latest shift_date in the series. */
+  lastDate: string;
+  /** First-rendered start_time (HH:MM) — series typically share one. */
+  startTime: string;
+  endTime: string;
+  /** Distinct customer_id list — ordered, deduped. */
+  customerIds: string[];
+  /** Distinct rep_id list (or null entries for unassigned). */
+  repIds: (string | null)[];
+  /** Set of yyyy-mm-dd → count, used to render the recurrence pattern. */
+  upcomingCount: number;
+  pastCount: number;
+}
+
+/**
+ * Group every shift that has a series_id into one summary row each.
+ * One-off shifts (no series_id) are omitted because the manage page
+ * only cares about recurring/bulk patterns. The Live Ops page +
+ * calendar already cover one-offs.
+ */
+export async function listShiftSeries(): Promise<ShiftSeriesSummary[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const { data, error } = await supabase
+    .from("shifts")
+    .select(
+      "id, series_id, customer_id, rep_id, shift_date, start_time, end_time, state"
+    )
+    .not("series_id", "is", null)
+    .order("shift_date", { ascending: true });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] listShiftSeries:", error.message);
+    return [];
+  }
+  type Row = {
+    id: string;
+    series_id: string;
+    customer_id: string;
+    rep_id: string | null;
+    shift_date: string;
+    start_time: string;
+    end_time: string;
+    state: string;
+  };
+  const today = todayLocalISO();
+  const groups = new Map<string, Row[]>();
+  for (const r of (data as Row[]) || []) {
+    const list = groups.get(r.series_id) || [];
+    list.push(r);
+    groups.set(r.series_id, list);
+  }
+  const out: ShiftSeriesSummary[] = [];
+  for (const [series_id, rows] of groups.entries()) {
+    rows.sort((a, b) => a.shift_date.localeCompare(b.shift_date));
+    const customerIds = Array.from(new Set(rows.map((r) => r.customer_id)));
+    const repIds = Array.from(new Set(rows.map((r) => r.rep_id)));
+    const upcomingCount = rows.filter((r) => r.shift_date >= today).length;
+    const pastCount = rows.length - upcomingCount;
+    out.push({
+      series_id,
+      shiftCount: rows.length,
+      firstDate: rows[0].shift_date,
+      lastDate: rows[rows.length - 1].shift_date,
+      startTime: (rows[0].start_time || "").slice(0, 5),
+      endTime: (rows[0].end_time || "").slice(0, 5),
+      customerIds,
+      repIds,
+      upcomingCount,
+      pastCount,
+    });
+  }
+  // Newest series first (by lastDate desc).
+  out.sort((a, b) => b.lastDate.localeCompare(a.lastDate));
+  return out;
+}
+
+/**
+ * Cancel every shift in a series. By default we only delete shifts
+ * still in the 'scheduled' state — running / complete shifts are
+ * untouched (deleting them would corrupt audit history). Pass
+ * `fromDate` to limit deletion to shifts on or after that date
+ * ("cancel from today forward" semantics).
+ */
+export async function cancelShiftSeries(
+  series_id: string,
+  opts?: { fromDate?: string }
+): Promise<{ ok: boolean; error?: string; deleted?: number }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  let q = supabase
+    .from("shifts")
+    .delete({ count: "exact" })
+    .eq("series_id", series_id)
+    .eq("state", "scheduled");
+  if (opts?.fromDate) q = q.gte("shift_date", opts.fromDate);
+  const { error, count } = await q;
+  if (error) {
+    notifySaveError(error.message, "shift series");
+    return { ok: false, error: error.message };
+  }
+  await logEvent({
+    event_type: "shift.deleted",
+    message: `Cancelled ${count ?? 0} shifts in a series${
+      opts?.fromDate ? ` from ${opts.fromDate} forward` : ""
+    }`,
+    meta: { series_id, from_date: opts?.fromDate },
+  });
+  notifySaved("series cancelled");
+  return { ok: true, deleted: count ?? 0 };
 }
 
 /**

@@ -546,11 +546,21 @@ export default function SchedulePage() {
     <AdminShell
       breadcrumbs={["Home", "Schedule"]}
       actions={
-        <Link href="/schedule/new" style={{ textDecoration: "none" }}>
-          <Btn icon="plus" kind="primary" size="sm">
-            New shift
-          </Btn>
-        </Link>
+        <div style={{ display: "flex", gap: 8 }}>
+          {/* Manage shifts → /schedule/manage. Lives next to "New
+              shift" so a manager can flip from "what's happening"
+              to "edit the patterns" in one click. */}
+          <Link href="/schedule/manage" style={{ textDecoration: "none" }}>
+            <Btn icon="settings" size="sm">
+              Manage shifts
+            </Btn>
+          </Link>
+          <Link href="/schedule/new" style={{ textDecoration: "none" }}>
+            <Btn icon="plus" kind="primary" size="sm">
+              New shift
+            </Btn>
+          </Link>
+        </div>
       }
     >
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>

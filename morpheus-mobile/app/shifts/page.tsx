@@ -42,6 +42,11 @@ export default function ShiftsListPage() {
   const [requested, setRequested] = useState<RequestedShift[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [claiming, setClaiming] = useState<string | null>(null);
+  // Free-text filter — applies across every section (mine /
+  // unassigned / requested) by name, code, or distance label. Empty
+  // string = show everything. Lives at the page top alongside the
+  // date so a rep with many shifts can scan to one quickly.
+  const [search, setSearch] = useState<string>("");
 
   const reload = () => {
     Promise.all([
@@ -122,6 +127,23 @@ export default function ShiftsListPage() {
     removeRequestedShift(id);
   };
 
+  // Apply the search filter across every section. Match is
+  // case-insensitive across customer name, customer code, and the
+  // distance label (whatever the rep is most likely to be skimming
+  // for). Empty search returns the original arrays untouched.
+  const matchSearch = (s: { name: string; code: number | string; distance?: string }) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      s.name.toLowerCase().includes(q) ||
+      String(s.code).includes(q) ||
+      (s.distance || "").toLowerCase().includes(q)
+    );
+  };
+  const mineFiltered = mine.filter(matchSearch);
+  const unassignedFiltered = unassigned.filter(matchSearch);
+  const requestedFiltered = requested.filter(matchSearch);
+
   // Combine unassigned (DB) + requested (separate table) for the
   // Unscheduled section. Two filters here:
   //   1. Hide a request that's already showing as an unassigned shift
@@ -136,27 +158,69 @@ export default function ShiftsListPage() {
   //      was asleep). Without this filter the rep sees the same store
   //      both as "Pending" and "Scheduled for me" until the next 60s
   //      poll catches up.
-  const unassignedIds = new Set(unassigned.map((u) => u.id));
-  const mineIds = new Set(mine.map((m) => m.id));
-  const requestedNonDup = requested.filter(
+  const unassignedIds = new Set(unassignedFiltered.map((u) => u.id));
+  const mineIds = new Set(mineFiltered.map((m) => m.id));
+  const requestedNonDup = requestedFiltered.filter(
     (r) => !unassignedIds.has(r.id) && !mineIds.has(r.id)
   );
+
+  // "Wed, May 7" — sits below the title so the rep always knows what
+  // day this list is for, even days into a long shift week where
+  // they might lose track.
+  const dateLabel = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+  const totalVisible =
+    mineFiltered.length + unassignedFiltered.length + requestedNonDup.length;
+  const totalAll = mine.length + unassigned.length + requested.length;
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
       <AppHeader title="Today's Shifts" onBack={() => router.push("/")} withMenu />
 
-      {/* Compact "Request a customer" pill — pinned to the top so a
-          rep with many shifts doesn't need to scroll, but quiet
-          enough that it doesn't dominate the page. Single-line,
-          icon-led, brand-tinted. Tap → /add-shift. */}
+      {/* Date row — gives the rep an explicit "this is what today
+          is" reference, plus the compact Request CTA on the right.
+          Replaces the old layout that buried the date and put the
+          CTA on its own row. */}
       <div
         style={{
           padding: "12px 16px 0",
           display: "flex",
-          justifyContent: "flex-end",
+          alignItems: "center",
+          gap: 10,
         }}
       >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: MC.font,
+              fontSize: 11,
+              fontWeight: 600,
+              color: MC.hint,
+              letterSpacing: 1,
+              textTransform: "uppercase",
+            }}
+          >
+            Today
+          </div>
+          <div
+            style={{
+              fontFamily: MC.fontDisplay,
+              fontSize: 18,
+              fontWeight: 700,
+              color: MC.ink,
+              letterSpacing: -0.3,
+              marginTop: 1,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {dateLabel}
+          </div>
+        </div>
         <Link
           href="/add-shift"
           aria-label="Request a customer"
@@ -171,15 +235,93 @@ export default function ShiftsListPage() {
             color: MC.brandDeep,
             textDecoration: "none",
             fontFamily: MC.font,
-            fontSize: 13,
+            fontSize: 12.5,
             fontWeight: 700,
             letterSpacing: -0.1,
+            flexShrink: 0,
           }}
         >
-          <Glyph name="plus" size={14} color={MC.brand} strokeWidth={2.6} />
-          Request a customer
+          <Glyph name="plus" size={13} color={MC.brand} strokeWidth={2.6} />
+          Request
         </Link>
       </div>
+
+      {/* Search box — filters across every section by name, code, or
+          distance label. Hidden until there are enough shifts to be
+          worth filtering. The clear-X resets the filter without the
+          rep needing to backspace through what they typed. */}
+      {totalAll >= 4 && (
+        <div style={{ padding: "10px 16px 0" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 12px",
+              background: MC.card,
+              border: `1px solid ${MC.line}`,
+              borderRadius: 12,
+            }}
+          >
+            <Glyph name="target" size={14} color={MC.hint} strokeWidth={2} />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search today's shifts…"
+              style={{
+                flex: 1,
+                border: "none",
+                outline: "none",
+                background: "transparent",
+                fontFamily: MC.font,
+                fontSize: 13.5,
+                color: MC.ink,
+              }}
+            />
+            {search ? (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "flex",
+                }}
+              >
+                <Glyph name="close" size={14} color={MC.hint} />
+              </button>
+            ) : (
+              <span
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 11,
+                  color: MC.hint,
+                  fontWeight: 600,
+                }}
+              >
+                {totalAll}
+              </span>
+            )}
+          </div>
+          {search && (
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 11,
+                color: MC.mute,
+                marginTop: 6,
+                paddingLeft: 4,
+              }}
+            >
+              {totalVisible} of {totalAll} match
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Pending requests pinned to the top — moved out of the
           "Unscheduled · available" section because reps want to see
@@ -207,15 +349,21 @@ export default function ShiftsListPage() {
         </>
       )}
 
-      <SectionLabel count={mine.length}>Scheduled for me</SectionLabel>
+      <SectionLabel count={mineFiltered.length}>Scheduled for me</SectionLabel>
 
       <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
         {!loaded ? (
           <SkeletonRow />
-        ) : mine.length === 0 ? (
-          <EmptyState text="No shifts assigned to you today." />
+        ) : mineFiltered.length === 0 ? (
+          <EmptyState
+            text={
+              search
+                ? `No "Scheduled for me" matches "${search}".`
+                : "No shifts assigned to you today."
+            }
+          />
         ) : (
-          mine.map((s) => (
+          mineFiltered.map((s) => (
             <ShiftRow
               key={s.realId}
               shift={s}
@@ -232,15 +380,21 @@ export default function ShiftsListPage() {
         )}
       </div>
 
-      <SectionLabel count={unassigned.length}>
+      <SectionLabel count={unassignedFiltered.length}>
         Unscheduled · available
       </SectionLabel>
 
       <div style={{ padding: "0 16px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {!loaded ? null : unassigned.length === 0 ? (
-          <EmptyState text="Nothing available right now." />
+        {!loaded ? null : unassignedFiltered.length === 0 ? (
+          <EmptyState
+            text={
+              search
+                ? `No claimable matches "${search}".`
+                : "Nothing available right now."
+            }
+          />
         ) : (
-          unassigned.map((s) => (
+          unassignedFiltered.map((s) => (
             <ShiftRow
               key={s.realId}
               shift={s}
