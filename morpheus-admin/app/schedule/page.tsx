@@ -29,6 +29,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { Combobox } from "@/components/ui/Combobox";
+import { LoadingBar } from "@/components/ui/LoadingBar";
 import { AC } from "@/lib/tokens";
 import {
   deleteShift,
@@ -608,6 +609,7 @@ export default function SchedulePage() {
         </div>
       }
     >
+      {loading && <LoadingBar />}
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div

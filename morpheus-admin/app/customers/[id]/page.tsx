@@ -21,6 +21,7 @@ import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
+import { LoadingBar } from "@/components/ui/LoadingBar";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
 import {
@@ -229,9 +230,6 @@ export default function CustomerDetailPage() {
       breadcrumbs={["Home", "Customers", { label: c.name }]}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          <Btn icon="edit" size="sm" onClick={() => router.push(`/customers/${id}/edit`)}>
-            Edit
-          </Btn>
           {isActive ? (
             <Btn size="sm" onClick={onToggleActive} disabled={busy}>
               {busy ? "…" : "Deactivate"}
@@ -247,6 +245,7 @@ export default function CustomerDetailPage() {
         </div>
       }
     >
+      {loading && <LoadingBar />}
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
         {actionError && (
           <div

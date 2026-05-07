@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { SegTabs } from "@/components/ui/SegTabs";
+import { LoadingBar } from "@/components/ui/LoadingBar";
 import { AC } from "@/lib/tokens";
 import {
   KpiBig,
@@ -210,6 +211,7 @@ export default function OperationsReportPage() {
 
   return (
     <AdminShell breadcrumbs={["Home", "Reports", "Operations"]}>
+      {loading && <LoadingBar />}
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Header + period selector */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>

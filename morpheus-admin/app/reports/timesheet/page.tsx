@@ -27,6 +27,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { Combobox } from "@/components/ui/Combobox";
+import { LoadingBar } from "@/components/ui/LoadingBar";
 import { RepAvatar } from "@/components/ui/Avatars";
 import {
   SortableHeader,
@@ -251,6 +252,7 @@ export default function TimesheetReportPage() {
         </Btn>
       }
     >
+      {shifts === null && <LoadingBar />}
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>

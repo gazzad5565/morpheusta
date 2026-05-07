@@ -25,6 +25,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { Combobox } from "@/components/ui/Combobox";
+import { LoadingBar } from "@/components/ui/LoadingBar";
 import { AC } from "@/lib/tokens";
 import {
   listShiftSeries,
@@ -176,7 +177,7 @@ export default function ManageShiftsPage() {
     // already says "Reset upcoming schedule" so the manager knows
     // the scope, but a typed confirm makes it deliberate.
     const typed = window.prompt(
-      `This will delete EVERY upcoming scheduled shift in the database.\n\nRunning shifts and complete shifts are kept (audit integrity), but everything else from today forward is gone.\n\nType RESET to confirm.`
+      `This will delete EVERY shift dated today or later — every state, no exceptions (scheduled, in-progress, complete, late, cancelled). Past shifts are kept for history.\n\nThis cannot be undone.\n\nType RESET to confirm.`
     );
     if (typed !== "RESET") return;
     setResetting(true);
@@ -200,6 +201,7 @@ export default function ManageShiftsPage() {
         </Link>
       }
     >
+      {loading && <LoadingBar />}
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div

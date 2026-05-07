@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { AppHeader, CustomerTile, ReasonChip, PrimaryButton } from "@/components/Chrome";
+import { LoadingBar } from "@/components/Loading";
 import { Glyph, type GlyphName } from "@/components/Glyph";
 import { getShiftById, checkInToShift } from "@/lib/shifts-store";
 import { getCustomerById } from "@/lib/customers-store";
@@ -422,6 +423,7 @@ function CheckInPage() {
   return (
     <div style={{ background: MC.bg, minHeight: "100%", position: "relative" }}>
       <AppHeader title="Check in" onBack={() => router.back()} />
+      {positionLoading && <LoadingBar />}
 
       <div style={{ padding: "14px 16px 8px" }}>
         <div

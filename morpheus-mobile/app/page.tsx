@@ -6,6 +6,7 @@ import { useState, useEffect, useMemo } from "react";
 import { MC } from "@/lib/tokens";
 import { type Shift } from "@/lib/mock-data";
 import { AppHeader, AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
+import { LoadingBar, Skeleton } from "@/components/Loading";
 import { Glyph, formatTime } from "@/components/Glyph";
 import { getUser } from "@/lib/auth";
 import { logEvent } from "@/lib/events-store";
@@ -235,6 +236,7 @@ export default function DashboardPage() {
       }}
     >
       <AppHeader title="Dashboard" lastSync={nowLabel} compact />
+      {!shiftsLoaded && <LoadingBar />}
 
       {/* Welcome strip — thin, glassy, branded. Org logo (if uploaded
           in admin /settings/organisation) sits left for personalised
@@ -251,26 +253,35 @@ export default function DashboardPage() {
       <div style={{ padding: "14px 20px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <div
-              style={{
-                fontFamily: MC.font,
-                fontSize: 30,
-                fontWeight: 700,
-                color: MC.ink,
-                letterSpacing: -0.8,
-                lineHeight: 1,
-              }}
-            >
-              {shiftsLoaded ? totalCount : "—"}
-            </div>
-            <div style={{ fontFamily: MC.font, fontSize: 14, fontWeight: 500, color: MC.mute }}>
-              shift{totalCount === 1 ? "" : "s"} today
-              {shiftsLoaded && completedCount > 0 && (
-                <span style={{ marginLeft: 6, color: MC.ok, fontWeight: 600 }}>
-                  · {completedCount} done
-                </span>
-              )}
-            </div>
+            {shiftsLoaded ? (
+              <>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 30,
+                    fontWeight: 700,
+                    color: MC.ink,
+                    letterSpacing: -0.8,
+                    lineHeight: 1,
+                  }}
+                >
+                  {totalCount}
+                </div>
+                <div style={{ fontFamily: MC.font, fontSize: 14, fontWeight: 500, color: MC.mute }}>
+                  shift{totalCount === 1 ? "" : "s"} today
+                  {completedCount > 0 && (
+                    <span style={{ marginLeft: 6, color: MC.ok, fontWeight: 600 }}>
+                      · {completedCount} done
+                    </span>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Skeleton width={36} height={28} radius={6} />
+                <Skeleton width={140} height={14} />
+              </div>
+            )}
           </div>
           {/* View all — primary action on the dashboard, was a tiny
               text link that disappeared next to the big shift count.

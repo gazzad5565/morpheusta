@@ -11,6 +11,7 @@ import {
   SectionLabel,
 } from "@/components/Chrome";
 import { Glyph, formatTime, type GlyphName } from "@/components/Glyph";
+import { LoadingBar, Spinner } from "@/components/Loading";
 import { startLocationTracking } from "@/lib/location-tracker";
 import {
   getMyActiveShift,
@@ -232,6 +233,7 @@ export default function ActiveShiftPage() {
     return (
       <div style={{ background: MC.bg, minHeight: "100%" }}>
         <AppHeader title="Shift Dashboard" onBack={() => router.push("/")} />
+        {!loadedShift && <LoadingBar />}
         <div style={{ padding: "32px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
           <div
             style={{
@@ -249,9 +251,14 @@ export default function ActiveShiftPage() {
                 fontWeight: 700,
                 color: MC.ink,
                 letterSpacing: -0.3,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 10,
+                justifyContent: "center",
               }}
             >
-              {loadedShift ? "No active shift" : "Loading…"}
+              {!loadedShift && <Spinner size={16} />}
+              {loadedShift ? "No active shift" : "Loading shift…"}
             </div>
             {loadedShift && (
               <div

@@ -17,6 +17,7 @@ import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { SegTabs } from "@/components/ui/SegTabs";
+import { LoadingBar } from "@/components/ui/LoadingBar";
 import { RepAvatar } from "@/components/ui/Avatars";
 import {
   SortableHeader,
@@ -191,6 +192,7 @@ export default function RepPerformanceReportPage() {
 
   return (
     <AdminShell breadcrumbs={["Home", "Reports", "Rep performance"]}>
+      {loading && <LoadingBar />}
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Header + period selector */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>

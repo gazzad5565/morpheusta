@@ -1,7 +1,7 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`c028b0a`** (May 7, 2026). Working tree clean before today's tasks/library consistency pass; about to push that bundle next.
+> Latest commit: **`755e4a3`** (May 7, 2026). Late-session push covers calendar consistency, RESET wipe fix, dead-button cleanup, full QA test plan + Playwright scaffold, the `Combobox` rollout, mobile dashboard polish (welcome strip, all-done state, break-or-travel card, sticky footer), customer edit form rewrite for full CRUD, `LoadingBar` / `Spinner` / `Skeleton` primitives plumbed into the worst-offender pages, `/notify` stubbed out (was full of dead buttons), and a `qa-audit` skill at `~/.claude/skills/`. Working tree clean.
 > Repo: https://github.com/gazzad5565/morpheusta · Live: https://morpheus-admin.vercel.app + https://morpheusta-khaki-omega.vercel.app · DB: Supabase project `otweltzwwhrvhtvaqsci`
 > **Don't ask the user for context — read this whole file first.** Section "Where things stand right now" (around line 100) is the canonical handover. The "Today's session — what shipped" sections list every commit by hash, newest day first. The "Top of the deferred list" tells you what to start on next.
 > If you make changes, update this file before you push. Phase 4 RLS is still the highest-priority open item; do not deploy to real users without it.
@@ -228,6 +228,27 @@ Long, varied day. Roughly in narrative order:
 - `2026_05_07_shifts_series_id.sql` — adds nullable `shifts.series_id uuid` + partial index
 
 Both must be run once in the Supabase SQL Editor before the relevant features hit prod.
+
+#### Late-session push (May 7 evening — `ac939c1`..`HEAD`)
+
+Done as one push, in narrative order:
+
+- **Calendar count-chip consistency** — `DAY_SHIFT_LIMIT` now mirrors `MAX_VISIBLE_LANES` (2). Any day that would need a `+N more` overflow pill collapses to the count chip instead. Same UX whether a day has 3 shifts or 7 (`a30b89e`).
+- **RESET wipes every future state, not just `scheduled`** — `deleteAllUpcomingShifts()` lost its `.eq("state", "scheduled")` filter. Earlier reset appeared to work but stranded `in_progress` / `complete` / `late` / `cancelled` rows that reappeared on next refetch. Per-row `bulkDeleteShifts` keeps the scheduled-only guard (mid-shift safety). Manage-page prompt copy updated to match new behavior (`a30b89e`, this push).
+- **QA suite groundwork** — full master plan at `qa/QA_PLAN.md` (37 admin routes + 12 mobile routes mapped; coverage map / e2e checklist / Supabase integration checklist / data-integrity checklist / prioritized bug list). Playwright scaffold with config, fixtures (`adminPage` / `repPage` with real login), seed helpers, helpers (service / anon / user Supabase clients with QA tagging), and 5 exemplar specs. Vitest API tests for RLS + uniqueness constraints. Reusable skill at `~/.claude/skills/qa-audit/SKILL.md` so future audits stay consistent (`5295f0c`).
+- **Dead-button purge round 1** — `/reps` lost `Import CSV` and `Invite rep` (no onClick, no Link wrap). `/reps/[id]` lost the `Message` button for the same reason. Edit on `/reps/[id]` still routes to the unified user editor (`3c81462`).
+- **`Combobox` rollout** — new `components/ui/Combobox.tsx`: reusable single + multi-select dropdown with auto search (>8 options), optional left icon glyph, color swatches, sublabels, keyboard nav, click-outside, and portal rendering so overflow:hidden parents don't clip it. Migrated every customer / rep / category / region / type filter across `/tasks`, `/schedule`, `/schedule/manage`, `/shifts/[id]/edit`, `/tasks/[id]/edit`, `/library/[id]/edit`, `/customers/new`, `/customers/[id]/edit`, `/reports/timesheet`, Live Feed range, Custom Fields builder + value entry. Native `<select>` retained only for the 30-min time picker (OS picker on mobile is better) and the disabled preview select inside the custom-fields form (`8729d42`).
+- **`/reps` got a Manage shifts header link** — parallels the calendar's button so managers can jump from the rep list to `/schedule/manage` in one click.
+- **Mobile welcome strip rebuilt** — thin Morpheus-cyan gradient card with a glassy logo tile (uses the org logo from `/settings/organisation` if uploaded, else a sparkle glyph), org name + date row, time-aware greeting (`Good morning` / `Good afternoon` / `Good evening` / `Working late`), first-name only (`755e4a3`).
+- **Honest empty/all-done state on the dashboard** — when every shift is complete the card flips to a green "All shifts done — nice work" celebration. The old "No shift assigned today" message was always a lie post-checkout (`755e4a3`).
+- **Break or travel** — homepage `BreakCard` is now `BreakOrTravelCard`. Chooser sheet leads with a prominent cyan "Travel now" button alongside the four break-length options. Active travel timer renders inline on the dashboard with an "Arrived" stop button (`755e4a3`).
+- **Footer sticks to the bottom** — `.phone-content > *` is a flex column, AppFooter uses `margin-top: auto`. Profile / Library / Support no longer leave the black bar floating mid-screen on short content. Mobile `lib/settings-store.ts` gained `getOrganisationName` / `getOrganisationLogoUrl` reads.
+- **Customer edit form rewrite** — `/customers/[id]/edit` was a one-field form (only address). Now exposes name, code, initials, avatar colour swatch, region, address (re-geocoded if changed), and the geofence slider — same shape as `/customers/new` but pre-filled, with a live preview card on the right. `CustomerPatch` extended so `updateCustomer` actually accepts those fields. Customer detail header: name is now a clickable button with an edit glyph; standalone Edit button removed (one canonical entry point) (`755e4a3`, this push).
+- **Loading awareness** — new `LoadingBar` (thin animated cyan bar pinned to top of content) + `Spinner` + `Skeleton` primitives in both apps. Plumbed into the worst offenders: admin `/schedule`, `/schedule/manage`, `/customers/[id]`, `/reports/operations`, `/reports/rep-performance`, `/reports/timesheet`; mobile `/`, `/active`, `/check-in`, `/check-out`. Mobile dashboard hero metric is a real skeleton block while shifts load instead of showing `—`.
+- **Dead-button purge round 2** — `/notify` was a static design preview with a dozen non-functional buttons (Save draft, Send now, channel toggles, etc.). Stubbed to a "Coming soon" card until a real notifications backend exists. The route still resolves so existing links aren't broken.
+- **Stale comment in `/schedule/manage` reset prompt** corrected to match the new "every state" wipe behavior.
+
+Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`).
 
 ### Today's session — what shipped (May 6, 2026)
 

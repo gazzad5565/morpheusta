@@ -13,6 +13,7 @@ import {
   SectionLabel,
 } from "@/components/Chrome";
 import { Glyph, type GlyphName } from "@/components/Glyph";
+import { LoadingBar } from "@/components/Loading";
 import { clearRepLocation } from "@/lib/location-tracker";
 import {
   getMyActiveShift,
@@ -331,6 +332,7 @@ function CheckOutPage() {
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
       <AppHeader title="Check Out" onBack={() => router.back()} />
+      {(positionLoading || !shiftLoaded) && <LoadingBar />}
 
       <div style={{ padding: "20px 16px 0" }}>
         <div
