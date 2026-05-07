@@ -12,6 +12,7 @@
  */
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
@@ -20,7 +21,7 @@ import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
-import { createShift } from "@/lib/shifts-store";
+import { createShift, listShiftsInRange } from "@/lib/shifts-store";
 import { listProfiles, getProfileById, displayName, type Profile } from "@/lib/profiles-store";
 import { deleteRequest } from "@/lib/requests-store";
 import { countTasksForCustomers } from "@/lib/tasks-store";
@@ -40,6 +41,15 @@ function addDaysISO(iso: string, days: number): string {
 
 function isValidHHMM(s: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
+}
+
+/** "08:30" → 510 (minutes since midnight). Returns 0 on garbage. */
+function hhmmToMin(t: string): number {
+  if (!t) return 0;
+  const [hh, mm] = t.split(":");
+  const h = parseInt(hh, 10);
+  const m = parseInt(mm, 10);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
 }
 
 /** Add one hour to "HH:MM" — clamps to 23:59 (no day rollover). */
@@ -105,11 +115,37 @@ function NewShiftPage() {
   // Recurrence
   const [repeatMode, setRepeatMode] = useState<"none" | "weekly">("none");
   const [weekdays, setWeekdays] = useState<Set<number>>(new Set());
-  const [untilDate, setUntilDate] = useState<string>(addDaysISO(shiftDate, 28));
+  // Default until-date sits 27 days out (NOT 28). The cartesian walk
+  // includes both endpoints, so a 28-day inclusive range hits the
+  // starting weekday five times — turning a "4 weeks of Mon-Fri"
+  // intent into 21 shifts instead of 20. 27 days = exactly 4 calendar
+  // weeks regardless of which day-of-week the rep starts on.
+  const [untilDate, setUntilDate] = useState<string>(addDaysISO(shiftDate, 27));
 
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Live "tasks per customer" map. Updates whenever the customer
+  // scope changes so the form can show "5 tasks · auto-counted"
+  // alongside the picker — same chip the Edit page surfaces.
+  const [tasksByCustomer, setTasksByCustomer] = useState<Map<string, number>>(
+    () => new Map()
+  );
+
+  // Conflicts found for the picked (rep × date × time) tuple. Each
+  // entry represents a shift that already exists for one of the
+  // selected reps on one of the generated dates and overlaps the
+  // chosen time window. Empty = clear to schedule.
+  interface ConflictHit {
+    repId: string;
+    repName: string;
+    date: string;
+    customerName: string;
+    start: string;
+    end: string;
+  }
+  const [conflicts, setConflicts] = useState<ConflictHit[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,6 +233,85 @@ function NewShiftPage() {
 
   const totalShifts =
     generatedDates.length * targetedCustomerIds.length * targetedRepIds.length;
+
+  // Refresh the per-customer task count whenever the customer scope
+  // settles. Debounced via the dependency on the resolved-id array
+  // string so we don't re-query on every render. countTasksForCustomers
+  // batches into two queries no matter the input size.
+  useEffect(() => {
+    let cancelled = false;
+    if (targetedCustomerIds.length === 0) {
+      setTasksByCustomer(new Map());
+      return;
+    }
+    countTasksForCustomers(targetedCustomerIds).then((m) => {
+      if (!cancelled) setTasksByCustomer(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Deliberately stringifying so we don't refetch on every render
+    // when the array reference is fresh but contents haven't changed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetedCustomerIds.join(",")]);
+
+  // Detect collisions: any existing shift for one of the picked reps
+  // on one of the generated dates that overlaps the chosen time
+  // window. Skipped when scope is "Unassigned" (null) since unassigned
+  // shifts are claimable and can stack freely.
+  useEffect(() => {
+    let cancelled = false;
+    if (
+      repScope === null ||
+      repScope.length === 0 ||
+      generatedDates.length === 0 ||
+      !startTime ||
+      !endTime ||
+      startTime >= endTime
+    ) {
+      setConflicts([]);
+      return;
+    }
+    const startISO = generatedDates[0];
+    const endISO = generatedDates[generatedDates.length - 1];
+    listShiftsInRange(startISO, endISO).then((rows) => {
+      if (cancelled) return;
+      const repIdSet = new Set(repScope);
+      const dateSet = new Set(generatedDates);
+      const newStartMin = hhmmToMin(startTime);
+      const newEndMin = hhmmToMin(endTime);
+      const hits: ConflictHit[] = [];
+      for (const r of rows) {
+        if (!r.rep_id || !repIdSet.has(r.rep_id)) continue;
+        if (!dateSet.has(r.shift_date)) continue;
+        const sStart = hhmmToMin((r.start_time || "").slice(0, 5));
+        const sEnd = hhmmToMin((r.end_time || "").slice(0, 5));
+        if (sStart >= newEndMin || sEnd <= newStartMin) continue;
+        const profile = reps.find((p) => p.id === r.rep_id);
+        hits.push({
+          repId: r.rep_id,
+          repName: profile ? displayName(profile) : "Rep",
+          date: r.shift_date,
+          customerName: r.customers?.name || "another customer",
+          start: (r.start_time || "").slice(0, 5),
+          end: (r.end_time || "").slice(0, 5),
+        });
+        // Cap output so a misconfigured "All reps × every weekday"
+        // doesn't print 200 warnings.
+        if (hits.length >= 8) break;
+      }
+      if (!cancelled) setConflicts(hits);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    repScope === null ? "_unassigned" : (repScope || []).join(","),
+    generatedDates.join(","),
+    startTime,
+    endTime,
+  ]);
 
   const toggleWeekday = (i: number) => {
     setWeekdays((prev) => {
@@ -357,6 +472,16 @@ function NewShiftPage() {
                 specificLabel="Specific"
                 specificSubLabel="Pick one or many"
               />
+              {/* Tasks + address preview chips — same pattern as the
+                  Edit page but adapted for multi-customer scope. Tells
+                  the manager "this is what the rep will be doing" and
+                  "this is where they're going" without leaving the
+                  form. Renders nothing when no customer is picked. */}
+              <CustomerContextChips
+                customers={customers}
+                customerScope={customerScope}
+                tasksByCustomer={tasksByCustomer}
+              />
             </Field>
 
             <Field
@@ -496,6 +621,58 @@ function NewShiftPage() {
               table count. So the manager only has to answer Steps 1 + 2. */}
 
           <div style={{ padding: "0 20px 20px", borderTop: `1px solid ${AC.line}`, paddingTop: 20 }}>
+
+          {/* Conflict warnings — picked rep already has a shift on
+              one of the generated dates that overlaps the chosen
+              time window. Soft warning (not a blocker) since a
+              manager might genuinely intend to add another touch
+              that day; the createShift call doesn't refuse on
+              overlap so the manager has the final word. */}
+          {conflicts.length > 0 && (
+            <div
+              style={{
+                padding: "10px 12px",
+                background: AC.warnTint,
+                color: "#7A560A",
+                borderRadius: 10,
+                fontSize: 12.5,
+                fontWeight: 500,
+                marginBottom: 12,
+                lineHeight: 1.5,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  fontWeight: 700,
+                  marginBottom: 4,
+                }}
+              >
+                <AGlyph name="warn" size={14} color="#7A560A" />
+                <span>
+                  {conflicts.length === 1
+                    ? "1 conflict on this slot"
+                    : `${conflicts.length} conflicts on this slot`}
+                </span>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {conflicts.slice(0, 5).map((c, i) => (
+                  <li key={i} style={{ marginTop: 2 }}>
+                    <b style={{ color: AC.ink2 }}>{c.repName}</b> already has{" "}
+                    <b style={{ color: AC.ink2 }}>{c.customerName}</b> on{" "}
+                    {c.date} {c.start}–{c.end}.
+                  </li>
+                ))}
+                {conflicts.length > 5 && (
+                  <li style={{ marginTop: 2, color: AC.mute }}>
+                    …and {conflicts.length - 5} more.
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
 
           {error && (
             <div
@@ -1074,4 +1251,191 @@ function formatTimeLabel(t: string): string {
   const ampm = h >= 12 ? "PM" : "AM";
   const h12 = ((h + 11) % 12) + 1;
   return `${h12}:${mm} ${ampm}`;
+}
+
+/**
+ * Compact context chips that sit beneath the customer scope picker.
+ * Shows the manager what the rep is walking into — task count and
+ * address — so the form mirrors the at-a-glance richness of the
+ * Edit page without expanding into a full preview.
+ *
+ *   - "All customers" scope: ranges (e.g. "Tasks: 2–7 across 16
+ *     customers") + a "Manage tasks →" jump.
+ *   - Specific (1 customer): exact task count + address chip if the
+ *     customer record has one.
+ *   - Specific (multi customer): summary range + customer count.
+ *   - Empty (nothing picked): renders nothing.
+ */
+function CustomerContextChips({
+  customers,
+  customerScope,
+  tasksByCustomer,
+}: {
+  customers: Customer[];
+  customerScope: CustomerScope;
+  tasksByCustomer: Map<string, number>;
+}) {
+  // Resolve the actual ids the chips should reflect.
+  const ids =
+    customerScope === null
+      ? customers.map((c) => c.id)
+      : customerScope;
+  if (ids.length === 0) return null;
+
+  // Aggregate counts. We only show a chip when we actually have
+  // numbers (counts may still be loading on first render).
+  const counts = ids
+    .map((id) => tasksByCustomer.get(id))
+    .filter((n): n is number => typeof n === "number");
+  const minTasks = counts.length > 0 ? Math.min(...counts) : null;
+  const maxTasks = counts.length > 0 ? Math.max(...counts) : null;
+
+  // Single-customer chip can show address.
+  const singleCustomer =
+    ids.length === 1 ? customers.find((c) => c.id === ids[0]) : null;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+        marginTop: 10,
+      }}
+    >
+      {/* Tasks chip */}
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 12px",
+          borderRadius: 10,
+          background: AC.bg,
+          border: `1px solid ${AC.lineDim}`,
+          flex: "1 1 220px",
+          minWidth: 0,
+        }}
+      >
+        <AGlyph name="tasks" size={14} color={AC.mute} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              color: AC.mute,
+              fontWeight: 700,
+              letterSpacing: 0.3,
+              textTransform: "uppercase",
+            }}
+          >
+            Tasks
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12.5,
+              color: AC.ink,
+              fontWeight: 600,
+              marginTop: 2,
+            }}
+          >
+            {counts.length === 0 ? (
+              <span style={{ color: AC.mute, fontWeight: 500 }}>
+                Counting…
+              </span>
+            ) : ids.length === 1 ? (
+              <>
+                {minTasks} task{minTasks === 1 ? "" : "s"}{" "}
+                <span
+                  style={{
+                    color: AC.mute,
+                    fontWeight: 500,
+                  }}
+                >
+                  · auto-counted from customer
+                </span>
+              </>
+            ) : minTasks === maxTasks ? (
+              <>
+                {minTasks} task{minTasks === 1 ? "" : "s"}{" "}
+                <span style={{ color: AC.mute, fontWeight: 500 }}>
+                  · per customer × {ids.length}
+                </span>
+              </>
+            ) : (
+              <>
+                {minTasks}–{maxTasks} tasks{" "}
+                <span style={{ color: AC.mute, fontWeight: 500 }}>
+                  · range across {ids.length} customers
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+        <Link
+          href="/tasks"
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11.5,
+            fontWeight: 700,
+            color: AC.brandDeep,
+            textDecoration: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Manage →
+        </Link>
+      </div>
+
+      {/* Address chip — single-customer only. Multi gets the count
+          chip above; address per-customer would be too noisy. */}
+      {singleCustomer?.address && (
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 12px",
+            borderRadius: 10,
+            background: AC.bg,
+            border: `1px solid ${AC.lineDim}`,
+            flex: "1 1 240px",
+            minWidth: 0,
+          }}
+        >
+          <AGlyph name="pin" size={14} color={AC.mute} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 11,
+                color: AC.mute,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+              }}
+            >
+              Address
+            </div>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 12.5,
+                color: AC.ink,
+                fontWeight: 500,
+                marginTop: 2,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              title={singleCustomer.address}
+            >
+              {singleCustomer.address}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
