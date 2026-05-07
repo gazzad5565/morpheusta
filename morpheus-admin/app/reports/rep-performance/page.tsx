@@ -346,7 +346,7 @@ export default function RepPerformanceReportPage() {
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                  <RepAvatar rep={{ initials: r.initials }} size={30} />
+                  <RepAvatar rep={{ initials: r.initials }} size={30} seed={r.id} />
                   <div style={{ minWidth: 0 }}>
                     <div
                       style={{

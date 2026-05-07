@@ -442,7 +442,11 @@ export default function TimesheetReportPage() {
                   {r.dateLabel}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <RepAvatar rep={{ initials: r.repInitials }} size={26} />
+                  <RepAvatar
+                    rep={{ initials: r.repInitials }}
+                    size={26}
+                    seed={r.repId ?? r.repInitials}
+                  />
                   <div
                     style={{
                       fontFamily: AC.font,

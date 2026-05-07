@@ -11,6 +11,13 @@ import {
   subscribeRepLocations,
   type RepLocation,
 } from "@/lib/rep-locations-store";
+import {
+  listShifts,
+  subscribeShifts,
+  shiftHref,
+  type ShiftRow,
+} from "@/lib/shifts-store";
+import { colorForRep } from "@/components/ui/Avatars";
 import type { Customer } from "@/lib/types";
 
 // Tiles: OpenFreeMap (no signup, no API key, OSM-derived vector tiles).
@@ -30,7 +37,13 @@ export function MapPanelClient() {
   const repMarkersRef = useRef<Map<string, MLMarker>>(new Map());
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [reps, setReps] = useState<RepLocation[]>([]);
+  const [shifts, setShifts] = useState<ShiftRow[]>([]);
   const [loaded, setLoaded] = useState(false);
+  // Mirror state into refs so the marker-creation effect (which captures
+  // these closures once per rep) can always look up the freshest data
+  // when a popup is rendered. The popup HTML is built lazily on click.
+  const customersRef = useRef<Customer[]>([]);
+  const shiftsRef = useRef<ShiftRow[]>([]);
 
   // Init map
   useEffect(() => {
@@ -72,7 +85,10 @@ export function MapPanelClient() {
   useEffect(() => {
     let cancelled = false;
     listCustomers().then((rows) => {
-      if (!cancelled) setCustomers(rows);
+      if (!cancelled) {
+        setCustomers(rows);
+        customersRef.current = rows;
+      }
     });
     return () => {
       cancelled = true;
@@ -86,6 +102,26 @@ export function MapPanelClient() {
       if (!cancelled) setReps(rows);
     });
     const unsub = subscribeRepLocations((rows) => setReps(rows));
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  // Today's shifts — used for rep popups so we can show what each rep
+  // is currently doing (which customer + state) and link straight to
+  // the shift detail page. Realtime sub keeps the popup fresh as state
+  // transitions happen (scheduled → in-progress → complete).
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const rows = await listShifts();
+      if (cancelled) return;
+      setShifts(rows);
+      shiftsRef.current = rows;
+    };
+    load();
+    const unsub = subscribeShifts(load);
     return () => {
       cancelled = true;
       unsub();
@@ -153,29 +189,34 @@ export function MapPanelClient() {
       seen.add(r.repId);
       const isStale = now - new Date(r.recordedAt).getTime() > STALE_AFTER_MS;
       const existing = repMarkersRef.current.get(r.repId);
+      const repColor = colorForRep(r.repId);
 
       if (existing) {
         existing.setLngLat([r.longitude, r.latitude]);
         const el = existing.getElement();
         el.style.opacity = isStale ? "0.45" : "1";
+        el.style.background = repColor;
+        // Refresh the popup HTML so the customer/state stays current
+        // even when the existing rep marker just moved.
+        const popup = existing.getPopup();
+        if (popup) popup.setHTML(buildRepPopupHTML(r, customersRef.current, shiftsRef.current));
       } else {
         const el = document.createElement("div");
         el.style.cssText = `
-          width: 28px; height: 28px; border-radius: 99px;
-          background: #1FA971; color: #fff;
+          width: 30px; height: 30px; border-radius: 99px;
+          background: ${repColor}; color: #fff;
           font-family: ${AC.font}; font-size: 11px; font-weight: 700;
           display: flex; align-items: center; justify-content: center;
           box-shadow: 0 0 0 2px #fff, 0 1px 6px rgba(0,0,0,0.30);
           opacity: ${isStale ? "0.45" : "1"};
           transition: opacity 200ms ease;
+          cursor: pointer;
+          letter-spacing: .2px;
         `;
         el.textContent = r.initials;
 
         const popup = new maplibregl.Popup({ offset: 18, closeButton: false }).setHTML(
-          `<div style="font-family:${AC.font};font-size:12px;line-height:1.4;">
-             <div style="font-weight:700;color:${AC.ink};">${escapeHtml(r.name)}</div>
-             <div style="color:${AC.mute};font-size:11px;margin-top:2px;">${formatAge(now - new Date(r.recordedAt).getTime())} ago${r.accuracyM != null ? ` · ±${r.accuracyM}m` : ""}</div>
-           </div>`
+          buildRepPopupHTML(r, customersRef.current, shiftsRef.current)
         );
 
         const marker = new maplibregl.Marker({ element: el })
@@ -194,6 +235,27 @@ export function MapPanelClient() {
       }
     }
   }, [reps, loaded]);
+
+  // When the shift list refreshes (state transitions, new shifts, etc),
+  // re-render the popup HTML for each currently-mounted rep marker so a
+  // popup that's already open updates without needing to re-click.
+  useEffect(() => {
+    customersRef.current = customers;
+  }, [customers]);
+  useEffect(() => {
+    shiftsRef.current = shifts;
+    for (const [repId, marker] of repMarkersRef.current.entries()) {
+      const r = reps.find((x) => x.repId === repId);
+      if (!r) continue;
+      const popup = marker.getPopup();
+      if (popup) popup.setHTML(buildRepPopupHTML(r, customers, shifts));
+    }
+    // We intentionally read `reps` and `customers` here without listing
+    // them as deps — when those change, the marker effect above will
+    // re-run anyway. This effect is purely about reacting to shift
+    // changes mid-session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shifts]);
 
   const activeCustomers = customers.filter((c) => c.active !== false);
   const placeableCount = activeCustomers.filter(
@@ -262,4 +324,158 @@ function formatAge(ms: number): string {
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
   return `${h}h`;
+}
+
+/**
+ * Pick the most-relevant shift for `repId` from today's list. Priority:
+ *   1. in-progress (the rep is actually at a customer right now)
+ *   2. travelling (manager wants to know they're en-route)
+ *   3. on-break / late
+ *   4. scheduled (next up)
+ *   5. complete (most recently finished)
+ * Falls back to undefined when the rep has no shifts today at all
+ * (e.g. ad-hoc check-in elsewhere).
+ */
+function pickRelevantShift(repId: string, shifts: ShiftRow[]): ShiftRow | undefined {
+  const mine = shifts.filter((s) => s.rep_id === repId);
+  if (mine.length === 0) return undefined;
+  const order: Record<string, number> = {
+    "in-progress": 0,
+    travelling: 1,
+    "on-break": 2,
+    late: 3,
+    scheduled: 4,
+    complete: 5,
+  };
+  return [...mine].sort(
+    (a, b) => (order[a.state] ?? 99) - (order[b.state] ?? 99)
+  )[0];
+}
+
+const STATE_LABEL: Record<string, { label: string; bg: string; ink: string }> = {
+  "in-progress": { label: "In progress", bg: AC.okTint, ink: "#0F5A38" },
+  travelling: { label: "Travelling", bg: AC.warnTint, ink: "#7A560A" },
+  "on-break": { label: "On break", bg: "#E6E9F8", ink: "#241B5A" },
+  late: { label: "Late", bg: AC.dangerTint, ink: "#6E1430" },
+  scheduled: { label: "Scheduled", bg: AC.bg, ink: AC.mute },
+  complete: { label: "Complete", bg: AC.okTint, ink: "#0F5A38" },
+};
+
+function formatHHMM(t: string | null | undefined): string {
+  if (!t) return "";
+  const [hh, mm] = t.split(":");
+  const h = parseInt(hh, 10);
+  if (Number.isNaN(h)) return t;
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${mm} ${ampm}`;
+}
+
+/**
+ * Build the rep marker popup. Shows:
+ *   - rep name
+ *   - last GPS ping age (+ accuracy when known)
+ *   - current/next customer (initials swatch + name + code)
+ *   - current shift state pill
+ *   - "Open shift →" link routed via shiftHref so scheduled shifts go
+ *     to the editor and in-progress / late / complete shifts go to the
+ *     read-only detail page (consistent with the rest of the app).
+ *   - "View location" link to keep the older fallback when there's no
+ *     shift today.
+ */
+function buildRepPopupHTML(
+  r: RepLocation,
+  customers: Customer[],
+  shifts: ShiftRow[]
+): string {
+  const ageMs = Date.now() - new Date(r.recordedAt).getTime();
+  const accuracy = r.accuracyM != null ? ` · ±${r.accuracyM}m` : "";
+  const shift = pickRelevantShift(r.repId, shifts);
+  const customer = shift
+    ? customers.find((c) => c.id === shift.customer_id) ||
+      (shift.customers
+        ? {
+            id: shift.customer_id,
+            name: shift.customers.name,
+            initials: shift.customers.initials,
+            color: shift.customers.color,
+            code: shift.customers.code,
+          }
+        : null)
+    : null;
+  const state = shift ? STATE_LABEL[shift.state] || STATE_LABEL.scheduled : null;
+
+  const headerRow = `
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="
+        width:24px;height:24px;border-radius:99px;
+        background:${colorForRep(r.repId)};color:#fff;
+        font-family:${AC.font};font-size:10px;font-weight:700;
+        display:flex;align-items:center;justify-content:center;letter-spacing:.2px;
+      ">${escapeHtml(r.initials)}</div>
+      <div style="font-weight:700;color:${AC.ink};font-size:13px;letter-spacing:-.1px;">${escapeHtml(r.name)}</div>
+    </div>
+    <div style="color:${AC.mute};font-size:11px;margin-top:4px;">
+      Last seen ${formatAge(ageMs)} ago${accuracy}
+    </div>
+  `;
+
+  if (!shift || !customer) {
+    return `
+      <div style="font-family:${AC.font};font-size:12px;line-height:1.4;min-width:200px;">
+        ${headerRow}
+        <div style="margin-top:8px;color:${AC.mute};font-size:11.5px;font-style:italic;">
+          No shift scheduled today.
+        </div>
+      </div>
+    `;
+  }
+
+  const window = shift.start_time && shift.end_time
+    ? `${formatHHMM(shift.start_time)}–${formatHHMM(shift.end_time)}`
+    : "";
+
+  return `
+    <div style="font-family:${AC.font};font-size:12px;line-height:1.4;min-width:240px;max-width:280px;">
+      ${headerRow}
+
+      <div style="
+        margin-top:10px;padding:8px 10px;
+        border:1px solid ${AC.lineDim};border-radius:8px;background:#fff;
+        display:flex;align-items:center;gap:8px;
+      ">
+        <div style="
+          width:26px;height:26px;border-radius:7px;flex-shrink:0;
+          background:${customer.color};color:#fff;
+          font-family:${AC.font};font-size:10.5px;font-weight:700;
+          display:flex;align-items:center;justify-content:center;letter-spacing:.2px;
+        ">${escapeHtml(customer.initials)}</div>
+        <div style="min-width:0;flex:1;">
+          <div style="
+            font-weight:600;color:${AC.ink};font-size:12.5px;letter-spacing:-.1px;
+            white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+          ">${escapeHtml(customer.name)}</div>
+          <div style="color:${AC.mute};font-size:11px;margin-top:1px;">#${escapeHtml(String(customer.code))}${window ? ` · ${escapeHtml(window)}` : ""}</div>
+        </div>
+      </div>
+
+      ${state ? `
+        <div style="margin-top:8px;">
+          <span style="
+            display:inline-flex;align-items:center;gap:5px;
+            padding:3px 8px;border-radius:99px;
+            background:${state.bg};color:${state.ink};
+            font-size:11px;font-weight:600;
+          ">${escapeHtml(state.label)}</span>
+        </div>
+      ` : ""}
+
+      <a href="${escapeHtml(shiftHref(shift))}" style="
+        display:flex;align-items:center;justify-content:center;gap:6px;
+        margin-top:10px;padding:8px 10px;border-radius:8px;
+        background:${AC.brand};color:#fff;text-decoration:none;
+        font-family:${AC.font};font-size:12px;font-weight:600;letter-spacing:-.1px;
+      ">Open shift →</a>
+    </div>
+  `;
 }

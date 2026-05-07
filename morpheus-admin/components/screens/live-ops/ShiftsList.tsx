@@ -362,7 +362,7 @@ function ShiftRowView({
       <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
         {rep ? (
           <>
-            <RepAvatar rep={{ initials: rep.initials }} size={28} />
+            <RepAvatar rep={{ initials: rep.initials }} size={28} seed={rep.id} />
             <div style={{ minWidth: 0 }}>
               <div
                 style={{

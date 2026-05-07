@@ -201,7 +201,7 @@ export function RepScopePicker({
                     onChange={() => toggle(r.id)}
                     style={{ width: 16, height: 16, accentColor: AC.brand }}
                   />
-                  <RepAvatar rep={{ initials }} size={26} />
+                  <RepAvatar rep={{ initials }} size={26} seed={r.id} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{

@@ -320,7 +320,7 @@ function GridView({ reps }: { reps: RepWithStats[] }) {
               }}
             >
               <div style={{ position: "absolute", left: 16, bottom: -16 }}>
-                <RepAvatar rep={{ initials: r.initials }} size={44} />
+                <RepAvatar rep={{ initials: r.initials }} size={44} seed={r.id} />
               </div>
               <span
                 style={{
@@ -436,7 +436,7 @@ function TableView({
             <input type="checkbox" style={CB} readOnly />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            <RepAvatar rep={{ initials: r.initials }} size={32} />
+            <RepAvatar rep={{ initials: r.initials }} size={32} seed={r.id} />
             <div style={{ minWidth: 0 }}>
               <div
                 style={{

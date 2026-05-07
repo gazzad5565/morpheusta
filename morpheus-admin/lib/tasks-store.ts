@@ -62,6 +62,54 @@ export async function listAllTasks(): Promise<TaskRow[]> {
   return (data as unknown as TaskRow[]) || [];
 }
 
+/**
+ * Count of tasks that apply to each customer in `customerIds`. Used by
+ * the schedule form to derive `tasks_total` per shift without making
+ * the manager type a number — the count auto-tracks edits to
+ * customer_tasks. Universal tasks (customer_id IS NULL) are added to
+ * every customer's tally because the rep's /active page surfaces them
+ * for any customer.
+ *
+ * Returns a Map keyed by customer_id. Missing customers default to 0.
+ */
+export async function countTasksForCustomers(
+  customerIds: string[]
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  for (const id of customerIds) result.set(id, 0);
+  if (!isSupabaseConfigured() || !supabase) return result;
+  if (customerIds.length === 0) return result;
+
+  // Universal-task count — added to every customer's tally below.
+  const { count: universalCount, error: uErr } = await supabase
+    .from("customer_tasks")
+    .select("id", { count: "exact", head: true })
+    .is("customer_id", null);
+  if (uErr) {
+    // eslint-disable-next-line no-console
+    console.warn("[tasks] count universals:", uErr.message);
+  }
+
+  // Customer-specific task rows for the requested ids. We only need
+  // customer_id columns to tally, hence the narrow projection.
+  const { data, error } = await supabase
+    .from("customer_tasks")
+    .select("customer_id")
+    .in("customer_id", customerIds);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[tasks] count specific:", error.message);
+    return result;
+  }
+
+  const universal = universalCount ?? 0;
+  for (const id of customerIds) result.set(id, universal);
+  for (const row of (data as { customer_id: string }[]) || []) {
+    result.set(row.customer_id, (result.get(row.customer_id) ?? 0) + 1);
+  }
+  return result;
+}
+
 /** Tasks for a single customer (used on the customer detail page). */
 export async function listTasksForCustomer(customerId: string): Promise<TaskRow[]> {
   if (!isSupabaseConfigured() || !supabase) return [];

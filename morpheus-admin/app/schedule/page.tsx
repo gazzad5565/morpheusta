@@ -58,7 +58,6 @@ function stateRank(s: ShiftRow): number {
 }
 
 const UNASSIGNED_KEY = "__unassigned__";
-const VIEW_STORAGE_KEY = "schedule-view";
 type ViewMode = "days" | "reps";
 
 /**
@@ -104,23 +103,13 @@ export default function SchedulePage() {
   const [customerFilter, setCustomerFilter] = useState<string>("All");
   const [loading, setLoading] = useState(true);
 
-  // View toggle (Days / Reps), persisted to localStorage.
+  // View toggle (Days / Reps). The page ALWAYS opens on Days — that's
+  // the canonical "what's happening this week?" lens. Switching to
+  // Reps stays in effect for the session so the manager can keep
+  // moving between rep cards, but a refresh / fresh tab brings them
+  // back to Days. Drop the localStorage restore that previously
+  // pinned the view per-browser.
   const [view, setView] = useState<ViewMode>("days");
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(VIEW_STORAGE_KEY);
-      if (saved === "reps" || saved === "days") setView(saved);
-    } catch {
-      /* SSR or storage blocked */
-    }
-  }, []);
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-    } catch {
-      /* noop */
-    }
-  }, [view]);
 
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),

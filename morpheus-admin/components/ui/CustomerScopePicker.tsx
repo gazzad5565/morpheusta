@@ -16,7 +16,7 @@
  * "Specific" is chosen. Select all / Clear shortcuts above the list.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AC } from "@/lib/tokens";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import type { Customer } from "@/lib/types";
@@ -54,6 +54,20 @@ export function CustomerScopePicker({
     () => new Set(Array.isArray(value) ? value : []),
     [value]
   );
+  const [search, setSearch] = useState("");
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.initials.toLowerCase().includes(q) ||
+        String(c.code).includes(q) ||
+        (c.region?.toLowerCase().includes(q) ?? false) ||
+        (c.address?.toLowerCase().includes(q) ?? false)
+    );
+  }, [customers, search]);
 
   const toggle = (id: string) => {
     const next = new Set(selectedIds);
@@ -62,7 +76,15 @@ export function CustomerScopePicker({
     onChange(Array.from(next));
   };
 
-  const selectAll = () => onChange(customers.map((c) => c.id));
+  // "Select all" should mean "select everything I can currently see" so a
+  // search-filtered list lets the manager bulk-pick a region without
+  // dragging in unrelated customers. Falls back to the full list when
+  // the search box is empty.
+  const selectAll = () => {
+    const ids = visible.length > 0 ? visible.map((c) => c.id) : customers.map((c) => c.id);
+    const merged = new Set([...selectedIds, ...ids]);
+    onChange(Array.from(merged));
+  };
   const clearAll = () => onChange([]);
 
   return (
@@ -92,7 +114,7 @@ export function CustomerScopePicker({
             border: `1px solid ${AC.line}`,
             borderRadius: 10,
             background: "#fff",
-            maxHeight: 240,
+            maxHeight: 280,
             overflowY: "auto",
           }}
         >
@@ -104,6 +126,9 @@ export function CustomerScopePicker({
               padding: "8px 12px",
               borderBottom: `1px solid ${AC.lineDim}`,
               background: AC.bg,
+              position: "sticky",
+              top: 0,
+              zIndex: 1,
             }}
           >
             <span
@@ -118,7 +143,7 @@ export function CustomerScopePicker({
             </span>
             <div style={{ flex: 1 }} />
             <button type="button" onClick={selectAll} style={linkBtn}>
-              Select all
+              Select all{search.trim() ? " visible" : ""}
             </button>
             <span style={{ color: AC.faint }}>·</span>
             <button type="button" onClick={clearAll} style={linkBtn}>
@@ -126,12 +151,44 @@ export function CustomerScopePicker({
             </button>
           </div>
 
+          {/* Inline search — same pattern as RepScopePicker. Mirrors the
+              search on the customers list page so anywhere a manager
+              picks customers the affordance is the same. */}
+          {customers.length > 6 && (
+            <div
+              style={{
+                padding: "8px 12px",
+                borderBottom: `1px solid ${AC.lineDim}`,
+              }}
+            >
+              <input
+                type="text"
+                placeholder="Filter by name, code, region, or address…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "7px 10px",
+                  border: `1px solid ${AC.line}`,
+                  borderRadius: 8,
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  color: AC.ink,
+                  outline: "none",
+                  background: "#fff",
+                }}
+              />
+            </div>
+          )}
+
           {loading ? (
             <Empty text="Loading customers…" />
           ) : customers.length === 0 ? (
             <Empty text="No customers yet. Add one first." />
+          ) : visible.length === 0 ? (
+            <Empty text={`Nothing matches "${search}".`} />
           ) : (
-            customers.map((c) => {
+            visible.map((c) => {
               const checked = selectedIds.has(c.id);
               return (
                 <label
