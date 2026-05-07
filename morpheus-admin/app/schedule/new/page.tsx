@@ -80,7 +80,11 @@ function NewShiftPage() {
   const [loading, setLoading] = useState(true);
 
   // Customer scope: null = all, [...] = specific (one or many).
-  const [customerScope, setCustomerScope] = useState<CustomerScope>(null);
+  // Default to [] (Specific, nothing picked) instead of null (All), so a
+  // manager can't accidentally bulk-create one shift per customer just
+  // by hitting Create. Forces an explicit pick — the most common case
+  // is a single shift, not a 16-customer spray.
+  const [customerScope, setCustomerScope] = useState<CustomerScope>([]);
   // Rep scope mirrors the customer pattern:
   //   null = unassigned (rep_id = NULL on the created shift)
   //   []   = none picked yet (caller treats as invalid)
@@ -306,189 +310,199 @@ function NewShiftPage() {
           alignItems: "start",
         }}
       >
-        <Card padding={20}>
-          <SectionTitle>Schedule a shift</SectionTitle>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 12.5,
-              color: AC.mute,
-              marginTop: 4,
-              marginBottom: 16,
-              lineHeight: 1.5,
-            }}
-          >
-            Pick the customer scope, the rep (or leave unassigned for any rep to claim), the
-            date and times. Use <b style={{ color: AC.ink }}>Repeat weekly</b> to spray the
-            same shift across a date range.
-          </div>
-
-          <Field label="Customers" required>
-            <CustomerScopePicker
-              customers={customers}
-              loading={loading}
-              value={customerScope}
-              onChange={setCustomerScope}
-              allLabel="All customers"
-              allSubLabel={`Will create one shift per customer (${customers.length})`}
-              specificLabel="Specific customers"
-              specificSubLabel="Pick one or many"
-            />
-          </Field>
-
-          <Field
-            label="Assign to rep"
-            hint="Pick one to assign, several to spawn one shift per rep, or leave as Unassigned for any rep to claim."
-          >
-            <RepScopePicker
-              reps={reps}
-              loading={loading}
-              value={repScope}
-              onChange={setRepScope}
-              unassignedLabel="Unassigned"
-              unassignedSubLabel="Claimable by any rep"
-              specificLabel="Specific reps"
-              specificSubLabel="Pick one or many"
-            />
-          </Field>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
-            <Field label="Start date" required>
-              <input
-                type="date"
-                value={shiftDate}
-                onChange={(e) => setShiftDate(e.target.value)}
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Start time" required>
-              <input
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="End time" required>
-              <input
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                style={inputStyle}
-              />
-            </Field>
-          </div>
-
-          {/* Recurrence */}
-          <Field label="Repeat">
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              <RepeatOption
-                active={repeatMode === "none"}
-                onClick={() => setRepeatMode("none")}
-                title="One-off"
-                sub="Just this date"
-              />
-              <RepeatOption
-                active={repeatMode === "weekly"}
-                onClick={() => setRepeatMode("weekly")}
-                title="Weekly"
-                sub="Pick weekdays + 'until' date"
-              />
+        <Card padding={0}>
+          <div style={{ padding: "20px 20px 8px" }}>
+            <SectionTitle>Schedule a shift</SectionTitle>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 12.5,
+                color: AC.mute,
+                marginTop: 4,
+                lineHeight: 1.5,
+              }}
+            >
+              Three quick steps. The summary on the right tells you exactly
+              what will be created before you hit Create.
             </div>
-            {repeatMode === "weekly" && (
-              <div
-                style={{
-                  border: `1px solid ${AC.line}`,
-                  borderRadius: 10,
-                  padding: 12,
-                  background: "#fff",
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 11,
-                    color: AC.mute,
-                    fontWeight: 700,
-                    letterSpacing: 0.3,
-                    textTransform: "uppercase",
-                    marginBottom: 8,
-                  }}
-                >
-                  On these days
-                </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-                  {WEEKDAYS.map((label, i) => {
-                    const on = weekdays.has(i);
-                    return (
-                      <button
-                        key={label}
-                        type="button"
-                        onClick={() => toggleWeekday(i)}
-                        style={{
-                          padding: "7px 14px",
-                          borderRadius: 99,
-                          background: on ? AC.brand : "#fff",
-                          color: on ? "#fff" : AC.ink2,
-                          border: `1px solid ${on ? AC.brand : AC.line}`,
-                          fontFamily: AC.font,
-                          fontSize: 12.5,
-                          fontWeight: 600,
-                          letterSpacing: -0.1,
-                          cursor: "pointer",
-                        }}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <Field label="Until (inclusive)" required>
-                  <input
-                    type="date"
-                    value={untilDate}
-                    min={shiftDate}
-                    onChange={(e) => setUntilDate(e.target.value)}
-                    style={inputStyle}
-                  />
-                </Field>
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 11.5,
-                    color: AC.mute,
-                    marginTop: 4,
-                  }}
-                >
-                  Will generate {generatedDates.length} date{generatedDates.length === 1 ? "" : "s"}
-                  {generatedDates.length > 0 && (
-                    <>
-                      : <b style={{ color: AC.ink2 }}>{generatedDates[0]}</b> →{" "}
-                      <b style={{ color: AC.ink2 }}>{generatedDates[generatedDates.length - 1]}</b>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-          </Field>
-
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
-            <Field label="Distance label" hint="Display only — what the rep sees on their card.">
-              <input
-                value={distance}
-                onChange={(e) => setDistance(e.target.value)}
-                placeholder="e.g. 3 km away"
-                style={inputStyle}
-              />
-            </Field>
-            <Field label="Total tasks" hint="How many tasks at this site.">
-              <input
-                value={tasksTotal}
-                onChange={(e) => setTasksTotal(e.target.value.replace(/\D/g, ""))}
-                style={{ ...inputStyle, fontFamily: AC.fontMono }}
-              />
-            </Field>
           </div>
+
+          {/* ─── Step 1 — Who & where ───────────────────────────────── */}
+          <Step number={1} title="Who's going where?" sub="Pick at least one customer. Reps can be assigned now or left claimable.">
+            <Field label="Customer(s)" required>
+              <CustomerScopePicker
+                customers={customers}
+                loading={loading}
+                value={customerScope}
+                onChange={setCustomerScope}
+                allLabel="All customers"
+                allSubLabel={`One shift per customer (${customers.length})`}
+                specificLabel="Specific"
+                specificSubLabel="Pick one or many"
+              />
+            </Field>
+
+            <Field
+              label="Rep(s)"
+              hint="Pick one to assign, several to spawn one shift per rep, or leave Unassigned."
+            >
+              <RepScopePicker
+                reps={reps}
+                loading={loading}
+                value={repScope}
+                onChange={setRepScope}
+                unassignedLabel="Unassigned"
+                unassignedSubLabel="Claimable by any rep"
+                specificLabel="Specific"
+                specificSubLabel="Pick one or many"
+              />
+            </Field>
+          </Step>
+
+          {/* ─── Step 2 — When ──────────────────────────────────────── */}
+          <Step number={2} title="When?" sub="Date and time. Switch to Weekly to repeat across a date range.">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+              <Field label="Date" required>
+                <input
+                  type="date"
+                  value={shiftDate}
+                  onChange={(e) => setShiftDate(e.target.value)}
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="Start" required>
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="End" required>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  style={inputStyle}
+                />
+              </Field>
+            </div>
+
+            <Field label="Repeat">
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <RepeatOption
+                  active={repeatMode === "none"}
+                  onClick={() => setRepeatMode("none")}
+                  title="One-off"
+                  sub="Just this date"
+                />
+                <RepeatOption
+                  active={repeatMode === "weekly"}
+                  onClick={() => setRepeatMode("weekly")}
+                  title="Weekly"
+                  sub="Pick weekdays + an 'until' date"
+                />
+              </div>
+              {repeatMode === "weekly" && (
+                <div
+                  style={{
+                    border: `1px solid ${AC.line}`,
+                    borderRadius: 10,
+                    padding: 12,
+                    background: "#fff",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 11,
+                      color: AC.mute,
+                      fontWeight: 700,
+                      letterSpacing: 0.3,
+                      textTransform: "uppercase",
+                      marginBottom: 8,
+                    }}
+                  >
+                    On these days
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                    {WEEKDAYS.map((label, i) => {
+                      const on = weekdays.has(i);
+                      return (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => toggleWeekday(i)}
+                          style={{
+                            padding: "7px 14px",
+                            borderRadius: 99,
+                            background: on ? AC.brand : "#fff",
+                            color: on ? "#fff" : AC.ink2,
+                            border: `1px solid ${on ? AC.brand : AC.line}`,
+                            fontFamily: AC.font,
+                            fontSize: 12.5,
+                            fontWeight: 600,
+                            letterSpacing: -0.1,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <Field label="Until (inclusive)" required>
+                    <input
+                      type="date"
+                      value={untilDate}
+                      min={shiftDate}
+                      onChange={(e) => setUntilDate(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </Field>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 11.5,
+                      color: AC.mute,
+                      marginTop: 4,
+                    }}
+                  >
+                    Will generate {generatedDates.length} date{generatedDates.length === 1 ? "" : "s"}
+                    {generatedDates.length > 0 && (
+                      <>
+                        : <b style={{ color: AC.ink2 }}>{generatedDates[0]}</b> →{" "}
+                        <b style={{ color: AC.ink2 }}>{generatedDates[generatedDates.length - 1]}</b>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </Field>
+          </Step>
+
+          {/* ─── Step 3 — Details (optional) ─────────────────────────── */}
+          <Step number={3} title="Anything else?" sub="Optional — display label and task count for the rep's card." last>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14 }}>
+              <Field label="Distance label" hint="Display only — what the rep sees.">
+                <input
+                  value={distance}
+                  onChange={(e) => setDistance(e.target.value)}
+                  placeholder="e.g. 3 km away"
+                  style={inputStyle}
+                />
+              </Field>
+              <Field label="Total tasks" hint="How many tasks at this site.">
+                <input
+                  value={tasksTotal}
+                  onChange={(e) => setTasksTotal(e.target.value.replace(/\D/g, ""))}
+                  style={{ ...inputStyle, fontFamily: AC.fontMono }}
+                />
+              </Field>
+            </div>
+          </Step>
+
+          <div style={{ padding: "0 20px 20px" }}>
 
           {error && (
             <div
@@ -540,42 +554,122 @@ function NewShiftPage() {
                 : `Create ${totalShifts} shifts`}
             </Btn>
           </div>
+          </div>
         </Card>
 
-        {/* Preview / summary */}
-        <Card padding={0}>
+        {/* Live preview — what hitting Create will actually do. Designed
+            to be scannable in one glance: a big number, a plain-English
+            sentence, then the structured rows underneath for verification. */}
+        <Card padding={0} style={{ position: "sticky", top: 20 }}>
           <div style={{ padding: "12px 16px", borderBottom: `1px solid ${AC.line}` }}>
             <div
               style={{
                 fontFamily: AC.font,
                 fontSize: 11,
-                fontWeight: 600,
+                fontWeight: 700,
                 color: AC.mute,
                 letterSpacing: 0.4,
                 textTransform: "uppercase",
               }}
             >
-              Summary
+              About to create
             </div>
           </div>
-          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+
+          {/* Big total — green/brand when valid, muted when blocked. */}
+          <div style={{ padding: 16 }}>
+            <div
+              style={{
+                padding: "16px 12px",
+                background: totalShifts > 0 ? AC.brandSoft : "#f6f7f9",
+                borderRadius: 12,
+                textAlign: "center",
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 36,
+                  fontWeight: 800,
+                  color: totalShifts > 0 ? AC.brandInk : AC.mute,
+                  letterSpacing: -0.8,
+                  lineHeight: 1,
+                }}
+              >
+                {totalShifts}
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: totalShifts > 0 ? AC.brandDeep : AC.mute,
+                  marginTop: 6,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                }}
+              >
+                {totalShifts === 1 ? "shift will be created" : "shifts will be created"}
+              </div>
+            </div>
+          </div>
+
+          {/* Plain-English sentence: what + who + when. Drops gracefully
+              to a hint when the form is incomplete so the user knows what
+              to fix next. */}
+          <div
+            style={{
+              padding: "0 16px 14px",
+              fontFamily: AC.font,
+              fontSize: 13,
+              color: AC.ink,
+              lineHeight: 1.55,
+            }}
+          >
+            <PreviewSentence
+              totalShifts={totalShifts}
+              customers={customers}
+              customerScope={customerScope}
+              reps={reps}
+              repScope={repScope}
+              shiftDate={shiftDate}
+              untilDate={untilDate}
+              repeatMode={repeatMode}
+              dateCount={generatedDates.length}
+              startTime={startTime}
+              endTime={endTime}
+            />
+          </div>
+
+          {/* Structured rows for verification at-a-glance. */}
+          <div
+            style={{
+              padding: "12px 16px 16px",
+              borderTop: `1px solid ${AC.line}`,
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
             <SummaryRow
               label="Customers"
               value={
                 customerScope === null
                   ? `All (${customers.length})`
                   : customerScope.length === 0
-                  ? "—"
+                  ? "Pick at least one →"
+                  : customerScope.length === 1
+                  ? customers.find((c) => c.id === customerScope[0])?.name || "1 customer"
                   : `${customerScope.length} selected`
               }
             />
             <SummaryRow
-              label="Rep"
+              label="Reps"
               value={
                 repScope === null
                   ? "Unassigned (claimable)"
                   : repScope.length === 0
-                  ? "—"
+                  ? "Pick at least one →"
                   : repScope.length === 1
                   ? (() => {
                       const r = reps.find((x) => x.id === repScope[0]);
@@ -588,26 +682,11 @@ function NewShiftPage() {
               label="Dates"
               value={
                 repeatMode === "none"
-                  ? shiftDate
-                  : `${generatedDates.length} dates · ${shiftDate} → ${untilDate}`
+                  ? formatDateLabel(shiftDate)
+                  : `${generatedDates.length} dates · ${formatDateLabel(shiftDate)} → ${formatDateLabel(untilDate)}`
               }
             />
-            <SummaryRow label="Window" value={`${startTime} – ${endTime}`} />
-            <div style={{ height: 1, background: AC.line, margin: "4px 0" }} />
-            <div
-              style={{
-                padding: 12,
-                background: AC.brandSoft,
-                borderRadius: 10,
-                fontFamily: AC.font,
-                fontSize: 13,
-                fontWeight: 700,
-                color: AC.brandInk,
-                textAlign: "center",
-              }}
-            >
-              {totalShifts} shift{totalShifts === 1 ? "" : "s"} will be created
-            </div>
+            <SummaryRow label="Time" value={`${startTime} – ${endTime}`} />
           </div>
         </Card>
       </div>
@@ -731,5 +810,223 @@ function Field({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Numbered step wrapper — gives the form a clear "do step 1, then 2, then 3"
+ * shape. Bottom border separates each step except the last so the action
+ * buttons feel attached to step 3.
+ */
+function Step({
+  number,
+  title,
+  sub,
+  last,
+  children,
+}: {
+  number: number;
+  title: string;
+  sub?: string;
+  last?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        padding: "18px 20px 8px",
+        borderBottom: last ? "none" : `1px solid ${AC.line}`,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+        <div
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 13,
+            background: AC.brand,
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            fontWeight: 700,
+            flexShrink: 0,
+            lineHeight: 1,
+          }}
+        >
+          {number}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 15,
+              fontWeight: 700,
+              color: AC.ink,
+              letterSpacing: -0.2,
+              lineHeight: 1.2,
+            }}
+          >
+            {title}
+          </div>
+          {sub && (
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 12,
+                color: AC.mute,
+                marginTop: 3,
+                lineHeight: 1.45,
+              }}
+            >
+              {sub}
+            </div>
+          )}
+        </div>
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+/** "2026-05-07" → "Wed May 7". Anchors at noon to dodge DST flips. */
+function formatDateLabel(iso: string): string {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso + "T12:00:00");
+    return d.toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+/**
+ * Plain-English description of what the form will create. Composed from the
+ * same state the totals are derived from so it can never disagree with the
+ * "X shifts will be created" badge.
+ */
+function PreviewSentence({
+  totalShifts,
+  customers,
+  customerScope,
+  reps,
+  repScope,
+  shiftDate,
+  untilDate,
+  repeatMode,
+  dateCount,
+  startTime,
+  endTime,
+}: {
+  totalShifts: number;
+  customers: Customer[];
+  customerScope: CustomerScope;
+  reps: Profile[];
+  repScope: RepScope;
+  shiftDate: string;
+  untilDate: string;
+  repeatMode: "none" | "weekly";
+  dateCount: number;
+  startTime: string;
+  endTime: string;
+}) {
+  // Empty / blocked state — tell the user the next thing to do.
+  if (totalShifts === 0) {
+    if (customerScope !== null && customerScope.length === 0) {
+      return (
+        <span style={{ color: AC.mute }}>
+          Pick at least one customer in <b style={{ color: AC.ink2 }}>Step 1</b> to
+          continue.
+        </span>
+      );
+    }
+    if (repScope !== null && repScope.length === 0) {
+      return (
+        <span style={{ color: AC.mute }}>
+          Pick at least one rep in <b style={{ color: AC.ink2 }}>Step 1</b>, or switch
+          to Unassigned.
+        </span>
+      );
+    }
+    if (repeatMode === "weekly" && dateCount === 0) {
+      return (
+        <span style={{ color: AC.mute }}>
+          Pick at least one weekday in <b style={{ color: AC.ink2 }}>Step 2</b> for the
+          recurrence.
+        </span>
+      );
+    }
+    return <span style={{ color: AC.mute }}>Fill in the steps to see a preview.</span>;
+  }
+
+  const customerPiece: React.ReactNode = (() => {
+    if (customerScope === null) {
+      return (
+        <>
+          all <b style={{ color: AC.ink2 }}>{customers.length} customers</b>
+        </>
+      );
+    }
+    if (customerScope.length === 1) {
+      const c = customers.find((x) => x.id === customerScope[0]);
+      return <b style={{ color: AC.ink2 }}>{c?.name || "1 customer"}</b>;
+    }
+    return <b style={{ color: AC.ink2 }}>{customerScope.length} customers</b>;
+  })();
+
+  const repPiece: React.ReactNode = (() => {
+    if (repScope === null) {
+      return (
+        <>
+          {" "}
+          (<span style={{ color: AC.mute }}>claimable, no rep assigned</span>)
+        </>
+      );
+    }
+    if (repScope.length === 1) {
+      const r = reps.find((x) => x.id === repScope[0]);
+      return (
+        <>
+          {" "}
+          for <b style={{ color: AC.ink2 }}>{r ? displayName(r) : "1 rep"}</b>
+        </>
+      );
+    }
+    return (
+      <>
+        {" "}
+        for <b style={{ color: AC.ink2 }}>{repScope.length} reps</b>
+      </>
+    );
+  })();
+
+  const datePiece: React.ReactNode =
+    repeatMode === "none" ? (
+      <>
+        on <b style={{ color: AC.ink2 }}>{formatDateLabel(shiftDate)}</b>
+      </>
+    ) : (
+      <>
+        on <b style={{ color: AC.ink2 }}>{dateCount} dates</b> between{" "}
+        <b style={{ color: AC.ink2 }}>{formatDateLabel(shiftDate)}</b> and{" "}
+        <b style={{ color: AC.ink2 }}>{formatDateLabel(untilDate)}</b>
+      </>
+    );
+
+  return (
+    <span>
+      Shift at {customerPiece}
+      {repPiece}, {datePiece},{" "}
+      <b style={{ color: AC.ink2 }}>
+        {startTime}–{endTime}
+      </b>
+      .
+    </span>
   );
 }
