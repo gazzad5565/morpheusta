@@ -12,6 +12,7 @@ import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent, type EventType } from "./events-store";
 import { createShift } from "./shifts-store";
 import { todayLocalISO } from "./format";
+import { notifySaved, notifySaveError } from "./save-status";
 
 export interface PendingRequest {
   id: string; // composite "{userId}-{customerId}"
@@ -236,7 +237,10 @@ export async function deleteRequest(
     .eq("id", id)
     .maybeSingle();
   const { error } = await supabase.from("requested_shifts").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    notifySaveError(error.message, "request");
+    return { ok: false, error: error.message };
+  }
   const customerName =
     (row as { customer_name?: string } | null)?.customer_name || "a customer";
   const eventType: EventType =
@@ -253,5 +257,6 @@ export async function deleteRequest(
         ? `Approved request for ${customerName}`
         : `Declined request for ${customerName}`,
   });
+  notifySaved(outcome === "scheduled" ? "request approved" : "request declined");
   return { ok: true };
 }

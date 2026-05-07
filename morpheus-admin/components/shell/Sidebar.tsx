@@ -410,6 +410,60 @@ export function Sidebar() {
           <AGlyph name="logout" size={14} color={AC.sideMute} />
         </button>
       </div>
+
+      {/* "Powered by Morpheus TA" — small CTA at the very bottom of the
+          sidebar so even white-labelled customers see the platform mark
+          subtly. The 'TA' is the Time & Attendance module — distinct
+          from the broader Morpheus platform — and gets a brand-tinted
+          pill so it pops without shouting. */}
+      <a
+        href="https://morpheus.app"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          margin: "0 12px 12px",
+          padding: "8px 10px",
+          borderRadius: 8,
+          background: "transparent",
+          border: "1px solid #1B2027",
+          textDecoration: "none",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          fontFamily: AC.font,
+          fontSize: 10.5,
+          color: "#5C6571",
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          fontWeight: 600,
+        }}
+        title="Morpheus — Field Operations Suite"
+      >
+        Powered by{" "}
+        <span
+          style={{
+            color: AC.brand,
+            fontWeight: 800,
+            letterSpacing: 0.6,
+          }}
+        >
+          Morpheus
+        </span>
+        <span
+          style={{
+            padding: "1px 5px",
+            borderRadius: 4,
+            background: "rgba(36, 173, 217, 0.18)",
+            color: AC.brand,
+            fontWeight: 800,
+            letterSpacing: 0.6,
+            fontSize: 9.5,
+          }}
+        >
+          TA
+        </span>
+      </a>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent } from "./events-store";
 import { getAutoCheckoutTime } from "./settings-store";
 import { todayLocalISO } from "./format";
+import { notifySaved, notifySaveError } from "./save-status";
 
 export interface ShiftRow {
   id: string;
@@ -146,7 +147,10 @@ export async function createShift(
     })
     .select("id, customers(name)")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    notifySaveError(error.message, "shift");
+    return { ok: false, error: error.message };
+  }
   const customerName =
     (data as { customers?: { name?: string } } | null)?.customers?.name || "a customer";
   await logEvent({
@@ -156,6 +160,7 @@ export async function createShift(
     message: `Scheduled ${customerName} on ${s.shift_date} ${s.start_time}–${s.end_time}`,
     meta: { rep_assigned: s.rep_id ? true : false },
   });
+  notifySaved("shift");
   return { ok: true, id: data?.id };
 }
 
@@ -209,7 +214,10 @@ export async function updateShift(
   if (Object.keys(cleaned).length === 0) return { ok: true };
 
   const { error } = await supabase.from("shifts").update(cleaned).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    notifySaveError(error.message, "shift");
+    return { ok: false, error: error.message };
+  }
 
   const customerName =
     (cur as { customers?: { name?: string } } | null)?.customers?.name || "a customer";
@@ -222,6 +230,7 @@ export async function updateShift(
     message: `Updated shift at ${customerName}`,
     meta: { fields: Object.keys(cleaned) },
   });
+  notifySaved("shift");
   return { ok: true };
 }
 
@@ -235,7 +244,10 @@ export async function deleteShift(
     .eq("id", id)
     .maybeSingle();
   const { error } = await supabase.from("shifts").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    notifySaveError(error.message, "shift");
+    return { ok: false, error: error.message };
+  }
   const customerName =
     (row as { customers?: { name?: string } } | null)?.customers?.name || "a customer";
   await logEvent({
@@ -243,6 +255,7 @@ export async function deleteShift(
     customer_id: (row as { customer_id?: string } | null)?.customer_id || null,
     message: `Removed shift at ${customerName}`,
   });
+  notifySaved("shift removed");
   return { ok: true };
 }
 

@@ -8,6 +8,7 @@ import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listCustomers } from "@/lib/customers-store";
 import { listAllTasks, type TaskRow } from "@/lib/tasks-store";
+import { SaveIndicator } from "@/components/ui/SaveIndicator";
 import type { Customer } from "@/lib/types";
 
 /**
@@ -122,6 +123,10 @@ export function TopBar({ title, breadcrumbs, actions, search = true }: Props) {
       </div>
 
       <div style={{ flex: 1 }} />
+
+      {/* Global save status — every page sees the same pill so the user
+          never has to guess whether their change actually landed. */}
+      <SaveIndicator />
 
       {search && <SearchBox />}
 

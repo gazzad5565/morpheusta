@@ -19,22 +19,43 @@ import {
   getOrganisationLogoUrl,
   setOrganisationLogoUrl,
   uploadOrgLogo,
+  getOrganisationDetails,
+  setOrganisationAddress,
+  setOrganisationPhone,
+  setOrganisationEmail,
+  setOrganisationTaxNumber,
 } from "@/lib/settings-store";
 
 export default function OrganisationSettingsPage() {
   const [name, setName] = useState<string>("");
   const [logoUrl, setLogoUrl] = useState<string>("");
+  // Org details — address, phone, email, tax number. Saved together
+  // when the user clicks "Save details", so partial typing doesn't
+  // generate four save toasts.
+  const [address, setAddress] = useState<string>("");
+  const [phone, setPhone] = useState<string>("");
+  const [email, setEmail] = useState<string>("");
+  const [taxNumber, setTaxNumber] = useState<string>("");
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingDetails, setSavingDetails] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    Promise.all([getOrganisationName(), getOrganisationLogoUrl()]).then(([n, u]) => {
+    Promise.all([
+      getOrganisationName(),
+      getOrganisationLogoUrl(),
+      getOrganisationDetails(),
+    ]).then(([n, u, d]) => {
       setName(n);
       setLogoUrl(u);
+      setAddress(d.address);
+      setPhone(d.phone);
+      setEmail(d.email);
+      setTaxNumber(d.taxNumber);
       setLoaded(true);
     });
   }, []);
@@ -77,6 +98,27 @@ export default function OrganisationSettingsPage() {
     }
     setLogoUrl(up.url);
     setMessage("Logo updated. The sidebar will pick it up on the next page load.");
+  };
+
+  const onSaveDetails = async () => {
+    setError(null);
+    setMessage(null);
+    setSavingDetails(true);
+    // Save four keys in parallel — each is its own app_settings row.
+    // We only surface the first error so the user gets a clean message.
+    const results = await Promise.all([
+      setOrganisationAddress(address),
+      setOrganisationPhone(phone),
+      setOrganisationEmail(email),
+      setOrganisationTaxNumber(taxNumber),
+    ]);
+    setSavingDetails(false);
+    const firstErr = results.find((r) => !r.ok);
+    if (firstErr) {
+      setError(firstErr.error || "Couldn't save.");
+      return;
+    }
+    setMessage("Saved.");
   };
 
   const onClearLogo = async () => {
@@ -152,6 +194,81 @@ export default function OrganisationSettingsPage() {
             }}
           >
             Shown next to the logo in the admin sidebar.
+          </div>
+        </Card>
+
+        {/* Contact details — address, phone, email, tax number. KISS:
+            free-text fields, single Save button, no validation beyond
+            "trim the whitespace". Used by future invoice / export PDFs
+            and possibly the rep app footer down the line. */}
+        <Card padding={20}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              color: AC.mute,
+              fontWeight: 700,
+              letterSpacing: 0.3,
+              textTransform: "uppercase",
+              marginBottom: 10,
+            }}
+          >
+            Contact details
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <DetailField
+              label="Address"
+              value={address}
+              onChange={setAddress}
+              placeholder="123 Long Street, Cape Town"
+              span={2}
+              multiline
+              disabled={!loaded || savingDetails}
+            />
+            <DetailField
+              label="Phone"
+              value={phone}
+              onChange={setPhone}
+              placeholder="+27 21 555 0100"
+              disabled={!loaded || savingDetails}
+            />
+            <DetailField
+              label="Email"
+              value={email}
+              onChange={setEmail}
+              placeholder="ops@your-co.com"
+              type="email"
+              disabled={!loaded || savingDetails}
+            />
+            <DetailField
+              label="Tax number"
+              value={taxNumber}
+              onChange={setTaxNumber}
+              placeholder="VAT / EIN / TRN"
+              span={2}
+              disabled={!loaded || savingDetails}
+            />
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+            <Btn
+              size="sm"
+              kind="primary"
+              onClick={onSaveDetails}
+              disabled={!loaded || savingDetails}
+            >
+              {savingDetails ? "Saving…" : "Save details"}
+            </Btn>
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11.5,
+              color: AC.mute,
+              marginTop: 8,
+              lineHeight: 1.45,
+            }}
+          >
+            Used on exports and the company footer. All fields are optional.
           </div>
         </Card>
 
@@ -277,5 +394,78 @@ export default function OrganisationSettingsPage() {
         )}
       </div>
     </SettingsShell>
+  );
+}
+
+/**
+ * Tiny labelled input used by the contact-details card. `span={2}` lets
+ * a field stretch the full grid width (used for address + tax number
+ * which read more naturally on one line).
+ */
+function DetailField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  span = 1,
+  multiline,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  type?: string;
+  span?: 1 | 2;
+  multiline?: boolean;
+  disabled?: boolean;
+}) {
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "8px 10px",
+    borderRadius: 8,
+    border: `1px solid ${AC.line}`,
+    background: "#fff",
+    fontFamily: AC.font,
+    fontSize: 13,
+    color: AC.ink,
+    outline: "none",
+  };
+  return (
+    <div style={{ gridColumn: span === 2 ? "span 2" : "auto" }}>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          color: AC.mute,
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
+      {multiline ? (
+        <textarea
+          rows={2}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          style={{ ...inputStyle, resize: "vertical", minHeight: 56 }}
+        />
+      ) : (
+        <input
+          type={type}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          style={inputStyle}
+        />
+      )}
+    </div>
   );
 }

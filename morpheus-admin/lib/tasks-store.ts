@@ -8,6 +8,7 @@
 
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent } from "./events-store";
+import { notifySaved, notifySaveError } from "./save-status";
 
 export interface TaskRow {
   id: string;
@@ -156,7 +157,10 @@ export async function createTask(
   }
 
   const { error } = await supabase.from("customer_tasks").insert(rows);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    notifySaveError(error.message, "task");
+    return { ok: false, error: error.message };
+  }
   await logEvent({
     event_type: "task.created",
     message:
@@ -165,6 +169,7 @@ export async function createTask(
         : `Added task "${t.name}" to ${rows.length} customer${rows.length === 1 ? "" : "s"}`,
     meta: { customer_count: rows.length },
   });
+  notifySaved("task");
   return { ok: true, count: rows.length };
 }
 
@@ -178,13 +183,17 @@ export async function deleteTask(
     .eq("id", id)
     .maybeSingle();
   const { error } = await supabase.from("customer_tasks").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    notifySaveError(error.message, "task");
+    return { ok: false, error: error.message };
+  }
   const taskName = (row as { name?: string } | null)?.name || "task";
   await logEvent({
     event_type: "task.deleted",
     customer_id: (row as { customer_id?: string | null } | null)?.customer_id || null,
     message: `Removed task "${taskName}"`,
   });
+  notifySaved("task removed");
   return { ok: true };
 }
 
@@ -237,6 +246,10 @@ export async function updateTask(
     .from("customer_tasks")
     .update(dbPatch)
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    notifySaveError(error.message, "task");
+    return { ok: false, error: error.message };
+  }
+  notifySaved("task");
   return { ok: true };
 }

@@ -661,6 +661,11 @@ function BreakCard() {
   const PURPLE_TINT = "#EDE7F8";
   const [breakSince, setBreakSince] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  // Whether the duration-chooser sheet is open. Tapping "Take a break"
+  // no longer auto-starts the break — it now opens this sheet so the
+  // rep picks 15 / 30 / 60 / open-ended first. Stops the "I tapped and
+  // suddenly I'm on break" surprise.
+  const [chooserOpen, setChooserOpen] = useState(false);
 
   // Hydrate from storage on mount so a break started from another
   // surface (e.g. the post-checkout summary) shows up here as live.
@@ -681,15 +686,29 @@ function BreakCard() {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [breakSince]);
-  const elapsed = breakSince ? Math.floor((now - breakSince) / 1000) : 0;
+  // Compute elapsed off Date.now() rather than the `now` state — `now`
+  // is only there to trigger re-renders. Using it for the value caused
+  // a brief negative blink right after starting a break (because `now`
+  // was last set on mount, before breakSince). Math.max(0, ...) is
+  // belt-and-braces in case a clock skew sets breakSince in the future.
+  // We still reference `now` so React knows to re-read on each tick.
+  void now;
+  const elapsed = breakSince
+    ? Math.max(0, Math.floor((Date.now() - breakSince) / 1000))
+    : 0;
   const m = Math.floor(elapsed / 60);
   const s = elapsed % 60;
 
   // Off-shift break — no shift_id attached, but the event still goes
   // into shift_events so the audit trail captures rest time.
-  const startBreak = () => {
+  // `targetMinutes` is purely informational (logged in the event meta)
+  // — the timer counts up, not down, so reps can take longer if they
+  // need to and we still capture elapsed time.
+  const startBreak = (targetMinutes: number | null) => {
     const ts = Date.now();
     setBreakSince(ts);
+    setNow(ts); // sync `now` so the elapsed render is exactly 0:00
+    setChooserOpen(false);
     try {
       window.localStorage.setItem(BREAK_LS_KEY, String(ts));
     } catch {
@@ -697,8 +716,13 @@ function BreakCard() {
     }
     void logEvent({
       event_type: "shift.break_started",
-      message: "Started a rest break (off-shift)",
-      meta: { kind: "off_shift" },
+      message: targetMinutes
+        ? `Started a ${targetMinutes}-minute break (off-shift)`
+        : "Started a rest break (off-shift)",
+      meta: {
+        kind: "off_shift",
+        ...(targetMinutes ? { target_minutes: targetMinutes } : {}),
+      },
     });
   };
   const endBreak = () => {
@@ -726,7 +750,7 @@ function BreakCard() {
       {breakSince === null ? (
         <button
           type="button"
-          onClick={startBreak}
+          onClick={() => setChooserOpen(true)}
           style={{
             width: "100%",
             background: MC.card,
@@ -874,7 +898,192 @@ function BreakCard() {
           </div>
         </div>
       )}
+
+      {/* Duration chooser — slide-up sheet anchored to the phone-frame.
+          Tap outside or "Cancel" to dismiss without starting anything.
+          Picking a duration logs target_minutes in the event meta so
+          the manager can later see "this rep took a 30-min break". */}
+      {chooserOpen && breakSince === null && (
+        <BreakChooserSheet
+          purple={PURPLE}
+          purpleTint={PURPLE_TINT}
+          onPick={(mins) => startBreak(mins)}
+          onClose={() => setChooserOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Slide-up sheet to pick a break duration before the timer kicks off.
+ * Replaces the old "tap → break starts immediately" path that surprised
+ * reps. Note: the chosen duration is stored in the event's `target_minutes`
+ * meta only — the timer always counts up so a rep who runs over still
+ * gets accurate elapsed time logged at end-of-break.
+ */
+function BreakChooserSheet({
+  purple,
+  purpleTint,
+  onPick,
+  onClose,
+}: {
+  purple: string;
+  purpleTint: string;
+  onPick: (minutes: number | null) => void;
+  onClose: () => void;
+}) {
+  const options: { label: string; sub: string; minutes: number | null }[] = [
+    { label: "Short break", sub: "15 min", minutes: 15 },
+    { label: "Lunch break", sub: "30 min", minutes: 30 },
+    { label: "Long break", sub: "60 min", minutes: 60 },
+    { label: "Open-ended", sub: "I'll end it manually", minutes: null },
+  ];
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(10,15,30,.42)",
+          zIndex: 60,
+          animation: "bcs-fade-in .18s ease-out both",
+        }}
+      />
+      {/* Sheet */}
+      <div
+        role="dialog"
+        aria-label="Pick break duration"
+        style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 61,
+          background: MC.card,
+          borderTopLeftRadius: 18,
+          borderTopRightRadius: 18,
+          padding: "16px 16px calc(env(safe-area-inset-bottom, 16px) + 12px)",
+          boxShadow: "0 -16px 32px rgba(10,15,30,.22)",
+          animation: "bcs-slide-up .26s cubic-bezier(.22, 1, .36, 1) both",
+        }}
+      >
+        <div style={{ width: 40, height: 4, borderRadius: 99, background: MC.line, margin: "0 auto 12px" }} />
+        <div
+          style={{
+            fontFamily: MC.fontDisplay,
+            fontSize: 17,
+            fontWeight: 700,
+            color: MC.ink,
+            letterSpacing: -0.3,
+            marginBottom: 4,
+          }}
+        >
+          Take a break
+        </div>
+        <div
+          style={{
+            fontFamily: MC.font,
+            fontSize: 12.5,
+            color: MC.mute,
+            marginBottom: 14,
+            lineHeight: 1.45,
+          }}
+        >
+          Pick a length — your timer counts up so it&apos;s fine to run over.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {options.map((o) => (
+            <button
+              key={o.label}
+              type="button"
+              onClick={() => onPick(o.minutes)}
+              style={{
+                width: "100%",
+                background: "#fff",
+                border: `1px solid ${MC.line}`,
+                borderRadius: 12,
+                padding: "11px 14px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                textAlign: "left",
+              }}
+            >
+              <div
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 9,
+                  background: purpleTint,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Glyph name="clock" size={16} color={purple} strokeWidth={2.4} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: MC.ink,
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  {o.label}
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 12,
+                    color: MC.mute,
+                    marginTop: 2,
+                  }}
+                >
+                  {o.sub}
+                </div>
+              </div>
+              <Glyph name="chev-r" size={16} color={MC.hint} />
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            width: "100%",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: "13px 0 4px",
+            fontFamily: MC.font,
+            fontSize: 13.5,
+            fontWeight: 600,
+            color: MC.mute,
+            letterSpacing: -0.1,
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+      <style>{`
+        @keyframes bcs-slide-up {
+          0%   { transform: translateY(100%); opacity: 0; }
+          100% { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes bcs-fade-in {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+      `}</style>
+    </>
   );
 }
 

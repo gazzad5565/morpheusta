@@ -5,6 +5,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { notifySaved, notifySaveError } from "./save-status";
 
 interface SettingRow {
   key: string;
@@ -24,7 +25,9 @@ async function readSetting<T>(key: string, fallback: T): Promise<T> {
 
 async function writeSetting(
   key: string,
-  value: unknown
+  value: unknown,
+  /** Optional label for the global save indicator. Pass `null` to skip. */
+  notifyLabel: string | null = "settings"
 ): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
@@ -32,7 +35,11 @@ async function writeSetting(
   const { error } = await supabase
     .from("app_settings")
     .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if (notifyLabel) notifySaveError(error.message, notifyLabel);
+    return { ok: false, error: error.message };
+  }
+  if (notifyLabel) notifySaved(notifyLabel);
   return { ok: true };
 }
 
@@ -127,6 +134,66 @@ export async function setOrganisationLogoUrl(
   url: string
 ): Promise<{ ok: boolean; error?: string }> {
   return writeSetting("organisation_logo_url", url);
+}
+
+// ─── Organisation contact details ──────────────────────────────────────
+//
+// Free-text fields, all optional. KISS: anything you type is what we store.
+// Each is its own app_settings row so updates can be partial without
+// stomping the rest. Used today only on the printable invoice / bill of
+// materials placeholder + the settings page itself; future surfaces
+// (rep app footer, exported PDF, etc) read the same values.
+
+const ORG_TEXT_KEYS = [
+  "organisation_address",
+  "organisation_phone",
+  "organisation_email",
+  "organisation_tax_number",
+] as const;
+type OrgTextKey = (typeof ORG_TEXT_KEYS)[number];
+
+async function readOrgText(key: OrgTextKey): Promise<string> {
+  const v = await readSetting<string>(key, "");
+  return typeof v === "string" ? v : "";
+}
+
+async function writeOrgText(
+  key: OrgTextKey,
+  value: string
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting(key, value.trim());
+}
+
+export const getOrganisationAddress = () => readOrgText("organisation_address");
+export const setOrganisationAddress = (v: string) =>
+  writeOrgText("organisation_address", v);
+
+export const getOrganisationPhone = () => readOrgText("organisation_phone");
+export const setOrganisationPhone = (v: string) =>
+  writeOrgText("organisation_phone", v);
+
+export const getOrganisationEmail = () => readOrgText("organisation_email");
+export const setOrganisationEmail = (v: string) =>
+  writeOrgText("organisation_email", v);
+
+export const getOrganisationTaxNumber = () => readOrgText("organisation_tax_number");
+export const setOrganisationTaxNumber = (v: string) =>
+  writeOrgText("organisation_tax_number", v);
+
+/** One-shot fetch of every org text field for a settings form. */
+export async function getOrganisationDetails(): Promise<{
+  address: string;
+  phone: string;
+  email: string;
+  taxNumber: string;
+}> {
+  const [address, phone, email, taxNumber] = await Promise.all([
+    getOrganisationAddress(),
+    getOrganisationPhone(),
+    getOrganisationEmail(),
+    getOrganisationTaxNumber(),
+  ]);
+  return { address, phone, email, taxNumber };
 }
 
 /**

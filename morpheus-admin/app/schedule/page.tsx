@@ -60,6 +60,19 @@ function stateRank(s: ShiftRow): number {
 const UNASSIGNED_KEY = "__unassigned__";
 type ViewMode = "days" | "reps";
 
+// Shared dropdown style for the toolbar filters (rep + customer). Kept
+// here so the two selects line up cell-for-cell on every screen size.
+const filterSelectStyle: React.CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: 8,
+  border: `1px solid #E2E8EE`,
+  background: "#fff",
+  fontFamily: "inherit",
+  fontSize: 12,
+  color: "#0E141B",
+  cursor: "pointer",
+};
+
 /**
  * Smart default start time for the "+ Add" button on a day cell.
  *
@@ -101,6 +114,10 @@ export default function SchedulePage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
   const [customerFilter, setCustomerFilter] = useState<string>("All");
+  // Rep filter — "All" / __unassigned__ / specific rep id. Mirrors the
+  // customer filter so a manager can quickly narrow the calendar to
+  // "show me Hayid's whole week" without switching to the Reps view.
+  const [repFilter, setRepFilter] = useState<string>("All");
   const [loading, setLoading] = useState(true);
 
   // View toggle (Days / Reps). The page ALWAYS opens on Days — that's
@@ -166,13 +183,18 @@ export default function SchedulePage() {
     [allProfiles]
   );
 
-  // Filter once, then index two different ways.
+  // Filter once (by customer + rep), then index two different ways.
+  // repFilter values: "All" → no rep filter; "__unassigned__" → rep_id IS NULL;
+  // any other string → that exact rep id.
   const filteredShifts = useMemo(
     () =>
-      shifts.filter(
-        (s) => customerFilter === "All" || s.customer_id === customerFilter
-      ),
-    [shifts, customerFilter]
+      shifts.filter((s) => {
+        if (customerFilter !== "All" && s.customer_id !== customerFilter) return false;
+        if (repFilter === "All") return true;
+        if (repFilter === UNASSIGNED_KEY) return !s.rep_id;
+        return s.rep_id === repFilter;
+      }),
+    [shifts, customerFilter, repFilter]
   );
 
   // Days view: { dayISO -> shifts[] }
@@ -293,18 +315,24 @@ export default function SchedulePage() {
             <ViewToggle view={view} onChange={setView} />
             <div style={{ flex: 1 }} />
             <select
+              value={repFilter}
+              onChange={(e) => setRepFilter(e.target.value)}
+              title="Filter by rep"
+              style={filterSelectStyle}
+            >
+              <option value="All">All reps</option>
+              <option value={UNASSIGNED_KEY}>Unassigned</option>
+              {repsForRows.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {displayName(r)}
+                </option>
+              ))}
+            </select>
+            <select
               value={customerFilter}
               onChange={(e) => setCustomerFilter(e.target.value)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: `1px solid ${AC.line}`,
-                background: "#fff",
-                fontFamily: AC.font,
-                fontSize: 12,
-                color: AC.ink,
-                cursor: "pointer",
-              }}
+              title="Filter by customer"
+              style={filterSelectStyle}
             >
               <option value="All">All customers</option>
               {customers.map((c) => (
