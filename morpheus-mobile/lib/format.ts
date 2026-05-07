@@ -21,6 +21,26 @@ export function localISO(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * "5s" / "12m" / "3h" / "2d" — short relative time string. Accepts a
+ * Date, an ISO string, or a unix-ms number. Returns "just now" for
+ * anything under 5 seconds.
+ */
+export function formatRelativeShort(when: Date | string | number): string {
+  const ms = typeof when === "number"
+    ? Date.now() - when
+    : Date.now() - new Date(when).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const days = Math.floor(h / 24);
+  return `${days}d ago`;
+}
+
 // ─── Times ──────────────────────────────────────────────────────────────
 
 export function formatTime(t: string, opts?: { compact?: boolean }): string {

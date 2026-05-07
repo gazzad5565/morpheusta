@@ -5,10 +5,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { type Shift } from "@/lib/mock-data";
+import { formatRelativeShort } from "@/lib/format";
 import {
   listRequestedShifts,
   removeRequestedShift,
   subscribeRequestedShifts,
+  type RequestedShift,
 } from "@/lib/shift-store";
 import {
   listMyShiftsToday,
@@ -37,7 +39,7 @@ export default function ShiftsListPage() {
   // - requested:   rep-requested shifts (from requested_shifts table)
   const [mine, setMine] = useState<DbShift[]>([]);
   const [unassigned, setUnassigned] = useState<DbShift[]>([]);
-  const [requested, setRequested] = useState<Shift[]>([]);
+  const [requested, setRequested] = useState<RequestedShift[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [claiming, setClaiming] = useState<string | null>(null);
 
@@ -167,6 +169,7 @@ export default function ShiftsListPage() {
                 expanded={false}
                 unscheduled
                 requested
+                requestedAt={s.requestedAt}
                 onRemove={() => onRemoveRequested(s.id)}
               />
             ))}
@@ -243,6 +246,7 @@ function ShiftRow({
   expanded,
   unscheduled,
   requested,
+  requestedAt,
   claimable,
   claiming,
   onToggle,
@@ -257,6 +261,8 @@ function ShiftRow({
   expanded: boolean;
   unscheduled?: boolean;
   requested?: boolean;
+  /** When the request was submitted — used to render "X ago" relative time. */
+  requestedAt?: number;
   claimable?: boolean;
   claiming?: boolean;
   onToggle?: () => void;
@@ -282,7 +288,20 @@ function ShiftRow({
       style={{
         background: MC.card,
         borderRadius: MC.radiusCard,
-        border: `1px solid ${isInProgress ? MC.brand + "55" : MC.line}`,
+        // Pending requests get a warn-tone left rail so the rep can see
+        // at a glance that this card is waiting on the manager rather
+        // than something they can act on. In-progress shifts get the
+        // brand-tint border like before.
+        border: `1px solid ${
+          requested
+            ? MC.warn + "66"
+            : isInProgress
+            ? MC.brand + "55"
+            : MC.line
+        }`,
+        borderLeft: requested
+          ? `3px solid ${MC.warn}`
+          : `1px solid ${isInProgress ? MC.brand + "55" : MC.line}`,
         overflow: "hidden",
         boxShadow: expanded
           ? "0 12px 28px rgba(10,15,30,.09)"
@@ -371,20 +390,24 @@ function ShiftRow({
                   </>
                 ) : requested ? (
                   <>
-                    <span>Requested · pending approval</span>
+                    <Glyph name="clock" size={13} color={MC.warn} strokeWidth={2} />
+                    <span style={{ color: MC.ink2 }}>
+                      Waiting for manager
+                      {requestedAt ? ` · ${formatRelativeShort(requestedAt)}` : ""}
+                    </span>
                     <span
                       style={{
                         padding: "1px 7px",
                         borderRadius: 999,
-                        background: MC.brandTint,
-                        color: MC.brandInk,
+                        background: MC.warnTint,
+                        color: "#7A560A",
                         fontSize: 9.5,
                         fontWeight: 700,
                         letterSpacing: 0.4,
                         textTransform: "uppercase",
                       }}
                     >
-                      NEW
+                      Pending
                     </span>
                   </>
                 ) : (

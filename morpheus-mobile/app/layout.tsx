@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { MenuShell } from "@/components/MenuShell";
 import { AuthGate } from "@/components/AuthGate";
+import { RequestResolutionWatcher } from "@/components/RequestResolutionWatcher";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -48,6 +49,11 @@ export default function RootLayout({
         <div className="phone-frame">
           <AuthGate>
             <MenuShell>{children}</MenuShell>
+            {/* Listens for request.scheduled / request.declined events
+                fired by admin and surfaces a tappable banner. Renders
+                nothing while idle. Mounted at layout level so banners
+                show on whatever page the rep is on. */}
+            <RequestResolutionWatcher />
           </AuthGate>
         </div>
       </body>
