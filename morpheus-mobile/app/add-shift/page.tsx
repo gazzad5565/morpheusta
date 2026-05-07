@@ -6,7 +6,11 @@ import { MC } from "@/lib/tokens";
 import { type Customer } from "@/lib/mock-data";
 import { addRequestedShift, listRequestedShifts } from "@/lib/shift-store";
 import { listAllCustomers } from "@/lib/customers-store";
-import { listMyShiftsToday } from "@/lib/shifts-store";
+import {
+  listMyShiftsToday,
+  selfCreateImmediateShift,
+} from "@/lib/shifts-store";
+import { getShiftRequestAutoApprove } from "@/lib/settings-store";
 import { AppHeader, AppFooter, CustomerTile } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
 
@@ -31,6 +35,11 @@ export default function AddShiftPage() {
   // even when they're scrolled deep in the customer list and the
   // sticky CTA is the only visible feedback otherwise.
   const [lastRequested, setLastRequested] = useState<string | null>(null);
+  const [autoApproved, setAutoApproved] = useState(false);
+  // Org-level "approval not needed" toggle. Read once on mount; if it
+  // changes mid-session a refresh picks up the new value (this isn't
+  // a hot path so the small staleness is fine).
+  const [autoApprove, setAutoApprove] = useState(false);
   const toastTimer = useRef<number | null>(null);
 
   // Hydrate everything from the DB on mount.
@@ -44,6 +53,9 @@ export default function AddShiftPage() {
     });
     listMyShiftsToday().then((rows) => {
       if (!cancelled) setTodayIds(new Set(rows.map((s) => s.id)));
+    });
+    getShiftRequestAutoApprove().then((on) => {
+      if (!cancelled) setAutoApprove(on);
     });
     return () => {
       cancelled = true;
@@ -67,16 +79,33 @@ export default function AddShiftPage() {
   const onRequest = (c: Customer) => {
     // Optimistic — flip UI immediately, persist in the background
     setRequestedIds((ids) => (ids.includes(c.id) ? ids : [...ids, c.id]));
-    addRequestedShift({
-      id: c.id,
-      name: c.name,
-      initials: c.initials,
-      color: c.color,
-      code: c.code,
-    });
-    // Show the confirmation toast for ~3.5s. If the rep taps multiple
-    // customers in quick succession we just refresh the timer so the
-    // toast follows whichever they tapped last.
+
+    if (autoApprove) {
+      // Org has "approval not needed" on → bypass the requested_shifts
+      // queue entirely and write a scheduled shift directly. The
+      // toast still confirms by name, but with a different label so
+      // the rep knows they can check in straight away.
+      void selfCreateImmediateShift(c.id);
+      setAutoApproved(true);
+      // Add to today's set so a re-tap of the same customer flips
+      // straight to "Today" rather than "Requested" / spawning a
+      // duplicate.
+      setTodayIds((prev) => {
+        const next = new Set(prev);
+        next.add(c.id);
+        return next;
+      });
+    } else {
+      addRequestedShift({
+        id: c.id,
+        name: c.name,
+        initials: c.initials,
+        color: c.color,
+        code: c.code,
+      });
+      setAutoApproved(false);
+    }
+
     setLastRequested(c.name);
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setLastRequested(null), 3500);
@@ -350,7 +379,7 @@ export default function AddShiftPage() {
                 textTransform: "uppercase",
               }}
             >
-              Request sent
+              {autoApproved ? "Shift added" : "Request sent"}
             </div>
             <div
               style={{
@@ -374,7 +403,9 @@ export default function AddShiftPage() {
                 marginTop: 1,
               }}
             >
-              Your manager has been notified.
+              {autoApproved
+                ? "Ready to check in on Today's Shifts."
+                : "Your manager has been notified."}
             </div>
           </div>
         </div>

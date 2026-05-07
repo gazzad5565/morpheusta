@@ -37,6 +37,28 @@ import {
 } from "@/lib/events-store";
 
 type TabKey = "needs-action" | "all";
+type RangeKey = "today" | "7d" | "30d" | "all";
+
+const RANGE_LABEL: Record<RangeKey, string> = {
+  today: "Today",
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+  all: "All time",
+};
+
+/** ISO timestamp threshold for a given range — events with
+ *  created_at >= threshold pass the filter. `all` returns null
+ *  meaning no filter. */
+function rangeStart(range: RangeKey): number | null {
+  if (range === "all") return null;
+  const now = new Date();
+  if (range === "today") {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return start.getTime();
+  }
+  const days = range === "7d" ? 7 : 30;
+  return Date.now() - days * 24 * 60 * 60 * 1000;
+}
 
 function formatRelative(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -56,6 +78,12 @@ export function LiveFeedPanel() {
   // managers want to see. The "Needs action" pill below already pulses
   // when there's something to deal with, so they won't miss it.
   const [activeTab, setActiveTab] = useState<TabKey>("all");
+  // Date range for the All activity feed. Default = Today since the
+  // event log grows quickly and "today's pulse" is what the manager
+  // most often needs. The feed itself is capped to 50 most-recent
+  // server-side, but the range filter is purely client-side now —
+  // good enough until the log gets big enough to warrant pagination.
+  const [range, setRange] = useState<RangeKey>("today");
 
   // Pending requests (Needs action)
   const [requests, setRequests] = useState<PendingRequest[]>([]);
@@ -286,12 +314,22 @@ export function LiveFeedPanel() {
           requests={requests}
           loaded={requestsLoaded}
           busyId={busyId}
+          recentEvents={events}
+          eventsLoaded={eventsLoaded}
+          onSwitchToAll={() => setActiveTab("all")}
           onSchedule={onSchedule}
           onApprove={onApprove}
           onDecline={onDecline}
         />
       )}
-      {activeTab === "all" && <AllActivityList events={events} loaded={eventsLoaded} />}
+      {activeTab === "all" && (
+        <AllActivityList
+          events={events}
+          loaded={eventsLoaded}
+          range={range}
+          onRangeChange={setRange}
+        />
+      )}
     </Card>
   );
 }
@@ -302,6 +340,9 @@ function NeedsActionList({
   requests,
   loaded,
   busyId,
+  recentEvents,
+  eventsLoaded,
+  onSwitchToAll,
   onSchedule,
   onApprove,
   onDecline,
@@ -309,6 +350,11 @@ function NeedsActionList({
   requests: PendingRequest[];
   loaded: boolean;
   busyId: string | null;
+  /** Last few events to show below "All clear" so the panel isn't
+   *  empty when there's nothing actionable. */
+  recentEvents: ShiftEvent[];
+  eventsLoaded: boolean;
+  onSwitchToAll: () => void;
   onSchedule: (r: PendingRequest) => void;
   onApprove: (r: PendingRequest) => void;
   onDecline: (r: PendingRequest) => void;
@@ -321,28 +367,137 @@ function NeedsActionList({
     );
   }
   if (requests.length === 0) {
+    // Inbox-zero state: lead with a satisfying "all caught up" line,
+    // then drop the 5 most recent activity events below so the
+    // panel still has something useful to look at. Tap "View all"
+    // to switch to the activity tab.
+    const peek = recentEvents.slice(0, 5);
     return (
-      <div
-        style={{
-          padding: 28,
-          textAlign: "center",
-          background: "#fff",
-        }}
-      >
-        <div style={{ fontFamily: AC.font, fontSize: 13, fontWeight: 600, color: AC.ink2 }}>
-          All clear
+      <div style={{ background: "#fff" }}>
+        <div style={{ padding: "24px 16px 12px", textAlign: "center" }}>
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 999,
+              background: AC.okTint,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 8,
+            }}
+          >
+            <AGlyph name="check" size={20} color={AC.ok} />
+          </div>
+          <div style={{ fontFamily: AC.font, fontSize: 14, fontWeight: 700, color: AC.ink, letterSpacing: -0.1 }}>
+            All caught up
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11.5,
+              color: AC.mute,
+              marginTop: 4,
+              lineHeight: 1.5,
+            }}
+          >
+            Rep requests will land here as they come in.
+          </div>
         </div>
-        <div
-          style={{
-            fontFamily: AC.font,
-            fontSize: 11.5,
-            color: AC.mute,
-            marginTop: 6,
-            lineHeight: 1.5,
-          }}
-        >
-          Nothing needs attention. Rep requests + flagged shifts will land here.
-        </div>
+        {eventsLoaded && peek.length > 0 && (
+          <div style={{ borderTop: `1px solid ${AC.lineDim}` }}>
+            <div
+              style={{
+                padding: "10px 14px 4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontFamily: AC.font,
+                fontSize: 10.5,
+                fontWeight: 700,
+                color: AC.mute,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+              }}
+            >
+              <span>Recent activity</span>
+              <button
+                type="button"
+                onClick={onSwitchToAll}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: AC.brandDeep,
+                  cursor: "pointer",
+                  fontFamily: AC.font,
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                }}
+              >
+                View all →
+              </button>
+            </div>
+            <div style={{ padding: "0 12px 10px" }}>
+              {peek.map((e, i) => {
+                const tone = eventTone(e.event_type);
+                const accent =
+                  tone === "ok"
+                    ? AC.ok
+                    : tone === "warn"
+                    ? AC.warn
+                    : tone === "danger"
+                    ? AC.danger
+                    : AC.brand;
+                return (
+                  <div
+                    key={e.id}
+                    style={{
+                      padding: "7px 10px",
+                      borderBottom:
+                        i < peek.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                      borderLeft: `2px solid ${accent}`,
+                      paddingLeft: 10,
+                      marginLeft: -2,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontFamily: AC.font,
+                        fontSize: 11.5,
+                        color: AC.ink,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      <b style={{ fontWeight: 700 }}>{e.actor_label || "System"}</b>{" "}
+                      <span style={{ color: AC.mute }}>
+                        {EVENT_LABEL[e.event_type] || e.event_type}
+                      </span>
+                      {e.message && (
+                        <>
+                          {" — "}
+                          <span style={{ color: AC.ink2 }}>{e.message}</span>
+                        </>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: AC.fontMono,
+                        fontSize: 10,
+                        color: AC.hint,
+                        marginTop: 1,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {formatRelative(e.created_at)} ago
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -483,47 +638,126 @@ function NeedsActionList({
 function AllActivityList({
   events,
   loaded,
+  range,
+  onRangeChange,
 }: {
   events: ShiftEvent[];
   loaded: boolean;
+  range: RangeKey;
+  onRangeChange: (r: RangeKey) => void;
 }) {
-  if (!loaded) {
-    return (
-      <div style={{ padding: 24, fontFamily: AC.font, fontSize: 12, color: AC.mute, textAlign: "center" }}>
-        Loading…
-      </div>
-    );
-  }
-  if (events.length === 0) {
-    return (
-      <div
+  // Apply the date filter client-side. The events array is already
+  // capped to 50 server-side; once the log gets bigger this branches
+  // into a server-side window with cursoring.
+  const startMs = rangeStart(range);
+  const filtered =
+    startMs === null
+      ? events
+      : events.filter((e) => new Date(e.created_at).getTime() >= startMs);
+
+  const RangePicker = (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 12px",
+        borderBottom: `1px solid ${AC.lineDim}`,
+        background: "#fff",
+      }}
+    >
+      <span
         style={{
-          padding: 28,
-          textAlign: "center",
-          background: "#fff",
+          fontFamily: AC.font,
+          fontSize: 10.5,
+          color: AC.mute,
+          fontWeight: 700,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
         }}
       >
-        <div style={{ fontFamily: AC.font, fontSize: 13, fontWeight: 600, color: AC.ink2 }}>
-          Quiet right now
+        Show
+      </span>
+      <select
+        value={range}
+        onChange={(e) => onRangeChange(e.target.value as RangeKey)}
+        style={{
+          padding: "4px 8px",
+          borderRadius: 6,
+          border: `1px solid ${AC.line}`,
+          background: "#fff",
+          fontFamily: AC.font,
+          fontSize: 11.5,
+          color: AC.ink,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        {(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => (
+          <option key={k} value={k}>
+            {RANGE_LABEL[k]}
+          </option>
+        ))}
+      </select>
+      <div style={{ flex: 1 }} />
+      <span
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          color: AC.mute,
+          fontWeight: 600,
+        }}
+      >
+        {filtered.length} {filtered.length === 1 ? "event" : "events"}
+      </span>
+    </div>
+  );
+
+  if (!loaded) {
+    return (
+      <>
+        {RangePicker}
+        <div style={{ padding: 24, fontFamily: AC.font, fontSize: 12, color: AC.mute, textAlign: "center" }}>
+          Loading…
         </div>
+      </>
+    );
+  }
+  if (filtered.length === 0) {
+    return (
+      <>
+        {RangePicker}
         <div
           style={{
-            fontFamily: AC.font,
-            fontSize: 11.5,
-            color: AC.mute,
-            marginTop: 6,
-            lineHeight: 1.5,
+            padding: 28,
+            textAlign: "center",
+            background: "#fff",
           }}
         >
-          Check-ins, claims, schedules, requests, customer changes — they'll all stream
-          here as they happen.
+          <div style={{ fontFamily: AC.font, fontSize: 13, fontWeight: 600, color: AC.ink2 }}>
+            Nothing in this window
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11.5,
+              color: AC.mute,
+              marginTop: 6,
+              lineHeight: 1.5,
+            }}
+          >
+            Try a wider range — check-ins, claims, schedules, requests, customer
+            changes all stream here.
+          </div>
         </div>
-      </div>
+      </>
     );
   }
   return (
-    <div style={{ padding: "10px 12px", maxHeight: 480, overflowY: "auto" }}>
-      {events.map((e, i) => {
+    <>
+      {RangePicker}
+      <div style={{ padding: "10px 12px", maxHeight: 480, overflowY: "auto" }}>
+        {filtered.map((e, i) => {
         const tone = eventTone(e.event_type);
         const accent =
           tone === "ok"
@@ -538,7 +772,7 @@ function AllActivityList({
             key={e.id}
             style={{
               padding: "8px 10px",
-              borderBottom: i < events.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+              borderBottom: i < filtered.length - 1 ? `1px solid ${AC.lineDim}` : "none",
               borderLeft: `3px solid ${accent}`,
               marginLeft: -4,
               paddingLeft: 11,
@@ -581,6 +815,7 @@ function AllActivityList({
           </div>
         );
       })}
-    </div>
+      </div>
+    </>
   );
 }

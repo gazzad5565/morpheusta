@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { type Shift } from "@/lib/mock-data";
-import { formatRelativeShort } from "@/lib/format";
+import { formatRelativeShort, formatShiftCountdown } from "@/lib/format";
 import {
   listRequestedShifts,
   removeRequestedShift,
@@ -27,6 +27,9 @@ type DbShift = Shift & {
   repId: string | null;
   checkInAt: string | null;
   state: string;
+  rawStartTime: string;
+  rawEndTime: string;
+  shiftDate: string;
 };
 
 export default function ShiftsListPage() {
@@ -47,6 +50,15 @@ export default function ShiftsListPage() {
   // string = show everything. Lives at the page top alongside the
   // date so a rep with many shifts can scan to one quickly.
   const [search, setSearch] = useState<string>("");
+  // Live tick that re-renders the page every 30 seconds so the
+  // "in 50 min" / "10 min late" countdown pills stay accurate
+  // without each card needing its own timer. 30s is fine grain
+  // for human-scale "approaching shift" labels.
+  const [, setNowTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setNowTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(t);
+  }, []);
 
   const reload = () => {
     Promise.all([
@@ -370,6 +382,12 @@ export default function ShiftsListPage() {
               state={s.state}
               expanded={expandedId === s.realId}
               navigating={navigatingTo === s.realId}
+              timing={formatShiftCountdown(
+                s.shiftDate,
+                s.rawStartTime,
+                s.rawEndTime,
+                s.state
+              )}
               onToggle={() =>
                 setExpandedId(expandedId === s.realId ? null : s.realId)
               }
@@ -461,6 +479,7 @@ function ShiftRow({
   claimable,
   claiming,
   navigating,
+  timing,
   onToggle,
   onCheckIn,
   onResume,
@@ -479,6 +498,10 @@ function ShiftRow({
   claiming?: boolean;
   /** True while the parent is in flight routing to /check-in or /active for this shift. */
   navigating?: boolean;
+  /** Optional contextual countdown pill ("in 50 min" / "10 min late" / etc).
+   *  Computed in the parent so it lives off the page-level 30s tick rather
+   *  than each row owning its own timer. */
+  timing?: import("@/lib/format").ShiftTiming | null;
   onToggle?: () => void;
   onCheckIn?: () => void;
   onResume?: () => void;
@@ -650,7 +673,14 @@ function ShiftRow({
                     {stateBadge.label}
                   </span>
                 )}
-                {!stateBadge && shift.distance && (
+                {/* Contextual countdown — "in 50 min", "10 min late",
+                    "ends in 20m", etc. Only shown for actionable
+                    states (scheduled / live); the in-progress
+                    state badge above doesn't repeat the same info. */}
+                {timing && (
+                  <CountdownPill timing={timing} />
+                )}
+                {!stateBadge && !timing && shift.distance && (
                   <>
                     <span style={{ opacity: 0.4 }}>·</span>
                     <span>{shift.distance}</span>
@@ -838,6 +868,43 @@ function ShiftRow({
  *  destination does its own loading state once it mounts, but on a
  *  slow network the gap between tap and that page rendering can be a
  *  couple of seconds — without this the button just sits there. */
+/** Tiny "in 50 min" / "10 min late" / "ends in 20m" pill. Tone
+ *  picked from the timing helper so a soon/now/late shift each get
+ *  their own colour without rebuilding the mapping in the row. */
+function CountdownPill({
+  timing,
+}: {
+  timing: import("@/lib/format").ShiftTiming;
+}) {
+  const tones: Record<
+    import("@/lib/format").ShiftTimingTone,
+    { bg: string; fg: string }
+  > = {
+    soon: { bg: MC.brandTint, fg: MC.brandInk },
+    now: { bg: MC.brandTint, fg: MC.brandInk },
+    later: { bg: "#EEF0F3", fg: MC.ink2 },
+    live: { bg: MC.okTint, fg: "#0d6a45" },
+    late: { bg: MC.warnTint, fg: "#7A560A" },
+  };
+  const t = tones[timing.tone];
+  return (
+    <span
+      style={{
+        padding: "1px 7px",
+        borderRadius: 999,
+        background: t.bg,
+        color: t.fg,
+        fontSize: 9.5,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+        textTransform: "uppercase",
+      }}
+    >
+      {timing.label}
+    </span>
+  );
+}
+
 function NavSpinner() {
   return (
     <span

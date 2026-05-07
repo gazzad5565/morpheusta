@@ -29,3 +29,13 @@ export async function getEarlyGraceMinutes(): Promise<number> {
   const v = await readSetting<number>("early_grace_minutes", DEFAULT_EARLY_GRACE_MINUTES);
   return typeof v === "number" && v >= 0 ? v : DEFAULT_EARLY_GRACE_MINUTES;
 }
+
+/**
+ * "Approval not needed" toggle — when true, reps tapping
+ * /add-shift's Request bypass the requested_shifts queue and the
+ * shift is created immediately. Default false.
+ */
+export async function getShiftRequestAutoApprove(): Promise<boolean> {
+  const v = await readSetting<boolean>("shift_request_auto_approve", false);
+  return Boolean(v);
+}

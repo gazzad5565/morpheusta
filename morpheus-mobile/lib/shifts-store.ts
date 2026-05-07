@@ -46,7 +46,18 @@ function formatTimeLabel(t: string): string {
 
 function rowToShift(
   row: ShiftRow
-): Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string } {
+): Shift & {
+  realId: string;
+  repId: string | null;
+  checkInAt: string | null;
+  state: string;
+  /** Raw HH:MM[:SS] from the DB so the rep app can compute relative
+   *  countdowns ("in 50 min" / "10 min late") without re-parsing
+   *  the human-formatted display strings. */
+  rawStartTime: string;
+  rawEndTime: string;
+  shiftDate: string;
+} {
   const c = row.customers;
   return {
     // The "id" used by mobile UI for matching is customer id
@@ -63,6 +74,9 @@ function rowToShift(
     repId: row.rep_id,
     checkInAt: row.check_in_at,
     state: row.state,
+    rawStartTime: row.start_time || "",
+    rawEndTime: row.end_time || "",
+    shiftDate: row.shift_date || "",
   };
 }
 
@@ -71,7 +85,7 @@ import { todayLocalISO as todayISO } from "./format";
 
 /** Shifts assigned to the current user, today. */
 export async function listMyShiftsToday(): Promise<
-  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string }>
+  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string; rawStartTime: string; rawEndTime: string; shiftDate: string }>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data: userData } = await supabase.auth.getUser();
@@ -122,7 +136,7 @@ export async function listMyShiftsToday(): Promise<
  * returns the most recently checked-in one.
  */
 export async function getMyActiveShift(): Promise<
-  (Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string }) | null
+  (Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string; rawStartTime: string; rawEndTime: string; shiftDate: string }) | null
 > {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data: userData } = await supabase.auth.getUser();
@@ -149,7 +163,7 @@ export async function getMyActiveShift(): Promise<
 
 /** Unassigned shifts today — anyone authenticated can see + claim. */
 export async function listUnassignedShiftsToday(): Promise<
-  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string }>
+  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string; rawStartTime: string; rawEndTime: string; shiftDate: string }>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
@@ -204,10 +218,69 @@ export async function claimShift(
   return { ok: true };
 }
 
+/**
+ * Self-create an immediate-shift for the current rep at a customer.
+ * Used by /add-shift when the org has the "approval not needed"
+ * setting on — bypasses the requested_shifts queue and writes a
+ * scheduled shift directly so the rep can check in straight away.
+ *
+ * Defaults: today's date, 08:00–17:00, tasks_total derived later
+ * by listShifts joins / countTasksForCustomers (we just write a
+ * sensible 0 here; the admin's edit page surfaces the live count).
+ *
+ * Caller is responsible for not invoking this when auto-approve is
+ * off — we don't recheck the setting here to avoid an extra round-
+ * trip per submission.
+ */
+export async function selfCreateImmediateShift(
+  customerId: string,
+  opts?: { startTime?: string; endTime?: string; shiftDate?: string }
+): Promise<{ ok: boolean; error?: string; id?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) return { ok: false, error: "Not signed in" };
+
+  const today = todayISO();
+  const { data: customerRow } = await supabase
+    .from("customers")
+    .select("name")
+    .eq("id", customerId)
+    .maybeSingle();
+
+  const { data, error } = await supabase
+    .from("shifts")
+    .insert({
+      customer_id: customerId,
+      shift_date: opts?.shiftDate || today,
+      start_time: opts?.startTime || "08:00",
+      end_time: opts?.endTime || "17:00",
+      rep_id: userId,
+      distance_label: "",
+      tasks_total: 0,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  const customerName =
+    (customerRow as { name?: string } | null)?.name || "a customer";
+  await logEvent({
+    event_type: "shift.scheduled",
+    shift_id: data?.id,
+    customer_id: customerId,
+    message: `Self-scheduled at ${customerName} (auto-approved)`,
+    meta: { auto_approved: true },
+  });
+  return { ok: true, id: data?.id };
+}
+
 /** Fetch a single shift by id, joined with its customer. */
 export async function getShiftById(
   shiftId: string
-): Promise<(Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string }) | null> {
+): Promise<(Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string; rawStartTime: string; rawEndTime: string; shiftDate: string }) | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")

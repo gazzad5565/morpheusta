@@ -226,6 +226,24 @@ export async function setOrganisationAddressCoords(
   );
 }
 
+// ─── Shift-request auto-approve ────────────────────────────────────────
+//
+// When this is on, a rep tapping "Request a customer" creates the shift
+// directly instead of going through the manager's approval queue. Useful
+// for orgs that trust their reps to self-schedule. Default OFF so a
+// brand-new install still routes everything through the manager.
+
+export async function getShiftRequestAutoApprove(): Promise<boolean> {
+  const v = await readSetting<boolean>("shift_request_auto_approve", false);
+  return Boolean(v);
+}
+
+export async function setShiftRequestAutoApprove(
+  on: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting("shift_request_auto_approve", !!on);
+}
+
 /** One-shot fetch of every org text field for a settings form. */
 export async function getOrganisationDetails(): Promise<{
   address: string;

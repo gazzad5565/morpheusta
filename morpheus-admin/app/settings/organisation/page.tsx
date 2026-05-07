@@ -43,6 +43,8 @@ import {
   setOrganisationTaxNumber,
   setOrganisationWebsite,
   setOrganisationRegistrationNumber,
+  getShiftRequestAutoApprove,
+  setShiftRequestAutoApprove,
 } from "@/lib/settings-store";
 
 export default function OrganisationSettingsPage() {
@@ -59,6 +61,8 @@ export default function OrganisationSettingsPage() {
   const [taxNumber, setTaxNumber] = useState<string>("");
   const [website, setWebsite] = useState<string>("");
   const [registrationNumber, setRegistrationNumber] = useState<string>("");
+  const [autoApprove, setAutoApprove] = useState<boolean>(false);
+  const [savingAutoApprove, setSavingAutoApprove] = useState(false);
 
   // Coords: `coords` is the saved/last-known location (drives the map).
   // `pickedCoords` is what the user just selected from the autocomplete
@@ -84,7 +88,8 @@ export default function OrganisationSettingsPage() {
       getOrganisationName(),
       getOrganisationLogoUrl(),
       getOrganisationDetails(),
-    ]).then(([n, u, d]) => {
+      getShiftRequestAutoApprove(),
+    ]).then(([n, u, d, aa]) => {
       setName(n);
       setLogoUrl(u);
       setAddress(d.address);
@@ -94,6 +99,7 @@ export default function OrganisationSettingsPage() {
       setWebsite(d.website);
       setRegistrationNumber(d.registrationNumber);
       setCoords(d.coords);
+      setAutoApprove(aa);
       setLoaded(true);
     });
   }, []);
@@ -198,6 +204,25 @@ export default function OrganisationSettingsPage() {
     setCoords(nextCoords);
     setPickedCoords(null);
     setMessage(coordNote ? `Saved. ${coordNote}` : "Saved.");
+  };
+
+  const onToggleAutoApprove = async () => {
+    setError(null);
+    setMessage(null);
+    setSavingAutoApprove(true);
+    const next = !autoApprove;
+    const r = await setShiftRequestAutoApprove(next);
+    setSavingAutoApprove(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't save.");
+      return;
+    }
+    setAutoApprove(next);
+    setMessage(
+      next
+        ? "Approval bypass on. Reps' new shift requests now schedule themselves immediately."
+        : "Approval bypass off. Reps' new shift requests now go to your inbox."
+    );
   };
 
   const onClearLogo = async () => {
@@ -443,6 +468,56 @@ export default function OrganisationSettingsPage() {
           </div>
         </Card>
 
+        {/* Behaviour: shift-request auto-approve toggle. When on,
+            reps tapping "Request a customer" on the mobile app
+            bypass the requested_shifts queue and the shift is
+            scheduled immediately for them. Default off so a fresh
+            install routes everything through the manager. */}
+        <Card padding={20}>
+          <SectionLabel>Shift request approvals</SectionLabel>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              padding: "10px 0 0",
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: AC.ink,
+                  letterSpacing: -0.1,
+                }}
+              >
+                Approval not needed
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  color: AC.mute,
+                  marginTop: 4,
+                  lineHeight: 1.5,
+                }}
+              >
+                When on, reps&apos; shift requests skip your inbox and the
+                shift is scheduled for them straight away. Use this if
+                you trust your reps to self-schedule. You can still
+                edit / cancel the resulting shifts via Schedule.
+              </div>
+            </div>
+            <ToggleSwitch
+              on={autoApprove}
+              disabled={!loaded || savingAutoApprove}
+              onChange={onToggleAutoApprove}
+            />
+          </div>
+        </Card>
+
         {/* Custom fields — same component used on every detail page. The
             "organisation" entity type was added in db migration
             2026_05_07_custom_fields_organisation.sql; define new fields
@@ -527,6 +602,56 @@ function Hint({ children }: { children: React.ReactNode }) {
  * a field stretch the full grid width (used for fields that read more
  * naturally on one line).
  */
+/**
+ * Plain on/off toggle. Used for the auto-approve setting; if we add
+ * more boolean prefs later it'll move into a shared component.
+ */
+function ToggleSwitch({
+  on,
+  disabled,
+  onChange,
+}: {
+  on: boolean;
+  disabled?: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={onChange}
+      style={{
+        width: 44,
+        height: 26,
+        borderRadius: 999,
+        background: on ? AC.brand : AC.line,
+        border: "none",
+        cursor: disabled ? "not-allowed" : "pointer",
+        position: "relative",
+        transition: "background 160ms ease",
+        flexShrink: 0,
+        opacity: disabled ? 0.6 : 1,
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: 3,
+          left: on ? 21 : 3,
+          width: 20,
+          height: 20,
+          borderRadius: 99,
+          background: "#fff",
+          boxShadow: "0 1px 3px rgba(10,15,30,.25)",
+          transition: "left 160ms ease",
+        }}
+      />
+    </button>
+  );
+}
+
 function DetailField({
   label,
   value,
