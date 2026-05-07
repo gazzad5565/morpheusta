@@ -28,6 +28,7 @@ import { AC } from "@/lib/tokens";
 import {
   listShiftSeries,
   cancelShiftSeries,
+  updateShiftSeries,
   subscribeShifts,
   type ShiftSeriesSummary,
 } from "@/lib/shifts-store";
@@ -43,6 +44,8 @@ export default function ManageShiftsPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  // Series being edited via the Edit-future modal. Null = closed.
+  const [editTarget, setEditTarget] = useState<ShiftSeriesSummary | null>(null);
 
   const refresh = async () => {
     const [s, cs, ps] = await Promise.all([
@@ -249,6 +252,7 @@ export default function ManageShiftsPage() {
                   customerById={customerById}
                   reps={reps}
                   busyKey={busyId}
+                  onEdit={() => setEditTarget(s)}
                   onCancelFuture={() => onCancelFuture(s)}
                   onCancelAll={() => onCancelAll(s)}
                 />
@@ -257,6 +261,19 @@ export default function ManageShiftsPage() {
           )}
         </Card>
       </div>
+
+      {editTarget && (
+        <EditFutureModal
+          series={editTarget}
+          customers={customers}
+          reps={Object.values(reps)}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => {
+            // realtime sub on shifts will refetch the list automatically
+            setEditTarget(null);
+          }}
+        />
+      )}
     </AdminShell>
   );
 }
@@ -294,6 +311,7 @@ function SeriesRow({
   customerById,
   reps,
   busyKey,
+  onEdit,
   onCancelFuture,
   onCancelAll,
 }: {
@@ -301,6 +319,7 @@ function SeriesRow({
   customerById: Map<string, Customer>;
   reps: Record<string, Profile>;
   busyKey: string | null;
+  onEdit: () => void;
   onCancelFuture: () => void;
   onCancelAll: () => void;
 }) {
@@ -379,6 +398,20 @@ function SeriesRow({
         >
           <Btn size="sm">View</Btn>
         </Link>
+        <Btn
+          size="sm"
+          kind="primary"
+          icon="edit"
+          onClick={onEdit}
+          disabled={futureBusy || allBusy || noFuture}
+          title={
+            noFuture
+              ? "No upcoming shifts to edit"
+              : "Change time / customer / rep across future shifts in this series"
+          }
+        >
+          Edit future
+        </Btn>
         <Btn
           size="sm"
           kind="danger"
@@ -485,3 +518,322 @@ function Empty({
     </div>
   );
 }
+
+/**
+ * Edit-future modal — change customer, rep, start time, and/or end
+ * time across every still-scheduled shift in the series, from today
+ * onward. Running and complete shifts in the series are never
+ * touched (audit integrity, mirrors the cancel rules).
+ *
+ * Designed to be conservative: each field starts blank-but-prefilled
+ * with the series's current value, and the manager has to actually
+ * change something for Save to fire (no-ops are silently dropped).
+ */
+function EditFutureModal({
+  series,
+  customers,
+  reps,
+  onClose,
+  onSaved,
+}: {
+  series: ShiftSeriesSummary;
+  customers: Customer[];
+  reps: Profile[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  // Single-customer / single-rep series prefill the dropdowns
+  // exactly. Multi- series start the dropdowns blank with a
+  // "(unchanged)" placeholder so the manager opts in to a flip.
+  const initialCustomer =
+    series.customerIds.length === 1 ? series.customerIds[0] : "";
+  const initialRep =
+    series.repIds.length === 1
+      ? series.repIds[0] === null
+        ? "__unassigned__"
+        : series.repIds[0]
+      : "";
+
+  const [customerId, setCustomerId] = useState<string>(initialCustomer);
+  const [repId, setRepId] = useState<string>(initialRep ?? "");
+  const [startTime, setStartTime] = useState<string>(series.startTime || "");
+  const [endTime, setEndTime] = useState<string>(series.endTime || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedNote, setSavedNote] = useState<string | null>(null);
+
+  const onSave = async () => {
+    setError(null);
+    setSavedNote(null);
+    if (startTime && endTime && startTime >= endTime) {
+      setError("End time must be after start time.");
+      return;
+    }
+
+    // Build a patch that ONLY contains fields the user explicitly
+    // changed. Treat blank/initial as "leave alone" — no-ops can't
+    // accidentally null fields out.
+    const patch: Parameters<typeof updateShiftSeries>[1] = {};
+    if (customerId && customerId !== initialCustomer) {
+      patch.customer_id = customerId;
+    }
+    if (repId !== "" && repId !== (initialRep ?? "")) {
+      patch.rep_id = repId === "__unassigned__" ? null : repId;
+    }
+    if (startTime && startTime !== series.startTime) {
+      patch.start_time = startTime;
+    }
+    if (endTime && endTime !== series.endTime) {
+      patch.end_time = endTime;
+    }
+    if (Object.keys(patch).length === 0) {
+      setError("Nothing to update — change a field first.");
+      return;
+    }
+
+    setBusy(true);
+    const r = await updateShiftSeries(series.series_id, patch, {
+      fromDate: todayLocalISO(),
+    });
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't save.");
+      return;
+    }
+    setSavedNote(`Updated ${r.updated ?? 0} shift${r.updated === 1 ? "" : "s"}.`);
+    // Auto-close after a moment so the manager sees the confirmation.
+    window.setTimeout(onSaved, 600);
+  };
+
+  // Sticky overlay using fixed positioning. No portal needed here —
+  // the page itself doesn't have transformed ancestors.
+  return (
+    <>
+      <div
+        onMouseDown={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(10,15,30,.32)",
+          zIndex: 200,
+        }}
+      />
+      <div
+        role="dialog"
+        aria-label="Edit future shifts in series"
+        onMouseDown={(e) => e.stopPropagation()}
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 460,
+          maxWidth: "calc(100vw - 32px)",
+          background: "#fff",
+          border: `1px solid ${AC.line}`,
+          borderRadius: 14,
+          boxShadow: "0 24px 60px rgba(10,15,30,.24)",
+          zIndex: 201,
+          padding: 22,
+          fontFamily: AC.font,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 14,
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: AC.ink,
+                letterSpacing: -0.2,
+              }}
+            >
+              Edit future shifts
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: AC.mute,
+                marginTop: 2,
+              }}
+            >
+              Applies to {series.upcomingCount} upcoming{" "}
+              {series.upcomingCount === 1 ? "shift" : "shifts"} in this series.
+              Past + running shifts are untouched.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <AGlyph name="x" size={14} color={AC.mute} />
+          </button>
+        </div>
+
+        <FormField label="Customer">
+          <select
+            value={customerId}
+            onChange={(e) => setCustomerId(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="">
+              {series.customerIds.length === 1
+                ? "(unchanged — same customer)"
+                : "(unchanged — multiple customers)"}
+            </option>
+            {customers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} · #{c.code}
+              </option>
+            ))}
+          </select>
+        </FormField>
+
+        <FormField label="Rep">
+          <select
+            value={repId}
+            onChange={(e) => setRepId(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="">
+              {series.repIds.length === 1
+                ? "(unchanged — same rep)"
+                : "(unchanged — multiple reps)"}
+            </option>
+            <option value="__unassigned__">— Unassigned (claimable) —</option>
+            {reps
+              .filter((r) => r.role === "rep")
+              .map((r) => (
+                <option key={r.id} value={r.id}>
+                  {displayName(r)}
+                </option>
+              ))}
+          </select>
+        </FormField>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <FormField label="Start time">
+            <input
+              type="time"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              style={selectStyle}
+            />
+          </FormField>
+          <FormField label="End time">
+            <input
+              type="time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              style={selectStyle}
+            />
+          </FormField>
+        </div>
+
+        {error && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "8px 10px",
+              background: AC.dangerTint,
+              color: "#9c1a3c",
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 500,
+            }}
+          >
+            {error}
+          </div>
+        )}
+        {savedNote && !error && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "8px 10px",
+              background: AC.okTint,
+              color: "#0F5A38",
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            {savedNote}
+          </div>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            marginTop: 16,
+          }}
+        >
+          <Btn onClick={onClose} disabled={busy}>
+            Cancel
+          </Btn>
+          <Btn kind="primary" icon="check" onClick={onSave} disabled={busy}>
+            {busy ? "Saving…" : "Save changes"}
+          </Btn>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function FormField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div
+        style={{
+          fontSize: 11,
+          color: AC.mute,
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          marginBottom: 5,
+        }}
+      >
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const selectStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "9px 11px",
+  borderRadius: 10,
+  border: `1px solid ${AC.line}`,
+  background: "#fff",
+  fontFamily: AC.font,
+  fontSize: 13.5,
+  color: AC.ink,
+  boxSizing: "border-box",
+};

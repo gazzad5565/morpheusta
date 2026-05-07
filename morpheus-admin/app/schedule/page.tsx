@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
@@ -1665,6 +1666,8 @@ function ShiftQuickPopover({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const c = shift.customers;
   const color = c?.color || "#888";
@@ -1697,7 +1700,13 @@ function ShiftQuickPopover({
     { weekday: "short", month: "short", day: "numeric" }
   );
 
-  return (
+  // Render via a portal to document.body so the popover escapes the
+  // card's stacking context (the card has zIndex:2 and lives inside
+  // DayColumnContents — without a portal the overflow pills at
+  // zIndex:3 in the same column poke through the dim backdrop and
+  // it looks like the modal is "behind" them).
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(
     <>
       <div
         onMouseDown={onClose}
@@ -1907,7 +1916,8 @@ function ShiftQuickPopover({
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 

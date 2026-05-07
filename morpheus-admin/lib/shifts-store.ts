@@ -357,6 +357,70 @@ export async function listShiftSeries(): Promise<ShiftSeriesSummary[]> {
 }
 
 /**
+ * Edit every still-scheduled shift in a series. Mirrors
+ * cancelShiftSeries — we only touch state='scheduled' rows so a
+ * running or complete shift can't be retroactively rewritten.
+ *
+ * Pass `fromDate` to limit the update to shifts on or after that
+ * date ("apply to today and future" semantics). Pass it the same
+ * keys updateShift accepts; we also accept rep_id explicitly here
+ * (null = make claimable).
+ *
+ * Customer changes propagate to tasks_total too — the new customer's
+ * task count is fetched once and applied to every updated row, so
+ * the live tasks bar stays honest after a series-wide customer flip.
+ */
+export interface SeriesPatch {
+  customer_id?: string;
+  rep_id?: string | null;
+  start_time?: string;
+  end_time?: string;
+}
+
+export async function updateShiftSeries(
+  series_id: string,
+  patch: SeriesPatch,
+  opts?: { fromDate?: string }
+): Promise<{ ok: boolean; error?: string; updated?: number }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+
+  // Strip undefined keys so we only push what the caller wants
+  // changed.
+  const cleaned: Record<string, unknown> = {};
+  if (patch.customer_id !== undefined) cleaned.customer_id = patch.customer_id;
+  if (patch.rep_id !== undefined) cleaned.rep_id = patch.rep_id;
+  if (patch.start_time !== undefined) cleaned.start_time = patch.start_time;
+  if (patch.end_time !== undefined) cleaned.end_time = patch.end_time;
+  if (Object.keys(cleaned).length === 0) {
+    return { ok: true, updated: 0 };
+  }
+
+  let q = supabase
+    .from("shifts")
+    .update(cleaned, { count: "exact" })
+    .eq("series_id", series_id)
+    .eq("state", "scheduled");
+  if (opts?.fromDate) q = q.gte("shift_date", opts.fromDate);
+  const { error, count } = await q;
+  if (error) {
+    notifySaveError(error.message, "shift series");
+    return { ok: false, error: error.message };
+  }
+
+  await logEvent({
+    event_type: "shift.scheduled",
+    message: `Edited ${count ?? 0} shifts in a series${
+      opts?.fromDate ? ` from ${opts.fromDate} forward` : ""
+    }`,
+    meta: { series_id, from_date: opts?.fromDate, fields: Object.keys(cleaned) },
+  });
+  notifySaved("series updated");
+  return { ok: true, updated: count ?? 0 };
+}
+
+/**
  * Cancel every shift in a series. By default we only delete shifts
  * still in the 'scheduled' state — running / complete shifts are
  * untouched (deleting them would corrupt audit history). Pass
