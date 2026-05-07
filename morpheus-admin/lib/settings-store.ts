@@ -149,6 +149,8 @@ const ORG_TEXT_KEYS = [
   "organisation_phone",
   "organisation_email",
   "organisation_tax_number",
+  "organisation_website",
+  "organisation_registration_number",
 ] as const;
 type OrgTextKey = (typeof ORG_TEXT_KEYS)[number];
 
@@ -180,20 +182,86 @@ export const getOrganisationTaxNumber = () => readOrgText("organisation_tax_numb
 export const setOrganisationTaxNumber = (v: string) =>
   writeOrgText("organisation_tax_number", v);
 
+export const getOrganisationWebsite = () => readOrgText("organisation_website");
+export const setOrganisationWebsite = (v: string) =>
+  writeOrgText("organisation_website", v);
+
+export const getOrganisationRegistrationNumber = () =>
+  readOrgText("organisation_registration_number");
+export const setOrganisationRegistrationNumber = (v: string) =>
+  writeOrgText("organisation_registration_number", v);
+
+/**
+ * Address coordinates — stored as two settings keys so they upsert
+ * independently of the address string itself. We round to 6 dp on
+ * write (~10 cm precision is plenty for "where's the office on a map").
+ */
+export async function getOrganisationAddressCoords(): Promise<{
+  lat: number;
+  lng: number;
+} | null> {
+  const [lat, lng] = await Promise.all([
+    readSetting<number | null>("organisation_address_lat", null),
+    readSetting<number | null>("organisation_address_lng", null),
+  ]);
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+export async function setOrganisationAddressCoords(
+  coords: { lat: number; lng: number } | null
+): Promise<{ ok: boolean; error?: string }> {
+  // Clearing: write nulls to both keys. Setting: round to 6 dp.
+  const r1 = await writeSetting(
+    "organisation_address_lat",
+    coords ? Math.round(coords.lat * 1e6) / 1e6 : null,
+    null // address coords already get a "Saved" toast via the address writer
+  );
+  if (!r1.ok) return r1;
+  return writeSetting(
+    "organisation_address_lng",
+    coords ? Math.round(coords.lng * 1e6) / 1e6 : null,
+    null
+  );
+}
+
 /** One-shot fetch of every org text field for a settings form. */
 export async function getOrganisationDetails(): Promise<{
   address: string;
   phone: string;
   email: string;
   taxNumber: string;
+  website: string;
+  registrationNumber: string;
+  coords: { lat: number; lng: number } | null;
 }> {
-  const [address, phone, email, taxNumber] = await Promise.all([
+  const [
+    address,
+    phone,
+    email,
+    taxNumber,
+    website,
+    registrationNumber,
+    coords,
+  ] = await Promise.all([
     getOrganisationAddress(),
     getOrganisationPhone(),
     getOrganisationEmail(),
     getOrganisationTaxNumber(),
+    getOrganisationWebsite(),
+    getOrganisationRegistrationNumber(),
+    getOrganisationAddressCoords(),
   ]);
-  return { address, phone, email, taxNumber };
+  return {
+    address,
+    phone,
+    email,
+    taxNumber,
+    website,
+    registrationNumber,
+    coords,
+  };
 }
 
 /**

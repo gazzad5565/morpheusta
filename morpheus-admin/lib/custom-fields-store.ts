@@ -15,6 +15,7 @@ export const FIELD_ENTITIES = [
   "shift",
   "task",
   "library_file",
+  "organisation",
 ] as const;
 export type FieldEntity = (typeof FIELD_ENTITIES)[number];
 
@@ -24,7 +25,16 @@ export const FIELD_ENTITY_LABEL: Record<FieldEntity, string> = {
   shift: "Shifts",
   task: "Tasks",
   library_file: "Library files",
+  organisation: "Organisation",
 };
+
+/**
+ * Single-tenant: there's only one "organisation" instance, so all
+ * custom_field_values rows for org-typed fields are keyed off this
+ * literal entity_id. Centralised here so the Settings page and any
+ * future readers (export PDFs etc) agree on the spelling.
+ */
+export const ORGANISATION_ENTITY_ID = "organisation";
 
 export const FIELD_TYPES = [
   "text",

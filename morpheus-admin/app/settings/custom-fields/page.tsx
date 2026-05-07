@@ -33,6 +33,7 @@ const ENTITY_GLYPH: Record<FieldEntity, GlyphName> = {
   shift: "cal",
   task: "tasks",
   library_file: "lib",
+  organisation: "building",
 };
 
 export default function CustomFieldsPage() {

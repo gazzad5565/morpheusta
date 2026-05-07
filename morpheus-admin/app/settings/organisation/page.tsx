@@ -1,10 +1,22 @@
 "use client";
 
 /**
- * /settings/organisation — set the org name + logo. The logo is uploaded
- * to the public `org_assets` Storage bucket; we save its public URL in
- * app_settings.organisation_logo_url and the Sidebar reads that on
- * mount to brand the admin console.
+ * /settings/organisation — set up the company using the app.
+ *
+ * Built around app_settings key/value rows so each field upserts
+ * independently:
+ *   organisation_name                  — sidebar brand text
+ *   organisation_logo_url              — sidebar logo (Storage URL)
+ *   organisation_address               — free-text postal address
+ *   organisation_address_lat / _lng    — coords from the autocomplete
+ *   organisation_phone, _email         — contact
+ *   organisation_tax_number            — VAT / EIN / TRN
+ *   organisation_website               — URL
+ *   organisation_registration_number   — company / charity number
+ *
+ * Plus a <CustomFieldsCard /> at the bottom so the manager can add any
+ * org-specific fields they need (industry, ABN, working hours, etc.) —
+ * defined in /settings/fields/new with applies_to="organisation".
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -12,6 +24,10 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { SettingsShell } from "@/components/shell/SettingsShell";
+import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
+import { CustomerAddressMap } from "@/components/CustomerAddressMap";
+import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
+import { ORGANISATION_ENTITY_ID } from "@/lib/custom-fields-store";
 import { AC } from "@/lib/tokens";
 import {
   getOrganisationName,
@@ -21,21 +37,40 @@ import {
   uploadOrgLogo,
   getOrganisationDetails,
   setOrganisationAddress,
+  setOrganisationAddressCoords,
   setOrganisationPhone,
   setOrganisationEmail,
   setOrganisationTaxNumber,
+  setOrganisationWebsite,
+  setOrganisationRegistrationNumber,
 } from "@/lib/settings-store";
 
 export default function OrganisationSettingsPage() {
   const [name, setName] = useState<string>("");
   const [logoUrl, setLogoUrl] = useState<string>("");
-  // Org details — address, phone, email, tax number. Saved together
-  // when the user clicks "Save details", so partial typing doesn't
-  // generate four save toasts.
+
+  // Contact / company details — saved together when the user clicks
+  // "Save details", so partial typing doesn't generate one toast per
+  // field. Address coords come from the autocomplete picker (preferred)
+  // or fall back to a server-side /api/geocode call on save.
   const [address, setAddress] = useState<string>("");
   const [phone, setPhone] = useState<string>("");
   const [email, setEmail] = useState<string>("");
   const [taxNumber, setTaxNumber] = useState<string>("");
+  const [website, setWebsite] = useState<string>("");
+  const [registrationNumber, setRegistrationNumber] = useState<string>("");
+
+  // Coords: `coords` is the saved/last-known location (drives the map).
+  // `pickedCoords` is what the user just selected from the autocomplete
+  // dropdown but hasn't saved yet. On save, picked wins; otherwise we
+  // try to geocode the typed address fresh.
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
+    null
+  );
+  const [pickedCoords, setPickedCoords] = useState<
+    { lat: number; lng: number } | null
+  >(null);
+
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
@@ -56,6 +91,9 @@ export default function OrganisationSettingsPage() {
       setPhone(d.phone);
       setEmail(d.email);
       setTaxNumber(d.taxNumber);
+      setWebsite(d.website);
+      setRegistrationNumber(d.registrationNumber);
+      setCoords(d.coords);
       setLoaded(true);
     });
   }, []);
@@ -104,13 +142,52 @@ export default function OrganisationSettingsPage() {
     setError(null);
     setMessage(null);
     setSavingDetails(true);
-    // Save four keys in parallel — each is its own app_settings row.
-    // We only surface the first error so the user gets a clean message.
+
+    // Resolve coordinates for the address, in priority order:
+    //   1. The user explicitly picked a suggestion → use those coords.
+    //   2. Address text is unchanged from saved → keep saved coords.
+    //   3. Address text changed but no suggestion picked → fall back to
+    //      a server-side /api/geocode lookup. If that fails, save the
+    //      address but null out the coords so the map disappears
+    //      rather than pointing at a stale location.
+    let nextCoords: { lat: number; lng: number } | null = coords;
+    let coordNote: string | null = null;
+    const trimmed = address.trim();
+
+    if (!trimmed) {
+      nextCoords = null;
+    } else if (pickedCoords) {
+      nextCoords = pickedCoords;
+    } else if (coords) {
+      // Keep existing coords — user didn't change the address.
+      nextCoords = coords;
+    } else {
+      try {
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(trimmed)}`);
+        if (res.ok) {
+          const data = (await res.json()) as { latitude: number; longitude: number };
+          nextCoords = { lat: data.latitude, lng: data.longitude };
+        } else {
+          coordNote = "Couldn't geocode the address — saved without coordinates.";
+          nextCoords = null;
+        }
+      } catch {
+        coordNote = "Geocoder unreachable — saved without coordinates.";
+        nextCoords = null;
+      }
+    }
+
+    // Save every field in parallel. They're independent app_settings
+    // rows so a failure in one doesn't block the rest, but we surface
+    // the first error we see.
     const results = await Promise.all([
       setOrganisationAddress(address),
+      setOrganisationAddressCoords(nextCoords),
       setOrganisationPhone(phone),
       setOrganisationEmail(email),
       setOrganisationTaxNumber(taxNumber),
+      setOrganisationWebsite(website),
+      setOrganisationRegistrationNumber(registrationNumber),
     ]);
     setSavingDetails(false);
     const firstErr = results.find((r) => !r.ok);
@@ -118,7 +195,9 @@ export default function OrganisationSettingsPage() {
       setError(firstErr.error || "Couldn't save.");
       return;
     }
-    setMessage("Saved.");
+    setCoords(nextCoords);
+    setPickedCoords(null);
+    setMessage(coordNote ? `Saved. ${coordNote}` : "Saved.");
   };
 
   const onClearLogo = async () => {
@@ -136,27 +215,26 @@ export default function OrganisationSettingsPage() {
     setMessage("Logo cleared.");
   };
 
+  // Brand color + initials for the map pin so it visually echoes the
+  // sidebar logo. Falls back to the AC brand when no logo is set.
+  const orgInitials = (name || "Org")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2) || "OR";
+
   return (
     <SettingsShell
       section="organisation"
-      description="Your organisation's name and logo. The logo shows in the sidebar of the admin console for everyone in your team."
+      description="Your organisation's name, logo, contact details, and any custom fields you want to track. Used in the sidebar, exports, and the rep app footer."
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 720 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 760 }}>
         {/* Name */}
         <Card padding={20}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 11,
-              color: AC.mute,
-              fontWeight: 700,
-              letterSpacing: 0.3,
-              textTransform: "uppercase",
-              marginBottom: 6,
-            }}
-          >
-            Organisation name
-          </div>
+          <SectionLabel>Organisation name</SectionLabel>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
               type="text"
@@ -184,47 +262,65 @@ export default function OrganisationSettingsPage() {
               {saving ? "Saving…" : "Save"}
             </Btn>
           </div>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 11.5,
-              color: AC.mute,
-              marginTop: 6,
-              lineHeight: 1.45,
-            }}
-          >
-            Shown next to the logo in the admin sidebar.
-          </div>
+          <Hint>Shown next to the logo in the admin sidebar.</Hint>
         </Card>
 
-        {/* Contact details — address, phone, email, tax number. KISS:
-            free-text fields, single Save button, no validation beyond
-            "trim the whitespace". Used by future invoice / export PDFs
-            and possibly the rep app footer down the line. */}
+        {/* Address — autocomplete + map preview, mirroring the customer
+            address picker so the affordance is consistent across the
+            app. Coords get filled in either by picking a suggestion or
+            by a fallback geocode on save. */}
         <Card padding={20}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 11,
-              color: AC.mute,
-              fontWeight: 700,
-              letterSpacing: 0.3,
-              textTransform: "uppercase",
-              marginBottom: 10,
+          <SectionLabel>Address</SectionLabel>
+          <AddressAutocomplete
+            value={address}
+            onChange={(v) => {
+              setAddress(v);
+              // If the user edits the field after picking, drop the
+              // pickedCoords flag — we'll re-geocode on save.
+              if (pickedCoords) setPickedCoords(null);
             }}
-          >
-            Contact details
-          </div>
+            onSelect={(s) => {
+              setPickedCoords({ lat: s.latitude, lng: s.longitude });
+              setCoords({ lat: s.latitude, lng: s.longitude });
+            }}
+            placeholder="Start typing your office address…"
+          />
+          <Hint>
+            {pickedCoords
+              ? `Coordinates locked: ${pickedCoords.lat.toFixed(5)}, ${pickedCoords.lng.toFixed(5)}`
+              : coords
+              ? `Saved coordinates: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}. Edit and save to update.`
+              : "Pick a match from the dropdown to lock coordinates."}
+          </Hint>
+
+          {coords && (
+            <div
+              style={{
+                marginTop: 12,
+                borderRadius: 12,
+                overflow: "hidden",
+                border: `1px solid ${AC.line}`,
+              }}
+            >
+              <CustomerAddressMap
+                lat={coords.lat}
+                lng={coords.lng}
+                radiusM={0}
+                color={AC.brand}
+                initials={orgInitials}
+                showGeofence={false}
+                height={240}
+              />
+            </div>
+          )}
+        </Card>
+
+        {/* Other contact + company details. KISS: free-text fields,
+            single Save covering address + everything else, no validation
+            beyond "trim". */}
+        <Card padding={20}>
+          <SectionLabel>Contact &amp; company details</SectionLabel>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <DetailField
-              label="Address"
-              value={address}
-              onChange={setAddress}
-              placeholder="123 Long Street, Cape Town"
-              span={2}
-              multiline
-              disabled={!loaded || savingDetails}
-            />
             <DetailField
               label="Phone"
               value={phone}
@@ -241,10 +337,25 @@ export default function OrganisationSettingsPage() {
               disabled={!loaded || savingDetails}
             />
             <DetailField
+              label="Website"
+              value={website}
+              onChange={setWebsite}
+              placeholder="https://your-co.com"
+              type="url"
+              disabled={!loaded || savingDetails}
+            />
+            <DetailField
               label="Tax number"
               value={taxNumber}
               onChange={setTaxNumber}
               placeholder="VAT / EIN / TRN"
+              disabled={!loaded || savingDetails}
+            />
+            <DetailField
+              label="Registration number"
+              value={registrationNumber}
+              onChange={setRegistrationNumber}
+              placeholder="Company / charity number"
               span={2}
               disabled={!loaded || savingDetails}
             />
@@ -259,34 +370,14 @@ export default function OrganisationSettingsPage() {
               {savingDetails ? "Saving…" : "Save details"}
             </Btn>
           </div>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 11.5,
-              color: AC.mute,
-              marginTop: 8,
-              lineHeight: 1.45,
-            }}
-          >
-            Used on exports and the company footer. All fields are optional.
-          </div>
+          <Hint>
+            One Save button covers address + every field above. All fields are optional.
+          </Hint>
         </Card>
 
         {/* Logo */}
         <Card padding={20}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 11,
-              color: AC.mute,
-              fontWeight: 700,
-              letterSpacing: 0.3,
-              textTransform: "uppercase",
-              marginBottom: 10,
-            }}
-          >
-            Logo
-          </div>
+          <SectionLabel>Logo</SectionLabel>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             {/* Preview */}
             <div
@@ -344,21 +435,20 @@ export default function OrganisationSettingsPage() {
                   </Btn>
                 )}
               </div>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 11.5,
-                  color: AC.mute,
-                  marginTop: 8,
-                  lineHeight: 1.45,
-                }}
-              >
+              <Hint>
                 PNG, JPG, SVG, or WebP, up to 2&nbsp;MB. Square or wide marks both
                 work — the sidebar shows it at 28px high.
-              </div>
+              </Hint>
             </div>
           </div>
         </Card>
+
+        {/* Custom fields — same component used on every detail page. The
+            "organisation" entity type was added in db migration
+            2026_05_07_custom_fields_organisation.sql; define new fields
+            via /settings/fields/new?entity=organisation and they'll
+            render here automatically. */}
+        <CustomFieldsCard entity="organisation" entityId={ORGANISATION_ENTITY_ID} />
 
         {error && (
           <div
@@ -397,10 +487,45 @@ export default function OrganisationSettingsPage() {
   );
 }
 
+/** Small uppercase eyebrow used at the top of every Card. */
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontFamily: AC.font,
+        fontSize: 11,
+        color: AC.mute,
+        fontWeight: 700,
+        letterSpacing: 0.3,
+        textTransform: "uppercase",
+        marginBottom: 10,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Hint({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontFamily: AC.font,
+        fontSize: 11.5,
+        color: AC.mute,
+        marginTop: 8,
+        lineHeight: 1.45,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 /**
  * Tiny labelled input used by the contact-details card. `span={2}` lets
- * a field stretch the full grid width (used for address + tax number
- * which read more naturally on one line).
+ * a field stretch the full grid width (used for fields that read more
+ * naturally on one line).
  */
 function DetailField({
   label,

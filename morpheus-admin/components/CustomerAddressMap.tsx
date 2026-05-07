@@ -48,12 +48,23 @@ export function CustomerAddressMap({
   radiusM,
   color,
   initials,
+  showGeofence = true,
+  height = 360,
 }: {
   lat: number;
   lng: number;
   radiusM: number;
   color: string;
   initials: string;
+  /**
+   * Whether to draw the geofence circle. Customers always want it
+   * (that's the point of this view), but the Organisation settings
+   * page reuses the map purely as an "address pinned here" preview
+   * with no geofence concept — pass false to hide the circle.
+   */
+  showGeofence?: boolean;
+  /** Pixel height for the map container. */
+  height?: number;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -73,30 +84,34 @@ export function CustomerAddressMap({
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     map.on("load", () => {
       loadedRef.current = true;
-      // Geofence layer.
-      map.addSource(CIRCLE_SOURCE_ID, {
-        type: "geojson",
-        data: geofenceFeature(lat, lng, radiusM),
-      });
-      map.addLayer({
-        id: CIRCLE_FILL_ID,
-        type: "fill",
-        source: CIRCLE_SOURCE_ID,
-        paint: {
-          "fill-color": color,
-          "fill-opacity": 0.18,
-        },
-      });
-      map.addLayer({
-        id: CIRCLE_LINE_ID,
-        type: "line",
-        source: CIRCLE_SOURCE_ID,
-        paint: {
-          "line-color": color,
-          "line-width": 2,
-          "line-dasharray": [2, 2],
-        },
-      });
+      if (showGeofence) {
+        // Geofence layer — only added when the caller wants it. Org
+        // address preview skips this since "office location" isn't a
+        // geofence concept.
+        map.addSource(CIRCLE_SOURCE_ID, {
+          type: "geojson",
+          data: geofenceFeature(lat, lng, radiusM),
+        });
+        map.addLayer({
+          id: CIRCLE_FILL_ID,
+          type: "fill",
+          source: CIRCLE_SOURCE_ID,
+          paint: {
+            "fill-color": color,
+            "fill-opacity": 0.18,
+          },
+        });
+        map.addLayer({
+          id: CIRCLE_LINE_ID,
+          type: "line",
+          source: CIRCLE_SOURCE_ID,
+          paint: {
+            "line-color": color,
+            "line-width": 2,
+            "line-dasharray": [2, 2],
+          },
+        });
+      }
     });
 
     // Pin
@@ -123,15 +138,17 @@ export function CustomerAddressMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update circle when radius (or coords) change.
+  // Update circle when radius (or coords) change. Skip entirely when
+  // the geofence is hidden — the source layer doesn't exist.
   useEffect(() => {
+    if (!showGeofence) return;
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
     const src = map.getSource(CIRCLE_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     if (src) {
       src.setData(geofenceFeature(lat, lng, radiusM));
     }
-  }, [lat, lng, radiusM]);
+  }, [lat, lng, radiusM, showGeofence]);
 
   // Re-center marker if coords change.
   useEffect(() => {
@@ -144,7 +161,7 @@ export function CustomerAddressMap({
   return (
     <div
       ref={containerRef}
-      style={{ height: 360, width: "100%", background: "#F1F4F7" }}
+      style={{ height, width: "100%", background: "#F1F4F7" }}
     />
   );
 }
