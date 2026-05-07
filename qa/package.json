@@ -1,0 +1,21 @@
+{
+  "name": "morpheus-qa",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "test:admin": "playwright test --project=admin",
+    "test:mobile": "playwright test --project=mobile",
+    "test:e2e": "playwright test --project=e2e",
+    "test:api": "vitest run api",
+    "test:all": "playwright test && vitest run api",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@supabase/supabase-js": "^2.105.1",
+    "@types/node": "^20",
+    "dotenv": "^16.4.5",
+    "typescript": "^5",
+    "vitest": "^1.6.0"
+  }
+}
