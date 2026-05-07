@@ -22,6 +22,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
@@ -1238,6 +1239,7 @@ function DayColumn({
   ) => void;
   onCommit: (newDateISO: string, newStartMin: number, newEndMin: number) => void;
 }) {
+  const router = useRouter();
   const colRef = useRef<HTMLDivElement | null>(null);
   const isWeekend = (() => {
     const d = new Date(iso);
@@ -1303,7 +1305,7 @@ function DayColumn({
           start: minToTime(startMin),
           ...(customerScopeForAdd ? { customer: customerScopeForAdd } : {}),
         });
-        window.location.assign(`/schedule/new?${qs.toString()}`);
+        router.push(`/schedule/new?${qs.toString()}`);
       }}
       style={{
         position: "relative",
