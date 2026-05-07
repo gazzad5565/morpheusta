@@ -145,9 +145,30 @@ export function ShiftsList() {
 
   // Combined list: real shifts AND pending requests, in one array. Each
   // is wrapped with a `kind` so the renderer can branch.
+  //
+  // Hide a pending request whose (rep_id, customer_id) already exists
+  // as a real shift today — defends against the realtime-DELETE lag
+  // where the requested_shifts row hasn't been removed yet but the
+  // approved shift is already in the list. Without this filter, the
+  // moment a manager approves a request the table briefly shows the
+  // same store assigned to the same rep twice (one Requested row,
+  // one Scheduled row) until the DELETE event lands. Supabase
+  // realtime DELETEs can lag behind INSERTs by seconds or longer.
   const filtered = useMemo<ListRow[]>(() => {
+    const shiftKeys = new Set(
+      rows
+        .filter((s) => s.rep_id)
+        .map((s) => `${s.rep_id}::${s.customer_id}`)
+    );
+    const dedupedRequests = requests.filter(
+      (r) => !shiftKeys.has(`${r.repId}::${r.customerId}`)
+    );
+
     const shiftRows: ListRow[] = rows.map((s) => ({ kind: "shift", shift: s }));
-    const reqRows: ListRow[] = requests.map((r) => ({ kind: "request", request: r }));
+    const reqRows: ListRow[] = dedupedRequests.map((r) => ({
+      kind: "request",
+      request: r,
+    }));
 
     if (active === "All") return [...reqRows, ...shiftRows];
     if (active === "Requested") return reqRows;

@@ -110,9 +110,25 @@ export default function ShiftsListPage() {
     removeRequestedShift(id);
   };
 
-  // Combine unassigned (DB) + requested (separate table) for the Unscheduled section
+  // Combine unassigned (DB) + requested (separate table) for the
+  // Unscheduled section. Two filters here:
+  //   1. Hide a request that's already showing as an unassigned shift
+  //      (a manager scheduled it without a rep — same customer, two
+  //      sources, would otherwise duplicate).
+  //   2. Hide a request that's now in MY today's shifts. This is the
+  //      "approval just happened" case: admin approved → new shift
+  //      INSERT fires shifts realtime → reload pulls the new shift into
+  //      `mine`. The DELETE on requested_shifts fires too but Supabase
+  //      realtime DELETE events occasionally lag (sometimes by tens of
+  //      seconds, especially if the WebSocket dropped while the phone
+  //      was asleep). Without this filter the rep sees the same store
+  //      both as "Pending" and "Scheduled for me" until the next 60s
+  //      poll catches up.
   const unassignedIds = new Set(unassigned.map((u) => u.id));
-  const requestedNonDup = requested.filter((r) => !unassignedIds.has(r.id));
+  const mineIds = new Set(mine.map((m) => m.id));
+  const requestedNonDup = requested.filter(
+    (r) => !unassignedIds.has(r.id) && !mineIds.has(r.id)
+  );
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>

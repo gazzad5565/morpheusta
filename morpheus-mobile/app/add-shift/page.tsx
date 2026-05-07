@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { type Customer } from "@/lib/mock-data";
@@ -26,6 +26,12 @@ export default function AddShiftPage() {
   // get a "Today" pill instead of a Request button. Pulled from the
   // real shifts table, not mock data.
   const [todayIds, setTodayIds] = useState<Set<string>>(() => new Set());
+  // Most recent customer name confirmed via the toast — fades out after
+  // a few seconds. Lets the rep see "Requested → it landed" immediately
+  // even when they're scrolled deep in the customer list and the
+  // sticky CTA is the only visible feedback otherwise.
+  const [lastRequested, setLastRequested] = useState<string | null>(null);
+  const toastTimer = useRef<number | null>(null);
 
   // Hydrate everything from the DB on mount.
   useEffect(() => {
@@ -68,7 +74,19 @@ export default function AddShiftPage() {
       color: c.color,
       code: c.code,
     });
+    // Show the confirmation toast for ~3.5s. If the rep taps multiple
+    // customers in quick succession we just refresh the timer so the
+    // toast follows whichever they tapped last.
+    setLastRequested(c.name);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setLastRequested(null), 3500);
   };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    };
+  }, []);
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
@@ -162,10 +180,11 @@ export default function AddShiftPage() {
         </div>
       </div>
 
-      {/* Results */}
+      {/* Results — bottom padding leaves room for the sticky "View N
+          requested" CTA so it can never cover the last card. */}
       <div
         style={{
-          padding: "12px 16px 22px",
+          padding: requestedIds.length > 0 ? "12px 16px 96px" : "12px 16px 22px",
           display: "flex",
           flexDirection: "column",
           gap: 8,
@@ -274,15 +293,33 @@ export default function AddShiftPage() {
         })}
       </div>
 
+      {/* Sticky CTA — pinned to the bottom of the phone-frame so the
+          rep always has a clear "what happens next" path: take me to
+          where I can see the pending request, instead of being stuck
+          on a long scrolling list of customers. Only renders if
+          there's at least one request to view. */}
       {requestedIds.length > 0 && (
-        <div style={{ padding: "0 16px 22px" }}>
+        <div
+          style={{
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: 60, // sit above the AppFooter
+            zIndex: 30,
+            padding: "10px 14px 12px",
+            background:
+              "linear-gradient(to bottom, rgba(247,248,250,0) 0%, rgba(247,248,250,0.92) 30%, rgba(247,248,250,1) 100%)",
+            pointerEvents: "none",
+          }}
+        >
           <button
             type="button"
             onClick={() => router.push("/shifts")}
             style={{
+              pointerEvents: "auto",
               width: "100%",
-              padding: "12px 16px",
-              borderRadius: 12,
+              padding: "13px 16px",
+              borderRadius: 14,
               background: MC.ink,
               color: "#fff",
               border: "none",
@@ -295,13 +332,103 @@ export default function AddShiftPage() {
               justifyContent: "center",
               gap: 8,
               letterSpacing: -0.1,
+              boxShadow: "0 8px 22px rgba(10,15,30,.22)",
             }}
           >
-            View {requestedIds.length} requested in shifts
+            <Glyph name="check-circle" size={16} color="#fff" strokeWidth={2.2} />
+            View {requestedIds.length} pending{" "}
+            {requestedIds.length === 1 ? "request" : "requests"}
             <Glyph name="arrow-r" size={16} color="#fff" strokeWidth={2.2} />
           </button>
         </div>
       )}
+
+      {/* Confirmation toast — drops in from the top after each Request
+          tap. Tells the rep that (a) the request reached the manager,
+          and (b) where to look next. Auto-dismiss after ~3.5s. */}
+      {lastRequested && (
+        <div
+          style={{
+            position: "fixed",
+            top: 60,
+            left: 14,
+            right: 14,
+            zIndex: 40,
+            background: "#fff",
+            border: `1px solid ${MC.ok}55`,
+            borderLeft: `4px solid ${MC.ok}`,
+            borderRadius: 12,
+            padding: "10px 12px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            boxShadow: "0 10px 24px rgba(10,15,30,.18)",
+            animation: "addshift-slide-in .28s cubic-bezier(.22, 1, .36, 1) both",
+          }}
+        >
+          <div
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              background: MC.okTint,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Glyph name="check" size={16} color={MC.ok} strokeWidth={2.6} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 11,
+                color: "#0d6a45",
+                fontWeight: 700,
+                letterSpacing: 0.5,
+                textTransform: "uppercase",
+              }}
+            >
+              Request sent
+            </div>
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 13,
+                color: MC.ink,
+                fontWeight: 600,
+                marginTop: 1,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {lastRequested}
+            </div>
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 11.5,
+                color: MC.mute,
+                marginTop: 1,
+              }}
+            >
+              Your manager has been notified.
+            </div>
+          </div>
+        </div>
+      )}
+      <style>{`
+        @keyframes addshift-slide-in {
+          0%   { transform: translateY(-12px); opacity: 0; }
+          100% { transform: translateY(0); opacity: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          [data-addshift-toast] { animation: none !important; }
+        }
+      `}</style>
 
       <AppFooter />
     </div>
