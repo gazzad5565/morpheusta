@@ -15,6 +15,7 @@ import { startLocationTracking } from "@/lib/location-tracker";
 import {
   getMyActiveShift,
   getTasksForCustomer,
+  setShiftBreakState,
   subscribeShifts,
   type TaskRow,
 } from "@/lib/shifts-store";
@@ -316,6 +317,14 @@ export default function ActiveShiftPage() {
           ...(isBreak ? { kind: "break" } : { compulsory: task.compulsory }),
         },
       });
+      // Flip the shift's state column too so the admin's Live Ops
+      // "On break" tab actually shows this shift while the break
+      // is in flight. Fire-and-forget — the audit event above is
+      // the source of truth; the state column is just a live-ops
+      // index optimisation.
+      if (isBreak) {
+        void setShiftBreakState(shiftData.shiftId, true);
+      }
     }
   };
 
@@ -362,6 +371,11 @@ export default function ActiveShiftPage() {
           ...(isBreak ? { kind: "break" } : {}),
         },
       });
+      // Restore in-progress when the break ends. Mirror of the
+      // setShiftBreakState(true) we fire on startTask above.
+      if (isBreak) {
+        void setShiftBreakState(shiftData.shiftId, false);
+      }
     }
   };
 

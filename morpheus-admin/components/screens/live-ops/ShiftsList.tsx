@@ -75,10 +75,13 @@ interface RepLite {
   initials: string;
 }
 
+// "Travelling" used to live here too but no code path anywhere ever
+// writes state='travelling' (Phase 4 work). Same dead-tab bug as the
+// old "Issues" / late state. Drop it until the mobile actually sets
+// that state — at which point we re-add the tab in one place.
 const TABS = [
   "All",
   "In progress",
-  "Travelling",
   "On break",
   "Unassigned",
   "Requested",
@@ -185,6 +188,32 @@ export function ShiftsList() {
     );
   }, [rows, requests, active]);
 
+  // Per-tab counts so each filter shows a tiny "1" / "3" pill next to
+  // its label. Subtle when zero, brand-tinted when there's something
+  // to handle. Computes off the same dedupedRequests / rows pair the
+  // filtered list above already uses.
+  const tabCounts = useMemo<Record<string, number>>(() => {
+    const shiftKeys = new Set(
+      rows.filter((s) => s.rep_id).map((s) => `${s.rep_id}::${s.customer_id}`)
+    );
+    const dedupedRequests = requests.filter(
+      (r) => !shiftKeys.has(`${r.repId}::${r.customerId}`)
+    );
+    const totalShifts = rows.length;
+    const inProgress = rows.filter(
+      (s) => effectiveState(s) === "in-progress"
+    ).length;
+    const onBreak = rows.filter((s) => effectiveState(s) === "on-break").length;
+    const unassigned = rows.filter((s) => !s.rep_id).length;
+    return {
+      All: totalShifts + dedupedRequests.length,
+      "In progress": inProgress,
+      "On break": onBreak,
+      Unassigned: unassigned,
+      Requested: dedupedRequests.length,
+    };
+  }, [rows, requests]);
+
   return (
     <Card padding={0}>
       <div
@@ -221,7 +250,7 @@ export function ShiftsList() {
           {filtered.length}
         </span>
         <div style={{ flex: 1 }} />
-        <SegTabs tabs={TABS} active={active} onChange={setActive} />
+        <SegTabs tabs={TABS} active={active} onChange={setActive} counts={tabCounts} />
         <div style={{ width: 1, height: 18, background: AC.line }} />
         <button
           type="button"

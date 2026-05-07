@@ -387,6 +387,50 @@ export async function checkOutOfShift(
 }
 
 /**
+ * Flip a live shift between in-progress and on-break.
+ *
+ * The admin Live Ops tabs filter by shifts.state, so without an
+ * actual state change the "On break" tab stayed empty even while a
+ * rep was on break — the existing shift_events row carried the
+ * audit but didn't surface in the live filter.
+ *
+ * We only allow the obvious transitions:
+ *   onBreak=true   → state must currently be 'in-progress' to flip
+ *                    to 'on-break'.
+ *   onBreak=false  → state must currently be 'on-break' to flip
+ *                    back to 'in-progress'.
+ * Any other state (scheduled / complete / late) is left alone — a
+ * stale break event after check-out shouldn't reanimate the shift.
+ */
+export async function setShiftBreakState(
+  shiftId: string,
+  onBreak: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { data: row } = await supabase
+    .from("shifts")
+    .select("state")
+    .eq("id", shiftId)
+    .maybeSingle();
+  const currentState = (row as { state?: string } | null)?.state || "";
+  const targetState = onBreak ? "on-break" : "in-progress";
+  const requiredCurrent = onBreak ? "in-progress" : "on-break";
+  if (currentState !== requiredCurrent) {
+    // No-op, not an error — the shift was already in some other
+    // terminal state (probably checked out) so don't reanimate it.
+    return { ok: true };
+  }
+  const { error } = await supabase
+    .from("shifts")
+    .update({ state: targetState })
+    .eq("id", shiftId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/**
  * Subscribe to realtime changes on the shifts table. The callback fires
  * on any insert/update/delete; the caller is expected to refetch its
  * own shape (listMyShiftsToday, etc).

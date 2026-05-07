@@ -135,14 +135,35 @@ function shiftOverlapsRange(
  *      complete shifts have draggable=false. Lanes eliminate the
  *      occlusion entirely.
  */
-function assignLanes(
-  shifts: ShiftRow[]
-): Map<string, { lane: number; lanes: number }> {
-  const result = new Map<string, { lane: number; lanes: number }>();
-  if (shifts.length === 0) return result;
+/**
+ * Maximum number of overlapping shift lanes we render before bailing
+ * out to a "+N more" overflow pill. Beyond this each card becomes a
+ * 20-px strip nobody can read; better to surface the count and let
+ * the manager click in for the full list.
+ */
+const MAX_VISIBLE_LANES = 3;
 
-  // Sort by start, then end (so longer shifts that start at the same
-  // time go into the leftmost lane — feels more natural when scanning).
+interface OverflowGroup {
+  /** Anchor shifts (top of cluster, used to position the +N pill). */
+  startMin: number;
+  endMin: number;
+  hidden: ShiftRow[];
+}
+
+interface LaneAssignment {
+  /** Map<shift_id, lane info> for shifts that render normally. */
+  visible: Map<string, { lane: number; lanes: number }>;
+  /** One per cluster that exceeded MAX_VISIBLE_LANES — used to draw "+N more". */
+  overflows: OverflowGroup[];
+}
+
+function assignLanes(shifts: ShiftRow[]): LaneAssignment {
+  const visible = new Map<string, { lane: number; lanes: number }>();
+  const overflows: OverflowGroup[] = [];
+  if (shifts.length === 0) return { visible, overflows };
+
+  // Sort by start, then by longer-first so longer shifts get the
+  // leftmost lane (feels more natural when scanning).
   const sorted = [...shifts].sort((a, b) => {
     const sa = timeToMin(a.start_time);
     const sb = timeToMin(b.start_time);
@@ -150,14 +171,15 @@ function assignLanes(
     return timeToMin(b.end_time) - timeToMin(a.end_time);
   });
 
-  // Walk shifts; whenever the next start is >= max end of the current
-  // cluster, the cluster is closed and we flush lane assignments.
+  // Walk shifts in order; whenever the next start is >= max end of
+  // the current cluster, the cluster is closed and we flush.
   let cluster: ShiftRow[] = [];
   let clusterMaxEnd = -1;
 
   const flush = () => {
     if (cluster.length === 0) return;
-    const laneEnds: number[] = []; // end-time per lane
+    // Lane sweep within the cluster.
+    const laneEnds: number[] = [];
     const laneOf: number[] = [];
     for (const s of cluster) {
       const start = timeToMin(s.start_time);
@@ -171,10 +193,42 @@ function assignLanes(
       }
       laneOf.push(lane);
     }
-    const lanes = laneEnds.length;
-    cluster.forEach((s, i) =>
-      result.set(s.id, { lane: laneOf[i], lanes })
-    );
+    const lanesNeeded = laneEnds.length;
+
+    if (lanesNeeded <= MAX_VISIBLE_LANES) {
+      cluster.forEach((s, i) =>
+        visible.set(s.id, { lane: laneOf[i], lanes: lanesNeeded })
+      );
+    } else {
+      // Cluster has too many overlapping lanes. Render the first
+      // MAX-1 lanes normally; collapse everything else (including
+      // the original lanes >= MAX-1) into a single "+N more" pill
+      // occupying the rightmost slot.
+      const lanesShown = MAX_VISIBLE_LANES;
+      const lastVisibleLane = lanesShown - 2; // 0..lastVisibleLane render normally
+      const hidden: ShiftRow[] = [];
+      let clusterStart = Infinity;
+      let clusterEnd = -Infinity;
+      cluster.forEach((s, i) => {
+        const lane = laneOf[i];
+        if (lane <= lastVisibleLane) {
+          visible.set(s.id, { lane, lanes: lanesShown });
+        } else {
+          hidden.push(s);
+        }
+        const sStart = timeToMin(s.start_time);
+        const sEnd = timeToMin(s.end_time);
+        if (sStart < clusterStart) clusterStart = sStart;
+        if (sEnd > clusterEnd) clusterEnd = sEnd;
+      });
+      if (hidden.length > 0) {
+        overflows.push({
+          startMin: clusterStart,
+          endMin: clusterEnd,
+          hidden,
+        });
+      }
+    }
     cluster = [];
     clusterMaxEnd = -1;
   };
@@ -192,7 +246,7 @@ function assignLanes(
     }
   }
   flush();
-  return result;
+  return { visible, overflows };
 }
 
 // Shared dropdown style for the toolbar filters (rep + customer). Kept
@@ -883,6 +937,280 @@ function formatHourLabel(h: number): string {
   return `${h - 12} PM`;
 }
 
+/**
+ * Renders one day column's worth of shift cards plus any "+N more"
+ * overflow pills. Pulled into its own component so the popover state
+ * (which overflow group is open?) is local — keeping it on DayColumn
+ * would invalidate the whole calendar grid on each open/close.
+ */
+function DayColumnContents({
+  shifts,
+  repNameMap,
+  drag,
+  onBeginDrag,
+  onEndDrag,
+}: {
+  shifts: ShiftRow[];
+  repNameMap: Record<string, string>;
+  drag: { shift: ShiftRow; pickupOffsetMin: number } | null;
+  onBeginDrag: (shift: ShiftRow, pickupOffsetMin: number) => void;
+  onEndDrag: () => void;
+}) {
+  const [openOverflowIdx, setOpenOverflowIdx] = useState<number | null>(null);
+  const { visible: laneMap, overflows } = useMemo(
+    () => assignLanes(shifts),
+    [shifts]
+  );
+
+  return (
+    <>
+      {shifts.map((s) => {
+        const meta = laneMap.get(s.id);
+        if (!meta) return null; // Hidden in an overflow group — popover renders these.
+        return (
+          <DraggableShiftCard
+            key={s.id}
+            shift={s}
+            repLabel={s.rep_id ? repNameMap[s.rep_id] || "Rep" : "Unassigned"}
+            dimmed={drag?.shift.id === s.id}
+            lane={meta.lane}
+            lanes={meta.lanes}
+            onBeginDrag={onBeginDrag}
+            onEndDrag={onEndDrag}
+          />
+        );
+      })}
+
+      {overflows.map((g, i) => {
+        const top = minToTop(g.startMin);
+        const height = Math.max(
+          SLOT_PX - 2,
+          (g.endMin - g.startMin) * PX_PER_MIN - 2
+        );
+        // The pill always sits in the rightmost lane (lane 2 of 3).
+        const lanePct = ((MAX_VISIBLE_LANES - 1) / MAX_VISIBLE_LANES) * 100;
+        return (
+          <div
+            key={`overflow-${i}`}
+            style={{
+              position: "absolute",
+              top,
+              height,
+              left: `calc(${lanePct}% + 2px)`,
+              right: 2,
+              zIndex: 3,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setOpenOverflowIdx(openOverflowIdx === i ? null : i)}
+              style={{
+                width: "100%",
+                height: "100%",
+                background: AC.brandSoft,
+                border: `1.5px dashed ${AC.brand}`,
+                borderRadius: 6,
+                cursor: "pointer",
+                color: AC.brandDeep,
+                fontFamily: AC.font,
+                fontSize: 10.5,
+                fontWeight: 700,
+                letterSpacing: -0.1,
+                padding: "4px 4px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 2,
+                textAlign: "center",
+              }}
+              title={`${g.hidden.length} more shifts overlap here — click to view`}
+            >
+              <span style={{ fontSize: 14, lineHeight: 1 }}>+{g.hidden.length}</span>
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 600,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                  opacity: 0.85,
+                }}
+              >
+                more
+              </span>
+            </button>
+
+            {openOverflowIdx === i && (
+              <OverflowPopover
+                shifts={g.hidden}
+                repNameMap={repNameMap}
+                onClose={() => setOpenOverflowIdx(null)}
+              />
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * Tiny popover anchored to the "+N more" pill. Lists every hidden
+ * shift as a stacked card with full text — click any one to navigate
+ * to its detail. Click outside or the close button to dismiss.
+ */
+function OverflowPopover({
+  shifts,
+  repNameMap,
+  onClose,
+}: {
+  shifts: ShiftRow[];
+  repNameMap: Record<string, string>;
+  onClose: () => void;
+}) {
+  // Close on outside click. Mounted via a small effect on the
+  // backdrop instead of a portal — good enough for a small popover.
+  return (
+    <>
+      <div
+        onMouseDown={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 100,
+          background: "transparent",
+        }}
+      />
+      <div
+        role="dialog"
+        aria-label={`${shifts.length} additional shifts`}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: "100%",
+          marginLeft: 6,
+          minWidth: 240,
+          maxWidth: 300,
+          maxHeight: 320,
+          overflowY: "auto",
+          background: "#fff",
+          border: `1px solid ${AC.line}`,
+          borderRadius: 10,
+          boxShadow: "0 12px 28px rgba(10,15,30,.16)",
+          zIndex: 101,
+          padding: 8,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "4px 6px 8px",
+            borderBottom: `1px solid ${AC.lineDim}`,
+            marginBottom: 6,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              fontWeight: 700,
+              color: AC.mute,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              flex: 1,
+            }}
+          >
+            {shifts.length} more shifts
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: 2,
+              display: "flex",
+            }}
+          >
+            <AGlyph name="x" size={12} color={AC.mute} />
+          </button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {shifts.map((s) => {
+            const repLabel = s.rep_id
+              ? repNameMap[s.rep_id] || "Rep"
+              : "Unassigned";
+            const c = s.customers;
+            const color = c?.color || "#888";
+            const isComplete = s.state === "complete";
+            return (
+              <Link
+                key={s.id}
+                href={shiftHref(s)}
+                style={{
+                  display: "block",
+                  padding: "6px 8px",
+                  borderRadius: 6,
+                  background: `${color}10`,
+                  borderLeft: `3px solid ${color}`,
+                  textDecoration: "none",
+                  color: "inherit",
+                  opacity: isComplete ? 0.7 : 1,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    color: AC.ink,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    textDecoration: isComplete ? "line-through" : "none",
+                  }}
+                >
+                  {repLabel}
+                </div>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    marginTop: 1,
+                    textDecoration: isComplete ? "line-through" : "none",
+                  }}
+                >
+                  {c?.name || "Unknown customer"}
+                </div>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 10.5,
+                    color: AC.ink2,
+                    marginTop: 2,
+                  }}
+                >
+                  {formatTime(s.start_time, { compact: true })}–
+                  {formatTime(s.end_time, { compact: true })}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function DayColumn({
   iso,
   isToday,
@@ -985,26 +1313,18 @@ function DayColumn({
       })}
 
       {/* Shift cards positioned by start_time / duration. Overlapping
-          shifts are split into lanes so they render side-by-side
-          instead of stacking on top of each other. */}
-      {(() => {
-        const laneMap = assignLanes(shifts);
-        return shifts.map((s) => {
-          const meta = laneMap.get(s.id) ?? { lane: 0, lanes: 1 };
-          return (
-            <DraggableShiftCard
-              key={s.id}
-              shift={s}
-              repLabel={s.rep_id ? repNameMap[s.rep_id] || "Rep" : "Unassigned"}
-              dimmed={drag?.shift.id === s.id}
-              lane={meta.lane}
-              lanes={meta.lanes}
-              onBeginDrag={onBeginDrag}
-              onEndDrag={onEndDrag}
-            />
-          );
-        });
-      })()}
+          shifts are split into lanes (max 3 visible) so they render
+          side-by-side instead of stacking on top of each other. Past
+          MAX_VISIBLE_LANES the rightmost slot becomes a "+N more" pill
+          showing how many shifts are hidden — clicking it reveals
+          them in a popover. */}
+      <DayColumnContents
+        shifts={shifts}
+        repNameMap={repNameMap}
+        drag={drag}
+        onBeginDrag={onBeginDrag}
+        onEndDrag={onEndDrag}
+      />
 
       {/* Hover preview while dragging over this column */}
       {hover && drag && (

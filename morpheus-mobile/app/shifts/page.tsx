@@ -134,6 +134,68 @@ export default function ShiftsListPage() {
     <div style={{ background: MC.bg, minHeight: "100%" }}>
       <AppHeader title="Today's Shifts" onBack={() => router.push("/")} withMenu />
 
+      {/* Top-anchored CTA — used to live at the bottom of the page,
+          which meant a rep with many shifts had to scroll past
+          everything to find it. Now it's right under the header so
+          "I want to add a shift" is one tap from any state. */}
+      <div style={{ padding: "12px 16px 0" }}>
+        <Link
+          href="/add-shift"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "11px 14px",
+            borderRadius: 12,
+            background: MC.card,
+            border: `1px solid ${MC.brand}33`,
+            borderLeft: `3px solid ${MC.brand}`,
+            color: MC.ink,
+            textDecoration: "none",
+            boxShadow: "0 1px 2px rgba(10,15,30,.04)",
+          }}
+        >
+          <span
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: MC.brandTint,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Glyph name="plus" size={15} color={MC.brand} strokeWidth={2.4} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: MC.ink,
+                letterSpacing: -0.1,
+              }}
+            >
+              Request a customer
+            </div>
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 11.5,
+                color: MC.mute,
+                marginTop: 1,
+              }}
+            >
+              Pick from your customer list — your manager is notified.
+            </div>
+          </div>
+          <Glyph name="chev-r" size={16} color={MC.hint} />
+        </Link>
+      </div>
+
       <SectionLabel count={mine.length}>Scheduled for me</SectionLabel>
 
       <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -193,30 +255,10 @@ export default function ShiftsListPage() {
         )}
       </div>
 
-      {/* Add shift CTA — quick path to /add-shift if rep wants to request more */}
-      <div style={{ padding: "4px 16px 24px" }}>
-        <Link
-          href="/add-shift"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-            padding: "12px 14px",
-            borderRadius: 12,
-            background: MC.card,
-            border: `1px dashed ${MC.line}`,
-            color: MC.brandDeep,
-            fontFamily: MC.font,
-            fontSize: 13.5,
-            fontWeight: 600,
-            textDecoration: "none",
-          }}
-        >
-          <Glyph name="target" size={15} color={MC.brandDeep} strokeWidth={2.2} />
-          Request a customer
-        </Link>
-      </div>
+      {/* CTA used to live here at the bottom too — moved to the top
+          beneath the header so reps with many shifts can find it
+          without scrolling. One copy is enough. */}
+      <div style={{ height: 12 }} />
 
       <AppFooter />
     </div>
