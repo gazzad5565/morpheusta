@@ -1,10 +1,10 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`94e1e5e`** (May 6, 2026). Working tree clean.
+> Latest commit: **`c028b0a`** (May 7, 2026). Working tree clean before today's tasks/library consistency pass; about to push that bundle next.
 > Repo: https://github.com/gazzad5565/morpheusta · Live: https://morpheus-admin.vercel.app + https://morpheusta-khaki-omega.vercel.app · DB: Supabase project `otweltzwwhrvhtvaqsci`
-> **Don't ask the user for context — read this whole file first.** Section "Where things stand right now" (around line 100) is the canonical handover. The "Today's session — what shipped" section lists every commit from May 6 by hash. The "Top of the deferred list" tells you what to start on tomorrow.
-> If you make changes, update this file before you push. Phase 4 RLS is the highest-priority open item; do not deploy to real users without it.
+> **Don't ask the user for context — read this whole file first.** Section "Where things stand right now" (around line 100) is the canonical handover. The "Today's session — what shipped" sections list every commit by hash, newest day first. The "Top of the deferred list" tells you what to start on next.
+> If you make changes, update this file before you push. Phase 4 RLS is still the highest-priority open item; do not deploy to real users without it.
 
 ---
 
@@ -104,11 +104,11 @@ If you switch computers (or hand this project to a developer), this section is t
 
 ### Where things stand right now (handover for the next chat)
 
-**Last commit:** `ad08c62` — "Shift Complete: cinematic celebration sequence"
+**Last commit:** `c028b0a` — "Calendar popover via portal; Edit-future on /schedule/manage" (about to push the tasks/library consistency pass on top)
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
-**Working end-to-end on real data — both apps build clean, all 18 admin routes return 200, no mock fallbacks left in the rep flow.**
+**Working end-to-end on real data — both apps build clean, all 31 admin routes + 15 mobile routes return 200, no mock fallbacks left in the rep flow.**
 
 #### Admin (manager console)
 
@@ -117,26 +117,34 @@ If you switch computers (or hand this project to a developer), this section is t
   - `/reports/operations` — daily Scheduled vs Completed line chart, on-time rate trend, state donut, top-customers bar chart, KPIs with period-over-period deltas (7/30/90d).
   - `/reports/rep-performance` — leaderboard with sortable columns + Δ vs prev period + coloured progress bars (Good/Warn/Danger thresholds).
   - `/reports/timesheet` — payroll-grade hours per shift, joins `shifts.check_out_at` (or events fallback), CSV export.
-- **Schedule / Calendar** — toggle between **Days view** (flat day-only) and **Reps view** (per-rep grid). Sortable cells, smart default `+ Add` time per cell, cards link to `/shifts/[id]` (locked detail) or `/shifts/[id]/edit` (when scheduled).
-- **Shift edit page** — `/shifts/[id]/edit`. Editable while `state='scheduled'`; redirects to read-only detail once the rep checks in. Server-enforces the lock too.
-- **Customers / Reps** — both list pages share the same toolbar: filter chips, search, Grid + Table view toggle, sortable columns. `/customers` also has Map view.
-- **Schedule/new** — multi-customer × multi-rep × weekly recurrence cartesian product (e.g. 3 reps × 5 customers × Mon-Fri = 75 shifts in one save).
-- **User CRUD** — sidebar nav link is now **"Users"** but route stays `/settings/managers`. Add User modal, edit page, role promote/demote. Server route at `/api/users` uses the service-role key, gates by `profiles.role='manager'`.
+- **Schedule / Calendar** — single time-axis Days view (06:00–20:00 in 30-min slots, 28 × 24px = 672px tall). Drag scheduled shifts to move (snaps to 30 min, conflict check, optimistic + rollback). Click empty slot → /schedule/new with date+time pre-filled. Click a shift → centred quick-info popover with View/Edit + Delete. Lane allocator splits overlapping shifts into ≤ 3 side-by-side lanes; "+N more" pill opens a popover when a cluster overflows. Rep filter dropdown; weekend columns are NOT dimmed.
+- **`/schedule/manage`** — series-based shift management. One row per `series_id` with customer(s), rep(s), date range, time, count + upcoming/past split. Actions: View / Edit future / Cancel future / All. Series-edit modal applies to scheduled shifts from today forward only.
+- **Shift edit page** — `/shifts/[id]/edit`. Editable while `state='scheduled'`; redirects to read-only detail once the rep checks in. Server-enforces the lock too. Distance label removed; tasks_total is auto-derived from `customer_tasks` count and shown as a read-only chip.
+- **Customers / Reps / Tasks / Library** — all four list pages share the same toolbar shape: filter chips with counts, search input, secondary filter dropdown / view toggle. `/customers` also has Grid/Table/Map views.
+- **Schedule/new** — multi-customer × multi-rep × weekly recurrence cartesian product (e.g. 3 reps × 5 customers × Mon-Fri = 75 shifts in one save), with shared `series_id` so all the rows are linked. Three numbered steps + live "About to create" preview. 30-min time picker dropdowns.
+- **User CRUD** — sidebar nav link is now **"Users"** but route stays `/settings/managers`. Add User modal, edit page, role promote/demote. Server route at `/api/users` uses the service-role key, gates by `profiles.role='manager'`. Reps detail "Edit" routes to the same editor.
 - **Settings hub + sub-pages** — `/settings` is a tile hub; each section is its own route under `SettingsShell` (Users, Check-in rules, Custom fields, Organisation, Notifications, Billing). Notifications/Billing are "Soon" placeholders.
-- **Organisation logo** — upload at `/settings/organisation` to a public Storage bucket; Sidebar reads it on mount and replaces the default Morpheus mark.
+- **Organisation page** — name, logo (uploaded to Supabase Storage), address w/ autocomplete + map preview, phone, email, tax number, website, registration number, custom fields, **"Approval not needed" toggle** (auto-approve rep requests).
 - **Topbar search** — live filter across reps, managers, customers, tasks. ⌘K focuses; ↑↓ + Enter navigates.
+- **Honest "Saved" pill** in the topbar — only renders during/after a real mutation. Wired into shifts / customers / tasks / requests / settings stores.
 - **Sidebar Live Ops badge** — flashing red pill + browser tab title prefix when there are pending rep requests, visible from any page. Refreshes via realtime + visibilitychange + 60s poll + every navigation.
+- **Sidebar "Powered by Morpheus TA" footer**.
 
 #### Mobile (rep PWA)
 
 - **Today / Shifts / Active / Library** all auto-refresh in real time via Supabase Realtime + visibilitychange + 60s poll fallbacks.
-- **Check-in animated success page** — `/check-in/success` is now fully data-driven (customer, time, distance, late mins, early mins, real next shift). Includes a one-shot animated celebration: pop-in icon, three pulsing rings, stroke-drawn checkmark, staggered fade-up of content. Respects `prefers-reduced-motion`.
+- **Today's Shifts** — date header, search box (4+ shifts), pending requests pinned to top in their own "Awaiting approval" section, contextual countdown pills per row (`in 50 min` / `10 min late` / `ends in 20m` / `ran 10m over`).
+- **Floating PendingRequestPill** — bottom-right, follows the rep across every page until the request is resolved. Cross-checks against today's shifts so it clears the moment the approved shift INSERTs.
+- **`<RequestResolutionWatcher>`** — toast banners on approve / decline, mounted at layout level so they fire on whatever page the rep is on.
+- **Check-in animated success page** — `/check-in/success` is fully data-driven and includes a cinematic celebration sequence (pop-in icon, three pulsing rings, stroke-drawn check, staggered fade-up). Respects `prefers-reduced-motion`.
 - **Off-site / Late / Early check-in** all detected and gated. **Early check-out** symmetric. Configurable grace periods on `/settings/check-in-rules`.
-- **Task / Break / Travel** all log dedicated events (`shift.task_started`, `shift.task_completed`, `shift.break_started`, `shift.break_ended`, `shift.travel_started`, `shift.travel_ended`).
-- **Travel UI** lives in three places: `<UpNextCard>` Start/Stop, post-checkout `/summary` "What's next?" tiles, and auto-ended on next check-in. State persists in `localStorage` so closing the app mid-travel doesn't lose it.
+- **Task / Break / Travel** all log dedicated events AND flip `shifts.state` so admin Live Ops tabs surface mid-shift state.
+- **Break duration chooser** — slide-up sheet with 15/30/60/open-ended; no more accidental auto-start.
+- **Travel UI** — `<UpNextCard>` Start/Stop, post-checkout `/summary` "What's next?" tiles. State persists in `localStorage`.
 - **Active task / break / travel state** persists across screen lock + app close via `localStorage`.
 - **Event queue** — failed `logEvent` calls are queued in localStorage and retried on the next mount or visibility-change. Up to 200 events buffered.
 - **Auto-checkout sweep** — admin home + tab-focus runs `sweepStaleShifts()` which marks any active-state shift past the configured cutoff as complete, also clears orphan `rep_locations` rows. Cutoff is configurable in `/settings/check-in-rules` (default 23:59).
+- **Auto-approve flow** — when org has "Approval not needed" on, `selfCreateImmediateShift` is called instead of `addRequestedShift`; toast says "Shift added · Ready to check in".
 
 #### Database
 
@@ -144,6 +152,82 @@ If you switch computers (or hand this project to a developer), this section is t
 - **Indexes** on hot paths (added during the stabilisation pass): `shifts (shift_date)`, `shifts (rep_id, shift_date)`, partial `shifts (state)` on active states only, `shifts (customer_id)`, `requested_shifts (status, requested_at)`, `requested_shifts (rep_id)`. Plus everything in `db/migrations/*` already indexed.
 - **`shifts.check_out_at`** is now a real column (was inferred from events) — backfilled from event log via migration; mobile checkout + admin sweep both stamp it.
 - **`shift_task_completions`** logs which tasks the rep ticked off on a given shift (cascades on shift / task delete; unique on (shift, task)).
+
+### Today's session — what shipped (May 7, 2026)
+
+Long, varied day. Roughly in narrative order:
+
+#### Mobile UX
+
+- **Pending request UX** — `<RequestResolutionWatcher>` toast banners for approval/decline; pending cards now have a clear "Awaiting approval" warn-tone state with a "Waiting for manager · X ago" line (`196bc67`).
+- **Approval flow polish** — duplicate-row lag killed (cross-check pending against today's shifts so the pill clears the moment the new shift INSERTs); post-tap toast confirmation; resolution banner now fires app-wide via layout-mounted watcher (`ebb9310`, `2f9c7f3`).
+- **Resolution banner grace gate dropped** — used to require admin to act within 5 min, otherwise the banner silently never fired. Now it just checks "did the rep ever request this customer in this session" (`2f9c7f3`).
+- **Floating PendingRequestPill** — bottom-right reminder mounted at layout level, follows the rep across every page until resolved. Cross-checks against today's shifts so it clears instantly when the approved shift INSERTs (`07080de`, `2f9c7f3`).
+- **`/shifts` redesign** — pending requests pinned to top above "Scheduled for me"; today's-date header line; search box (4+ shifts); compact "Request a customer" pill in the corner; loading spinner on Resume / Check-in buttons; **contextual countdown pill** per row (`in 50 min` / `10 min late` / `ends in 20m` / `ran 10m over`) ticking on a 30s page-level timer (`d97e56b`, `5ee80c6`, `7a63ac2`).
+- **Dashboard tightened** — AppHeader uses `env(safe-area-inset-top)` so non-notched devices get a slimmer band; `compact` mode hides the redundant "Dashboard" title; "View all" promoted from a tiny text link to a brand-tinted pill button (`07080de`, `2f9c7f3`).
+- **Break duration chooser** — homepage "Take a break" no longer auto-starts; opens a slide-up sheet with 15/30/60/open-ended; negative-timer bug fixed by clamping elapsed at zero (`6d3b46a`).
+- **Live state flips** — mobile now flips `shifts.state` on `on-break` / `travelling` transitions so admin Live Ops "On break" / "Travelling" tabs actually surface the rep mid-shift. `setShiftBreakState` is permissive (in-progress / travelling / on-break all OK as source) so taking a break right after travelling works (`c3d15dd`, `2f9c7f3`, `7a63ac2`).
+- **`/add-shift` cleanup** — chunky black "View N pending" sticky bar removed (the global pill does the job); chunky CTA card replaced with compact pill (`07080de`, `2f9c7f3`).
+
+#### Calendar (admin)
+
+- **Time-axis Days view** with 30-min slot grid (06:00–20:00, 28 slots × 24px = 672px tall) + drag-and-drop with snap, conflict detection, optimistic update + rollback (`deb1ad3`).
+- **Lane allocator** — overlapping shifts split into side-by-side lanes via sweep-line per overlap cluster. Past `MAX_VISIBLE_LANES = 3` the rightmost slot becomes a brand-tinted "+N more" pill that opens a popover listing the rest (`07080de`, `c3d15dd`).
+- **Drag-on-busy-day fix** — overflow pill at `zIndex:3` was swallowing dragOver/drop. Now `pointerEvents:none` while a drag is active so the column underneath catches the drop (`e16a08f`).
+- **Weekend dimming dropped** — Sat/Sun look like normal workdays; today still highlights (`e16a08f`).
+- **Click-to-add** — click any empty spot in a column → `/schedule/new` with date + clicked time pre-filled (snapped to 30 min). Uses `router.push`, not `window.location.assign`, so calendar state survives the round-trip (`2f9c7f3`, `6282384`).
+- **Quick-info popover** on click — centred modal via `createPortal` to escape stacking contexts. Shows customer + initials, rep, date/time, tasks, state pill. Buttons: View / Edit + Delete (scheduled only, inline confirm) (`e16a08f`, `c028b0a`).
+- **Days/Reps toggle retired** — rep dropdown filter took over the use case. Reps view + ~520 LOC of unreachable components deleted (`07080de`).
+- **Time picker** — native `<input type="time">` replaced with a 30-min select (06:00–22:00 in AM/PM labels). Existing odd-minute values still round-trip (`e16a08f`).
+
+#### Schedule / shifts management
+
+- **Numbered-step `/schedule/new`** flow + live "About to create" preview (`96e9684`).
+- **Customer scope default = empty** so a misclick can't bulk-create one shift per customer (`96e9684`).
+- **Distance + total-tasks fields removed** from create AND edit forms — distance derives from customer coords + rep location; tasks_total auto-counts from `customer_tasks` (specific + universal). Live count chip on the edit page; Live Ops bar uses `liveTaskTotal` per row from a single batched `countTasksForCustomers` call (`96e9684`, `2f9c7f3`, `e16a08f`).
+- **Auto-derived `series_id`** on every multi-shift creation (one UUID per /schedule/new submission). One-off shifts leave it null (`7a63ac2`).
+- **`/schedule/manage` page** — series-based shift management. One row per series with customer(s), rep(s), date range, time, count + upcoming/past split. Actions: View / Edit future / Cancel future / All. Top-of-calendar "Manage shifts" link next to "New shift" (`d97e56b`).
+- **Edit-future modal** — change customer / rep / start / end across every still-scheduled shift in a series from today onward. Smart prefill (single-customer/rep series prefill exact; multi-* start blank with "(unchanged)" placeholder) (`c028b0a`).
+
+#### Admin UX pass
+
+- **Honest "Saved" indicator** in the TopBar — the global pill only surfaces during/after actual mutations (was previously rendering "Auto-saved" always, which was misleading because most pages still need explicit Save buttons). Wired into shifts / customers / tasks / requests / settings stores (`6d3b46a`, `53dc28a`).
+- **Disabled `<Btn>`** actually looks disabled — primary/danger go gray with not-allowed cursor (`6d3b46a`).
+- **`<RepAvatar>`** now derives a stable color from rep id (or initials) using a 12-color palette. Same rep, same color everywhere — Reps list, reports, pickers, Live Ops table, map dots (`a4afc62`).
+- **`<CustomerScopePicker>`** got a search box matching the rep picker (`a4afc62`).
+- **Schedule rep-filter dropdown** in the calendar toolbar (`6d3b46a`).
+- **Live Ops Today's Shifts** — count badges per tab (subtle pill next to label, brand-tinted when >0); "On break" + "Travelling" tabs now reflect real state; "Issues" dead tab removed (`90bcfb3`, `c3d15dd`).
+- **Live Ops Live Feed** — caught-up empty state surfaces 5 most-recent activity events below "All caught up"; All activity gets a Today / 7d / 30d / All time dropdown (defaults to Today) (`5ee80c6`).
+- **Live Ops Map popover** — rep marker shows rep + current customer + state pill + click-through to shift detail (`a4afc62`).
+- **Reps detail Edit button** wired (was a dead button) — routes to existing `/settings/managers/[id]/edit` (`e662f17`).
+
+#### Settings
+
+- **Organisation page expanded** — Address with `<AddressAutocomplete>` + map preview (reuses `<CustomerAddressMap>` with new `showGeofence` prop), Phone, Email, Tax number, Website, Registration number. Plus mounted `<CustomFieldsCard entity="organisation">` so org-level custom fields are now first-class. (`6d3b46a`, `cbf6966`).
+- **`organisation` added to `FIELD_ENTITIES`** + DB migration `2026_05_07_custom_fields_organisation.sql` to relax the CHECK constraint (`cbf6966`).
+- **"Approval not needed" toggle** — when on, rep "Request a customer" bypasses the requested_shifts queue and a shift is scheduled directly. Mobile branches the toast text accordingly (`5ee80c6`).
+- **Sidebar "Powered by Morpheus TA" footer** + dropped the duplicate subtitle (`6d3b46a`, `53dc28a`).
+
+#### Library
+
+- **Search box** above the file table (matches Customers / Reps / Tasks affordance).
+- **Free-text categories** — upload form's category dropdown is now an input + datalist of existing categories. Sidebar shows the union of seed + free-text categories.
+- **"Close upload" → "Cancel upload"** with x glyph (`53dc28a`).
+
+#### Tasks page
+
+- **Search box** added to the toolbar matching the Customers/Reps/Library pattern. Filters across name, description, and joined customer name. (Tasks / Library list pages now share the toolbar shape with Reps + Customers.)
+
+#### Drag, popover, polish
+
+- Calendar popover migrated from card-child to `createPortal(document.body)` so it escapes the card's stacking context (was rendering visually behind sibling overflow pills) (`c028b0a`).
+
+#### Migrations applied today
+
+- `2026_05_07_custom_fields_organisation.sql` — extends `custom_fields.applies_to` CHECK to include `'organisation'`
+- `2026_05_07_shifts_series_id.sql` — adds nullable `shifts.series_id uuid` + partial index
+
+Both must be run once in the Supabase SQL Editor before the relevant features hit prod.
 
 ### Today's session — what shipped (May 6, 2026)
 
@@ -175,7 +259,14 @@ Big day. Roughly in order:
 - **End-of-day stabilisation** — final type-check + build + 18-route smoke test all clean. README rewritten as full handover doc (`893250e`)
 - **Shift Complete cinematic** — 3-second one-shot animation on `/summary`: bouncy hero icon + 3 pulsing rings + stroke-drawn check + shimmer sweep + 36-particle brand-coloured confetti + staggered title/subtitle + cascading stat tiles with **easeOutCubic count-up numbers** + activity timeline draws line-by-line with dots popping in as it passes. Pure CSS + one tiny RAF count-up component. Respects `prefers-reduced-motion` (`ad08c62`)
 
-### Migrations applied today (already in cloud)
+### Migrations applied today (cloud status)
+
+May 7:
+
+- `2026_05_07_custom_fields_organisation.sql` — applied? **needs running** in Supabase SQL Editor
+- `2026_05_07_shifts_series_id.sql` — applied? **needs running** in Supabase SQL Editor
+
+May 6 (already in cloud):
 
 - `2026_05_06_shifts_indexes.sql`
 - `2026_05_06_organisation.sql`
@@ -186,7 +277,14 @@ Big day. Roughly in order:
 
 ### What the next chat should do first
 
-Top of the queue: **Phase 4 RLS** (locks down the database against malicious-rep API access — see #1 in the deferred list above). Or **Capacitor wrap** if background GPS is the priority. Or **Custom report builder** if reporting is the priority.
+Top of the queue (in priority order):
+
+1. **Run the May 7 migrations** in Supabase if they aren't already — until then `/schedule/manage` series-edit is no-op-safe but the `series_id` column doesn't exist; org-level custom fields will be rejected by the CHECK constraint.
+2. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
+3. **Cinematic check-out animation** — user reported it's "missing". The `/summary` page code is intact; need to reproduce the rep's flow end-to-end and confirm whether it's actually firing.
+4. **Travelling auto-end on check-in** — when a rep checks into a shift, the existing `setTravellingSince(null)` setter should auto-fire so the previous "Travelling" state doesn't linger.
+5. **Capacitor wrap** if background GPS is the priority.
+6. **Custom report builder** if reporting is the priority.
 
 Open the `/reports` hub to see what works visually, the Timesheet report to see how the events log + new `check_out_at` column come together for payroll, and `/schedule/new` to see the multi-rep × multi-customer × recurrence pattern.
 

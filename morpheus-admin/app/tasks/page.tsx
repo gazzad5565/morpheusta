@@ -29,6 +29,10 @@ export default function TasksPage() {
     "all"
   );
   const [customerFilter, setCustomerFilter] = useState<string>("All");
+  // Free-text filter — matches against task name, description, and
+  // joined customer name. Mirrors the search input on /customers and
+  // /reps so every list page in the admin uses the same affordance.
+  const [search, setSearch] = useState<string>("");
 
   const reload = () => {
     listAllTasks().then((r) => {
@@ -49,16 +53,30 @@ export default function TasksPage() {
   }, [rows]);
 
   const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
     return rows.filter((r) => {
       if (activeFilter === "compulsory" && !r.compulsory) return false;
       if (activeFilter === "optional" && r.compulsory) return false;
-      if (customerFilter === "All") return true;
-      if (customerFilter === "Universal") return r.customer_id === null;
-      // Universal tasks always show under any specific-customer filter too,
-      // since they apply to that customer.
-      return r.customer_id === null || r.customers?.id === customerFilter;
+      if (customerFilter === "Universal") {
+        if (r.customer_id !== null) return false;
+      } else if (customerFilter !== "All") {
+        // Universal tasks always show under any specific-customer filter too,
+        // since they apply to that customer.
+        if (r.customer_id !== null && r.customers?.id !== customerFilter) return false;
+      }
+      if (q) {
+        const hay = [
+          r.name,
+          r.description || "",
+          r.customers?.name || "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
     });
-  }, [rows, activeFilter, customerFilter]);
+  }, [rows, activeFilter, customerFilter, search]);
 
   const onDelete = async (t: TaskRow) => {
     if (!confirm(`Delete task "${t.name}" from ${t.customers?.name || "this customer"}?`)) {
@@ -112,6 +130,49 @@ export default function TasksPage() {
               Optional · {optionalCount}
             </FilterChip>
             <div style={{ flex: 1 }} />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "5px 10px",
+                background: AC.bg,
+                border: `1px solid ${AC.line}`,
+                borderRadius: 8,
+                width: 220,
+              }}
+            >
+              <AGlyph name="search" size={13} color={AC.hint} />
+              <input
+                placeholder="Name, description, or customer…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{
+                  flex: 1,
+                  border: "none",
+                  outline: "none",
+                  background: "transparent",
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  color: AC.ink,
+                }}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    display: "flex",
+                  }}
+                >
+                  <AGlyph name="x" size={12} color={AC.hint} />
+                </button>
+              )}
+            </div>
             <select
               value={customerFilter}
               onChange={(e) => setCustomerFilter(e.target.value)}
