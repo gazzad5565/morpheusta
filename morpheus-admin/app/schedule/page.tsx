@@ -20,14 +20,19 @@
  *   - Customer filter narrows visible shifts.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
-import { listShiftsInRange, shiftHref, type ShiftRow } from "@/lib/shifts-store";
+import {
+  listShiftsInRange,
+  shiftHref,
+  updateShift,
+  type ShiftRow,
+} from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listCustomers } from "@/lib/customers-store";
 import { localISO as isoDate, formatTime, initialsFromNameOrEmail } from "@/lib/format";
@@ -59,6 +64,56 @@ function stateRank(s: ShiftRow): number {
 
 const UNASSIGNED_KEY = "__unassigned__";
 type ViewMode = "days" | "reps";
+
+// ─── Time grid constants ──────────────────────────────────────────────
+//
+// The Days view is a real time-axis calendar. We render slots from
+// HOUR_START to HOUR_END at SLOT_MIN-minute granularity. SLOT_PX is the
+// height of one slot in CSS pixels, and PX_PER_MIN derives from it.
+//
+// Picked 06:00–20:00 (14 h) by default — covers early starts and late
+// completions without making the column scroll on a typical 1080p
+// screen. Two slots per hour matches the "thirty-minute slots" the
+// product spec asks for.
+const HOUR_START = 6;
+const HOUR_END = 20;
+const SLOT_MIN = 30;
+const SLOT_PX = 24;
+const PX_PER_MIN = SLOT_PX / SLOT_MIN;
+const DAY_TOTAL_MIN = (HOUR_END - HOUR_START) * 60;
+const DAY_TOTAL_PX = DAY_TOTAL_MIN * PX_PER_MIN;
+const TIME_GUTTER_W = 60;
+
+function timeToMin(t: string | null | undefined): number {
+  if (!t) return 0;
+  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+function minToTime(m: number): string {
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+/** Top offset in px for a given absolute minute-of-day. */
+function minToTop(m: number): number {
+  return Math.max(0, (m - HOUR_START * 60) * PX_PER_MIN);
+}
+/** Convert a Y offset (px from column top) into a snapped minute-of-day. */
+function pxToSnappedMin(px: number): number {
+  const raw = px / PX_PER_MIN + HOUR_START * 60;
+  const snapped = Math.round(raw / SLOT_MIN) * SLOT_MIN;
+  // Clamp so we can't drop a card so its start lands at or after HOUR_END.
+  // Subtract one slot's worth so the shortest possible block still fits
+  // before the day's bottom edge.
+  return Math.max(HOUR_START * 60, Math.min(HOUR_END * 60 - SLOT_MIN, snapped));
+}
+function shiftOverlapsRange(
+  s: ShiftRow,
+  startMin: number,
+  endMin: number
+): boolean {
+  return timeToMin(s.start_time) < endMin && startMin < timeToMin(s.end_time);
+}
 
 // Shared dropdown style for the toolbar filters (rep + customer). Kept
 // here so the two selects line up cell-for-cell on every screen size.
@@ -235,6 +290,135 @@ export default function SchedulePage() {
   const totalVisible = filteredShifts.length;
   const hasUnassigned = byRepDay.has(UNASSIGNED_KEY);
 
+  // Transient banner messages for drag-and-drop feedback. Keeps the
+  // alert() noise off while still telling the manager what happened on
+  // a successful move or a conflict block. Auto-dismisses.
+  const [moveBanner, setMoveBanner] = useState<{
+    kind: "ok" | "warn" | "error";
+    text: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!moveBanner) return;
+    const t = window.setTimeout(() => setMoveBanner(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [moveBanner]);
+
+  /**
+   * Optimistic shift move. Used by both the Days view (drag changes
+   * date + start/end) and the Reps view (drag changes rep_id and/or
+   * date, time-of-day preserved).
+   *
+   * Steps:
+   *   1. Snapshot the original row so we can revert on DB error.
+   *   2. Conflict check — if the new (rep, date, time-range) overlaps
+   *      any other shift for the same rep, we block and surface the
+   *      offender's customer name. Unassigned shifts (rep_id = null)
+   *      don't conflict with anything; multiple unassigned shifts at
+   *      the same time are allowed.
+   *   3. Optimistic UI update. The drop visually lands instantly.
+   *   4. Background updateShift(). On success we keep the optimistic
+   *      state (the next refetch reconciles anyway). On failure we
+   *      revert and surface the error in the banner.
+   *
+   * Refuses to move shifts in any state other than "scheduled" — the
+   * draggable={...} guard on each card already prevents this, but we
+   * double-check here so a stale drag can't slip through.
+   */
+  const applyShiftMove = async (
+    id: string,
+    patch: {
+      shift_date?: string;
+      start_time?: string;
+      end_time?: string;
+      rep_id?: string | null;
+    }
+  ): Promise<void> => {
+    const before = shifts.find((s) => s.id === id);
+    if (!before) return;
+    if (before.state !== "scheduled") {
+      setMoveBanner({
+        kind: "warn",
+        text: `Can't move a ${before.state} shift. Only scheduled shifts are draggable.`,
+      });
+      return;
+    }
+
+    const newDate = patch.shift_date ?? before.shift_date;
+    const newStart = patch.start_time ?? before.start_time;
+    const newEnd = patch.end_time ?? before.end_time;
+    const newRep =
+      patch.rep_id !== undefined ? patch.rep_id : before.rep_id;
+
+    // No-op? Don't bother hitting the DB.
+    if (
+      newDate === before.shift_date &&
+      newStart === before.start_time &&
+      newEnd === before.end_time &&
+      newRep === before.rep_id
+    ) {
+      return;
+    }
+
+    // Conflict check (only when the new shift has a rep — unassigned
+    // shifts can stack freely; the manager picks one to claim later).
+    if (newRep) {
+      const newStartMin = timeToMin(newStart);
+      const newEndMin = timeToMin(newEnd);
+      const conflict = shifts.find(
+        (s) =>
+          s.id !== id &&
+          s.rep_id === newRep &&
+          s.shift_date === newDate &&
+          shiftOverlapsRange(s, newStartMin, newEndMin)
+      );
+      if (conflict) {
+        const cn = conflict.customers?.name || "another shift";
+        setMoveBanner({
+          kind: "warn",
+          text: `Overlaps with ${cn} (${conflict.start_time}–${conflict.end_time}). Pick another slot.`,
+        });
+        return;
+      }
+    }
+
+    // Optimistic update.
+    setShifts((arr) =>
+      arr.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              shift_date: newDate,
+              start_time: newStart,
+              end_time: newEnd,
+              rep_id: newRep,
+            }
+          : s
+      )
+    );
+
+    const r = await updateShift(id, {
+      shift_date: newDate !== before.shift_date ? newDate : undefined,
+      start_time: newStart !== before.start_time ? newStart : undefined,
+      end_time: newEnd !== before.end_time ? newEnd : undefined,
+      rep_id:
+        newRep !== before.rep_id ? (newRep as string | null) : undefined,
+    });
+
+    if (!r.ok) {
+      // Revert.
+      setShifts((arr) => arr.map((s) => (s.id === id ? before : s)));
+      setMoveBanner({
+        kind: "error",
+        text: r.error || "Couldn't save the move. The shift was put back.",
+      });
+      return;
+    }
+    setMoveBanner({
+      kind: "ok",
+      text: `Moved to ${newDate} ${newStart}–${newEnd}.`,
+    });
+  };
+
   const goPrev = () => setWeekStart((w) => addDays(w, -7));
   const goNext = () => setWeekStart((w) => addDays(w, 7));
   const goThisWeek = () => setWeekStart(startOfWeekMonday(new Date()));
@@ -344,32 +528,20 @@ export default function SchedulePage() {
           </div>
         </Card>
 
+        {moveBanner && <MoveBanner banner={moveBanner} />}
+
         {/* Body */}
         {view === "days" ? (
           <Card padding={0}>
-            <DaysHeader days={days} todayISO={todayISO} />
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(7, 1fr)",
-                minHeight: 420,
-              }}
-            >
-              {days.map((d) => {
-                const iso = isoDate(d);
-                const list = byDay.get(iso) || [];
-                return (
-                  <DayCell
-                    key={iso}
-                    iso={iso}
-                    isToday={iso === todayISO}
-                    shifts={list}
-                    repNameMap={repNameMap}
-                    customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
-                  />
-                );
-              })}
-            </div>
+            <DaysHeaderWithGutter days={days} todayISO={todayISO} />
+            <DaysCalendar
+              days={days}
+              todayISO={todayISO}
+              byDay={byDay}
+              repNameMap={repNameMap}
+              customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
+              onMove={applyShiftMove}
+            />
           </Card>
         ) : (
           <Card padding={0}>
@@ -380,6 +552,7 @@ export default function SchedulePage() {
                 todayISO={todayISO}
                 dayMap={byRepDay.get(UNASSIGNED_KEY) || new Map()}
                 repNameMap={repNameMap}
+                onMove={applyShiftMove}
               />
             )}
             {repsForRows.length === 0 && !loading ? (
@@ -404,6 +577,7 @@ export default function SchedulePage() {
                   dayMap={byRepDay.get(rep.id) || new Map()}
                   repNameMap={repNameMap}
                   customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
+                  onMove={applyShiftMove}
                 />
               ))
             )}
@@ -419,11 +593,53 @@ export default function SchedulePage() {
           }}
         >
           {view === "days"
-            ? "Click a + to add a shift on that day. Click a shift card for its detail page."
-            : "Click a + to schedule a shift on that day for that rep. Click a shift card for its detail page."}
+            ? "Drag a scheduled shift to move it. Click + to add a new one. Click a card for its detail page."
+            : "Drag a card across reps and days to reassign — time-of-day stays the same. Click + to add."}
         </div>
       </div>
     </AdminShell>
+  );
+}
+
+// ─── Drag-feedback banner ───────────────────────────────────────────────
+
+function MoveBanner({
+  banner,
+}: {
+  banner: { kind: "ok" | "warn" | "error"; text: string };
+}) {
+  const palette =
+    banner.kind === "ok"
+      ? { bg: AC.okTint, ink: "#0F5A38", icon: "check" as const }
+      : banner.kind === "warn"
+      ? { bg: AC.warnTint, ink: "#7A560A", icon: "warn" as const }
+      : { bg: AC.dangerTint, ink: "#9c1a3c", icon: "warn" as const };
+  return (
+    <div
+      role="status"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 12px",
+        background: palette.bg,
+        color: palette.ink,
+        borderRadius: 8,
+        fontFamily: AC.font,
+        fontSize: 12.5,
+        fontWeight: 600,
+        animation: "sched-banner-in .22s cubic-bezier(.22, 1, .36, 1) both",
+      }}
+    >
+      <AGlyph name={palette.icon} size={13} color={palette.ink} />
+      <span>{banner.text}</span>
+      <style>{`
+        @keyframes sched-banner-in {
+          from { transform: translateY(-4px); opacity: 0; }
+          to   { transform: translateY(0);    opacity: 1; }
+        }
+      `}</style>
+    </div>
   );
 }
 
@@ -485,18 +701,31 @@ function ViewToggle({
   );
 }
 
-// ─── Days view ──────────────────────────────────────────────────────────
+// ─── Days view (time-axis calendar) ─────────────────────────────────────
 
-function DaysHeader({ days, todayISO }: { days: Date[]; todayISO: string }) {
+function DaysHeaderWithGutter({
+  days,
+  todayISO,
+}: {
+  days: Date[];
+  todayISO: string;
+}) {
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "repeat(7, 1fr)",
+        gridTemplateColumns: `${TIME_GUTTER_W}px repeat(7, 1fr)`,
         borderBottom: `1px solid ${AC.line}`,
         background: AC.bg,
       }}
     >
+      {/* Empty corner above the gutter */}
+      <div
+        style={{
+          padding: "10px 8px",
+          borderRight: `1px solid ${AC.lineDim}`,
+        }}
+      />
       {days.map((d, i) => {
         const iso = isoDate(d);
         const isToday = iso === todayISO;
@@ -540,87 +769,514 @@ function DaysHeader({ days, todayISO }: { days: Date[]; todayISO: string }) {
   );
 }
 
-function DayCell({
+/**
+ * Top-level Days view: a left time gutter + 7 day columns, all
+ * sharing the same DAY_TOTAL_PX height. Shifts are absolutely
+ * positioned within their column based on start/end time. Drag a
+ * scheduled shift to move its start time and/or change its day.
+ *
+ * Drag state is held in a ref + a single re-render-only state so the
+ * dragging card and the hover preview can update without re-rendering
+ * the entire week. We use HTML5 DnD because it just works for this
+ * shape — pointer events would be more flexible but bring their own
+ * scroll/iframe edge cases that aren't worth the complexity here.
+ */
+function DaysCalendar({
+  days,
+  todayISO,
+  byDay,
+  repNameMap,
+  customerScopeForAdd,
+  onMove,
+}: {
+  days: Date[];
+  todayISO: string;
+  byDay: Map<string, ShiftRow[]>;
+  repNameMap: Record<string, string>;
+  customerScopeForAdd: string | null;
+  onMove: (
+    id: string,
+    patch: {
+      shift_date?: string;
+      start_time?: string;
+      end_time?: string;
+      rep_id?: string | null;
+    }
+  ) => Promise<void>;
+}) {
+  // Active drag — both views share the same drag state shape so we can
+  // reuse the helper. `pickupOffsetMin` is how far down the card the
+  // cursor was when picked up, so the dropped block lands at exactly
+  // the position the user expects rather than snapping its top to the
+  // cursor.
+  const [drag, setDrag] = useState<{
+    shift: ShiftRow;
+    pickupOffsetMin: number;
+  } | null>(null);
+  const [hover, setHover] = useState<{
+    dayISO: string;
+    startMin: number;
+    endMin: number;
+  } | null>(null);
+
+  const beginDrag = (shift: ShiftRow, pickupOffsetMin: number) => {
+    setDrag({ shift, pickupOffsetMin });
+  };
+  const endDrag = () => {
+    setDrag(null);
+    setHover(null);
+  };
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `${TIME_GUTTER_W}px repeat(7, 1fr)`,
+        position: "relative",
+      }}
+    >
+      <TimeGutter />
+      {days.map((d) => {
+        const iso = isoDate(d);
+        const isToday = iso === todayISO;
+        const list = byDay.get(iso) || [];
+        return (
+          <DayColumn
+            key={iso}
+            iso={iso}
+            isToday={isToday}
+            shifts={list}
+            repNameMap={repNameMap}
+            customerScopeForAdd={customerScopeForAdd}
+            drag={drag}
+            hover={hover && hover.dayISO === iso ? hover : null}
+            onBeginDrag={beginDrag}
+            onEndDrag={endDrag}
+            onSetHover={(h) => setHover(h)}
+            onCommit={async (newDateISO, newStartMin, newEndMin) => {
+              if (!drag) return;
+              const id = drag.shift.id;
+              endDrag();
+              await onMove(id, {
+                shift_date: newDateISO,
+                start_time: minToTime(newStartMin),
+                end_time: minToTime(newEndMin),
+              });
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function TimeGutter() {
+  const slots: number[] = [];
+  for (let m = HOUR_START * 60; m < HOUR_END * 60; m += SLOT_MIN) slots.push(m);
+  return (
+    <div
+      style={{
+        position: "relative",
+        height: DAY_TOTAL_PX,
+        background: AC.bg,
+        borderRight: `1px solid ${AC.lineDim}`,
+      }}
+    >
+      {slots.map((m) => {
+        const onTheHour = m % 60 === 0;
+        return (
+          <div
+            key={m}
+            style={{
+              position: "absolute",
+              top: minToTop(m),
+              left: 0,
+              right: 0,
+              height: SLOT_PX,
+              borderTop: `1px ${onTheHour ? "solid" : "dashed"} ${
+                onTheHour ? AC.lineDim : "#EEF1F4"
+              }`,
+            }}
+          >
+            {onTheHour && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 2,
+                  right: 6,
+                  fontFamily: AC.font,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: AC.mute,
+                  letterSpacing: 0.2,
+                }}
+              >
+                {formatHourLabel(m / 60)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function formatHourLabel(h: number): string {
+  if (h === 0) return "12 AM";
+  if (h === 12) return "12 PM";
+  if (h < 12) return `${h} AM`;
+  return `${h - 12} PM`;
+}
+
+function DayColumn({
   iso,
   isToday,
   shifts,
   repNameMap,
   customerScopeForAdd,
+  drag,
+  hover,
+  onBeginDrag,
+  onEndDrag,
+  onSetHover,
+  onCommit,
 }: {
   iso: string;
   isToday: boolean;
   shifts: ShiftRow[];
   repNameMap: Record<string, string>;
   customerScopeForAdd: string | null;
+  drag: { shift: ShiftRow; pickupOffsetMin: number } | null;
+  hover: { dayISO: string; startMin: number; endMin: number } | null;
+  onBeginDrag: (shift: ShiftRow, pickupOffsetMin: number) => void;
+  onEndDrag: () => void;
+  onSetHover: (
+    h: { dayISO: string; startMin: number; endMin: number } | null
+  ) => void;
+  onCommit: (newDateISO: string, newStartMin: number, newEndMin: number) => void;
 }) {
+  const colRef = useRef<HTMLDivElement | null>(null);
   const isWeekend = (() => {
     const d = new Date(iso);
     const dow = d.getDay();
     return dow === 0 || dow === 6;
   })();
+  const slots: number[] = [];
+  for (let m = HOUR_START * 60; m < HOUR_END * 60; m += SLOT_MIN) slots.push(m);
+
+  // Compute hover preview when a drag is over this column.
+  const computeHoverFromEvent = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!drag || !colRef.current) return null;
+    const rect = colRef.current.getBoundingClientRect();
+    const yPx = e.clientY - rect.top;
+    // Apply pickup offset so the cursor stays where the user grabbed.
+    const pickupOffsetPx = drag.pickupOffsetMin * PX_PER_MIN;
+    const startMin = pxToSnappedMin(yPx - pickupOffsetPx);
+    const dur =
+      timeToMin(drag.shift.end_time) - timeToMin(drag.shift.start_time);
+    const endMin = Math.min(HOUR_END * 60, startMin + dur);
+    return { dayISO: iso, startMin, endMin };
+  };
+
+  return (
+    <div
+      ref={colRef}
+      onDragOver={(e) => {
+        if (!drag) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const h = computeHoverFromEvent(e);
+        if (h) onSetHover(h);
+      }}
+      onDragLeave={() => {
+        // Don't blank the hover too aggressively — moving across child
+        // elements can trigger spurious leaves. Only clear if the
+        // pointer truly left this column. We rely on the next column's
+        // dragOver to overwrite the hover state.
+      }}
+      onDrop={(e) => {
+        if (!drag) return;
+        e.preventDefault();
+        const h = computeHoverFromEvent(e);
+        if (h) onCommit(h.dayISO, h.startMin, h.endMin);
+        else onEndDrag();
+      }}
+      style={{
+        position: "relative",
+        height: DAY_TOTAL_PX,
+        borderLeft: `1px solid ${AC.lineDim}`,
+        background: isToday ? "#FAFCFD" : isWeekend ? AC.bg : "#fff",
+      }}
+    >
+      {/* Slot grid lines (decorative — actual hit-testing uses pixel math) */}
+      {slots.map((m) => {
+        const onTheHour = m % 60 === 0;
+        return (
+          <div
+            key={m}
+            style={{
+              position: "absolute",
+              top: minToTop(m),
+              left: 0,
+              right: 0,
+              height: SLOT_PX,
+              borderTop: `1px ${onTheHour ? "solid" : "dashed"} ${
+                onTheHour ? AC.lineDim : "#F1F4F7"
+              }`,
+              pointerEvents: "none",
+            }}
+          />
+        );
+      })}
+
+      {/* Shift cards positioned by start_time / duration */}
+      {shifts.map((s) => (
+        <DraggableShiftCard
+          key={s.id}
+          shift={s}
+          repLabel={s.rep_id ? repNameMap[s.rep_id] || "Rep" : "Unassigned"}
+          dimmed={drag?.shift.id === s.id}
+          onBeginDrag={onBeginDrag}
+          onEndDrag={onEndDrag}
+        />
+      ))}
+
+      {/* Hover preview while dragging over this column */}
+      {hover && drag && (
+        <div
+          style={{
+            position: "absolute",
+            top: minToTop(hover.startMin),
+            height: Math.max(
+              SLOT_PX - 2,
+              (hover.endMin - hover.startMin) * PX_PER_MIN - 2
+            ),
+            left: 4,
+            right: 4,
+            borderRadius: 6,
+            background: `${AC.brand}1F`,
+            border: `1.5px dashed ${AC.brand}`,
+            pointerEvents: "none",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            paddingTop: 4,
+            fontFamily: AC.font,
+            fontSize: 10,
+            fontWeight: 700,
+            color: AC.brandDeep,
+            letterSpacing: 0.2,
+          }}
+        >
+          {minToTime(hover.startMin)}–{minToTime(hover.endMin)}
+        </div>
+      )}
+
+      {/* Bottom-anchored "+ Add" affordance — sits below the slot grid
+          so it never collides with a card. */}
+      <DayColumnAdd
+        iso={iso}
+        shifts={shifts}
+        customerScopeForAdd={customerScopeForAdd}
+      />
+    </div>
+  );
+}
+
+function DayColumnAdd({
+  iso,
+  shifts,
+  customerScopeForAdd,
+}: {
+  iso: string;
+  shifts: ShiftRow[];
+  customerScopeForAdd: string | null;
+}) {
   const addQs = new URLSearchParams({
     date: iso,
     start: defaultStartTimeFor(iso, shifts),
     ...(customerScopeForAdd ? { customer: customerScopeForAdd } : {}),
   });
-  const addHref = `/schedule/new?${addQs.toString()}`;
   return (
-    <div
+    <Link
+      href={`/schedule/new?${addQs.toString()}`}
+      aria-label={`Add shift on ${iso}`}
       style={{
-        position: "relative",
-        padding: 8,
-        borderLeft: `1px solid ${AC.lineDim}`,
-        background: isToday ? "#FAFCFD" : isWeekend ? AC.bg : "#fff",
+        position: "absolute",
+        left: 6,
+        right: 6,
+        bottom: 6,
+        height: 24,
+        borderRadius: 6,
+        border: `1px dashed ${AC.line}`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: 0.55,
+        textDecoration: "none",
+        color: AC.mute,
+        fontFamily: AC.font,
+        fontSize: 11,
+        fontWeight: 500,
+        gap: 4,
+        background: "rgba(255,255,255,.7)",
+        backdropFilter: "blur(2px)",
+      }}
+    >
+      <AGlyph name="plus" size={11} color={AC.faint} />
+      <span>Add</span>
+    </Link>
+  );
+}
+
+/**
+ * Position-absolute, draggable shift card used by the Days calendar.
+ * Click anywhere except a click-and-drag → navigate to the detail
+ * page (Link wrapper). Only state='scheduled' shifts are draggable;
+ * everything else is read-only.
+ */
+function DraggableShiftCard({
+  shift,
+  repLabel,
+  dimmed,
+  onBeginDrag,
+  onEndDrag,
+}: {
+  shift: ShiftRow;
+  repLabel: string;
+  dimmed: boolean;
+  onBeginDrag: (shift: ShiftRow, pickupOffsetMin: number) => void;
+  onEndDrag: () => void;
+}) {
+  const startMin = timeToMin(shift.start_time);
+  const endMin = timeToMin(shift.end_time);
+  const top = minToTop(startMin);
+  const height = Math.max(
+    SLOT_PX - 2,
+    (endMin - startMin) * PX_PER_MIN - 2
+  );
+  const c = shift.customers;
+  const color = c?.color || "#888";
+  const customerName = c?.name || "Unknown customer";
+  const stateColors: Record<string, string> = {
+    "in-progress": AC.brand,
+    complete: AC.ok,
+    late: AC.danger,
+    scheduled: color,
+  };
+  const accent = stateColors[shift.state] || color;
+  const isComplete = shift.state === "complete";
+  const isDraggable = shift.state === "scheduled";
+
+  const handleDragStart = (e: React.DragEvent<HTMLAnchorElement>) => {
+    if (!isDraggable) {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.effectAllowed = "move";
+    // Some browsers require dataTransfer to have something set.
+    e.dataTransfer.setData("text/plain", shift.id);
+    // Pickup offset (minutes) — how far down the card the cursor was.
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const offsetPx = e.clientY - rect.top;
+    const pickupOffsetMin = Math.max(0, offsetPx / PX_PER_MIN);
+    onBeginDrag(shift, pickupOffsetMin);
+  };
+
+  return (
+    <Link
+      href={shiftHref(shift)}
+      title={`${repLabel} · ${customerName}${
+        isDraggable ? " · drag to move" : ""
+      }`}
+      draggable={isDraggable}
+      onDragStart={handleDragStart}
+      onDragEnd={onEndDrag}
+      style={{
+        position: "absolute",
+        top,
+        height,
+        left: 4,
+        right: 4,
+        background: `${color}18`,
+        borderLeft: `3px solid ${accent}`,
+        borderRadius: 5,
+        padding: "4px 7px",
+        textDecoration: "none",
         display: "flex",
         flexDirection: "column",
-        gap: 6,
-        // Cap the column height so a busy day doesn't stretch the
-        // whole grid row to 50+ cards tall. Shifts beyond what fits
-        // become scrollable inside the cell. The "+ Add" stays anchored
-        // at the bottom regardless.
-        maxHeight: 640,
+        gap: 1,
+        opacity: dimmed ? 0.35 : isComplete ? 0.7 : 1,
+        cursor: isDraggable ? "grab" : "pointer",
         overflow: "hidden",
+        boxShadow: dimmed ? "none" : "0 1px 2px rgba(10,15,30,.06)",
       }}
     >
       <div
         style={{
-          flex: 1,
-          overflowY: "auto",
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: 6,
-        }}
-      >
-        {shifts.map((s) => {
-          const repLabel = s.rep_id ? repNameMap[s.rep_id] || "Rep" : "Unassigned";
-          return <ShiftCard key={s.id} shift={s} repLabel={repLabel} />;
-        })}
-      </div>
-      <Link
-        href={addHref}
-        aria-label={`Add shift on ${iso}`}
-        style={{
-          minHeight: shifts.length === 0 ? 56 : 28,
-          borderRadius: 6,
-          border: `1px dashed ${AC.line}`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          opacity: 0.6,
-          textDecoration: "none",
-          color: AC.mute,
           fontFamily: AC.font,
-          fontSize: 11,
-          fontWeight: 500,
-          gap: 4,
-          flexShrink: 0,
+          fontSize: 10.5,
+          fontWeight: 700,
+          color: AC.ink,
+          letterSpacing: -0.1,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          textDecoration: isComplete ? "line-through" : "none",
         }}
       >
-        <AGlyph name="plus" size={11} color={AC.faint} />
-        {shifts.length === 0 && <span>Add</span>}
-      </Link>
-    </div>
+        {repLabel}
+      </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 10.5,
+          fontWeight: 600,
+          color: color,
+          letterSpacing: -0.1,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          textDecoration: isComplete ? "line-through" : "none",
+        }}
+      >
+        {customerName}
+      </div>
+      {height >= 44 && (
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 10,
+            color: AC.ink2,
+            fontWeight: 500,
+            marginTop: 2,
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            flexWrap: "wrap",
+          }}
+        >
+          {formatTime(shift.start_time, { compact: true })}–
+          {formatTime(shift.end_time, { compact: true })}
+          {shift.state !== "scheduled" && (
+            <span
+              style={{
+                padding: "0 5px",
+                borderRadius: 99,
+                background: `${accent}22`,
+                color: accent,
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+              }}
+            >
+              {shift.state}
+            </span>
+          )}
+        </div>
+      )}
+    </Link>
   );
 }
 
@@ -699,6 +1355,7 @@ function RepRow({
   dayMap,
   repNameMap,
   customerScopeForAdd,
+  onMove,
 }: {
   rep: Profile;
   days: Date[];
@@ -706,6 +1363,15 @@ function RepRow({
   dayMap: Map<string, ShiftRow[]>;
   repNameMap: Record<string, string>;
   customerScopeForAdd: string | null;
+  onMove: (
+    id: string,
+    patch: {
+      shift_date?: string;
+      start_time?: string;
+      end_time?: string;
+      rep_id?: string | null;
+    }
+  ) => Promise<void>;
 }) {
   return (
     <div
@@ -778,6 +1444,9 @@ function RepRow({
             repLabelDefault={displayName(rep)}
             repNameMap={repNameMap}
             addHref={`/schedule/new?${addQs.toString()}`}
+            dropTargetRepId={rep.id}
+            dropTargetDateISO={iso}
+            onMove={onMove}
           />
         );
       })}
@@ -790,11 +1459,21 @@ function UnassignedRow({
   todayISO,
   dayMap,
   repNameMap,
+  onMove,
 }: {
   days: Date[];
   todayISO: string;
   dayMap: Map<string, ShiftRow[]>;
   repNameMap: Record<string, string>;
+  onMove: (
+    id: string,
+    patch: {
+      shift_date?: string;
+      start_time?: string;
+      end_time?: string;
+      rep_id?: string | null;
+    }
+  ) => Promise<void>;
 }) {
   return (
     <div
@@ -856,6 +1535,9 @@ function UnassignedRow({
             repLabelDefault="Unassigned"
             repNameMap={repNameMap}
             addHref={null}
+            dropTargetRepId={null}
+            dropTargetDateISO={iso}
+            onMove={onMove}
           />
         );
       })}
@@ -870,6 +1552,9 @@ function RepDayCell({
   repLabelDefault,
   repNameMap,
   addHref,
+  dropTargetRepId,
+  dropTargetDateISO,
+  onMove,
 }: {
   iso: string;
   isToday: boolean;
@@ -877,14 +1562,49 @@ function RepDayCell({
   repLabelDefault: string;
   repNameMap: Record<string, string>;
   addHref: string | null;
+  /** rep_id this cell drops onto. null → unassigned row. */
+  dropTargetRepId: string | null;
+  /** YYYY-MM-DD this cell drops onto. */
+  dropTargetDateISO: string;
+  onMove: (
+    id: string,
+    patch: {
+      shift_date?: string;
+      start_time?: string;
+      end_time?: string;
+      rep_id?: string | null;
+    }
+  ) => Promise<void>;
 }) {
   const isWeekend = (() => {
     const d = new Date(iso);
     const dow = d.getDay();
     return dow === 0 || dow === 6;
   })();
+  // Local drop-hover flag so we can show a brand-tinted overlay only on
+  // the cell currently under the cursor.
+  const [hovered, setHovered] = useState(false);
   return (
     <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (!hovered) setHovered(true);
+      }}
+      onDragLeave={() => setHovered(false)}
+      onDrop={async (e) => {
+        e.preventDefault();
+        const id = e.dataTransfer.getData("text/plain");
+        setHovered(false);
+        if (!id) return;
+        // In the Reps view we preserve time-of-day and only mutate
+        // rep_id + shift_date. The store helper short-circuits to a
+        // no-op when nothing actually changed.
+        await onMove(id, {
+          rep_id: dropTargetRepId,
+          shift_date: dropTargetDateISO,
+        });
+      }}
       style={{
         position: "relative",
         // Lock every cell in the rep grid to the same height range so
@@ -895,16 +1615,25 @@ function RepDayCell({
         maxHeight: 156,
         padding: 6,
         borderLeft: `1px solid ${AC.lineDim}`,
-        background: isToday ? "#FAFCFD" : isWeekend ? AC.bg : "#fff",
+        background: hovered
+          ? `${AC.brand}12`
+          : isToday
+          ? "#FAFCFD"
+          : isWeekend
+          ? AC.bg
+          : "#fff",
+        outline: hovered ? `1.5px dashed ${AC.brand}` : "none",
+        outlineOffset: -2,
         display: "flex",
         flexDirection: "column",
         gap: 4,
         overflowY: "auto",
+        transition: "background 120ms ease",
       }}
     >
       {shifts.map((s) => {
         const repLabel = s.rep_id ? repNameMap[s.rep_id] || repLabelDefault : repLabelDefault;
-        return <ShiftCard key={s.id} shift={s} repLabel={repLabel} />;
+        return <RepCellShiftCard key={s.id} shift={s} repLabel={repLabel} />;
       })}
       {shifts.length === 0 && addHref && (
         <Link
@@ -925,6 +1654,49 @@ function RepDayCell({
           <AGlyph name="plus" size={11} color={AC.faint} />
         </Link>
       )}
+    </div>
+  );
+}
+
+/**
+ * The Reps view's compact card — a draggable wrapper around the shared
+ * <ShiftCard> below. Time-of-day stays put; the parent cell's onDrop
+ * decides which (rep, date) the shift moves to. Only `scheduled`
+ * shifts are draggable.
+ */
+function RepCellShiftCard({
+  shift,
+  repLabel,
+}: {
+  shift: ShiftRow;
+  repLabel: string;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const isDraggable = shift.state === "scheduled";
+  return (
+    <div
+      draggable={isDraggable}
+      onDragStart={(e) => {
+        if (!isDraggable) {
+          e.preventDefault();
+          return;
+        }
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", shift.id);
+        setDragging(true);
+      }}
+      onDragEnd={() => setDragging(false)}
+      style={{
+        opacity: dragging ? 0.4 : 1,
+        cursor: isDraggable ? "grab" : "default",
+      }}
+      title={
+        isDraggable
+          ? "Drag to another rep or day to reassign"
+          : `${shift.state} — not draggable`
+      }
+    >
+      <ShiftCard shift={shift} repLabel={repLabel} />
     </div>
   );
 }
