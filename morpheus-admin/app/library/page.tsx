@@ -58,6 +58,7 @@ export default function LibraryPage() {
   // Filter state
   const [filterCustomer, setFilterCustomer] = useState<string>("All");
   const [filterCategory, setFilterCategory] = useState<string>("All");
+  const [search, setSearch] = useState<string>("");
 
   const reload = () => {
     listLibraryFiles().then((rows) => {
@@ -137,13 +138,36 @@ export default function LibraryPage() {
       (f) => f.customerIds === null || f.customerIds.includes(filterCustomer)
     );
   }, [files, filterCustomer]);
-  const filtered = useMemo(
+  const byCategory = useMemo(
     () =>
       filterCategory === "All"
         ? byCustomer
         : byCustomer.filter((f) => (f.category || DEFAULT_CATEGORY) === filterCategory),
     [byCustomer, filterCategory]
   );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return byCategory;
+    return byCategory.filter(
+      (f) =>
+        f.name.toLowerCase().includes(q) ||
+        (f.category || DEFAULT_CATEGORY).toLowerCase().includes(q) ||
+        (f.mimeType || "").toLowerCase().includes(q) ||
+        f.customers.some((c) => c.name.toLowerCase().includes(q))
+    );
+  }, [byCategory, search]);
+
+  // Dynamic category list — union of the seed list and any free-text
+  // categories that already appear on uploaded files. Lets a manager
+  // create a new category just by typing it in the upload form
+  // without needing a migration. Sorted, de-duped.
+  const allCategories = useMemo(() => {
+    const set = new Set<string>(LIBRARY_CATEGORIES as readonly string[]);
+    for (const f of files) {
+      if (f.category) set.add(f.category);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [files]);
 
   return (
     <AdminShell
@@ -152,10 +176,10 @@ export default function LibraryPage() {
         <Btn
           kind={uploadOpen ? "secondary" : "primary"}
           size="sm"
-          icon="plus"
+          icon={uploadOpen ? "x" : "plus"}
           onClick={onUploadClick}
         >
-          {uploadOpen ? "Close upload" : "Upload file"}
+          {uploadOpen ? "Cancel upload" : "Upload file"}
         </Btn>
       }
     >
@@ -217,7 +241,7 @@ export default function LibraryPage() {
             active={filterCategory === "All"}
             onClick={() => setFilterCategory("All")}
           />
-          {LIBRARY_CATEGORIES.map((cat) => {
+          {allCategories.map((cat) => {
             const count = files.filter(
               (f) => (f.category || DEFAULT_CATEGORY) === cat
             ).length;
@@ -282,18 +306,32 @@ export default function LibraryPage() {
                 Configure upload
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-                <Field label="Category">
-                  <select
+                <Field
+                  label="Category"
+                  hint="Pick an existing one or type a new name to create it."
+                >
+                  {/* Free-text input with a datalist of existing
+                      categories. Lets a manager create a category
+                      just by typing — no migration needed since the
+                      DB column is already free-text. */}
+                  <input
+                    type="text"
+                    list="library-category-list"
                     value={pendingCategory}
                     onChange={(e) => setPendingCategory(e.target.value)}
-                    style={selectStyle}
-                  >
-                    {LIBRARY_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
+                    placeholder="e.g. Documents, Onboarding, Compliance…"
+                    style={{
+                      ...selectStyle,
+                      // Datalist inputs render as plain text inputs;
+                      // keep parity with the select's height/padding.
+                      appearance: "none",
+                    }}
+                  />
+                  <datalist id="library-category-list">
+                    {allCategories.map((c) => (
+                      <option key={c} value={c} />
                     ))}
-                  </select>
+                  </datalist>
                 </Field>
                 <div />
               </div>
@@ -348,6 +386,65 @@ export default function LibraryPage() {
               </div>
             </Card>
           )}
+
+          {/* Search bar — same affordance as Customers / Reps / Tasks
+              for consistency across the admin. Filters across name,
+              category, MIME type, and joined customer names. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 12px",
+              background: "#fff",
+              border: `1px solid ${AC.line}`,
+              borderRadius: 10,
+            }}
+          >
+            <AGlyph name="search" size={14} color={AC.hint} />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search files by name, category, type, or customer…"
+              style={{
+                flex: 1,
+                border: "none",
+                outline: "none",
+                background: "transparent",
+                fontFamily: AC.font,
+                fontSize: 13,
+                color: AC.ink,
+              }}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "flex",
+                  color: AC.mute,
+                }}
+              >
+                <AGlyph name="x" size={13} color={AC.mute} />
+              </button>
+            )}
+            <span
+              style={{
+                fontFamily: AC.font,
+                fontSize: 11,
+                color: AC.mute,
+                fontWeight: 600,
+              }}
+            >
+              {filtered.length} of {files.length}
+            </span>
+          </div>
 
           {/* File table */}
           <Card padding={0}>

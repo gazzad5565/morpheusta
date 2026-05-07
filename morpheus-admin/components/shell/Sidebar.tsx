@@ -204,17 +204,24 @@ export function Sidebar() {
           >
             {orgName ? orgName.toUpperCase() : "MORPHEUS"}
           </div>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 10,
-              color: AC.sideMute,
-              letterSpacing: 0.4,
-              marginTop: 2,
-            }}
-          >
-            {orgName ? "Powered by Morpheus" : "Field Operations Suite"}
-          </div>
+          {/* Subtitle: only show the platform tagline when there's NO
+              org name (i.e. brand-new install). Once an org name is
+              set the "Powered by Morpheus" attribution lives in the
+              footer pill at the bottom of the sidebar — no need to
+              double up. */}
+          {!orgName && (
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 10,
+                color: AC.sideMute,
+                letterSpacing: 0.4,
+                marginTop: 2,
+              }}
+            >
+              Field Operations Suite
+            </div>
+          )}
         </div>
       </div>
 

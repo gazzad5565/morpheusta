@@ -39,31 +39,13 @@ export function SaveIndicator() {
   if (snap.status === "saved" && ageMs > SAVED_FADE_MS) effective = "idle";
   if (snap.status === "error" && ageMs > ERROR_TTL_MS) effective = "idle";
 
-  // Idle state: subtle reassurance pill so the user always knows the
-  // app isn't holding unsaved drafts. Doesn't shout.
-  if (effective === "idle") {
-    return (
-      <span
-        title="Every change is saved automatically."
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 5,
-          padding: "4px 9px",
-          borderRadius: 99,
-          background: "transparent",
-          color: AC.mute,
-          fontFamily: AC.font,
-          fontSize: 11,
-          fontWeight: 500,
-          letterSpacing: 0.1,
-        }}
-      >
-        <AGlyph name="check" size={12} color={AC.faint} />
-        Auto-saved
-      </span>
-    );
-  }
+  // Idle: render nothing. The previous "Auto-saved" pill was actively
+  // misleading — many pages still require explicit Save buttons (any
+  // form-based editor, the org settings, the schedule create form,
+  // etc.) so claiming "auto-saved" while the user has unsaved typing
+  // in front of them was wrong. We now only surface feedback during
+  // and just after a real mutation.
+  if (effective === "idle") return null;
 
   if (effective === "saving") {
     return (
