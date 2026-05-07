@@ -8,7 +8,13 @@
  *   - listProfiles({ role: "rep" }) → reps so we can resolve rep_id → name
  *
  * Filtering is client-side via SegTabs (All / In progress / Travelling /
- * On break / Issues / Unassigned). Sort is by start_time ascending.
+ * On break / Unassigned / Requested). Sort is by start_time ascending.
+ *
+ * Note: there used to be an "Issues" tab that filtered to state='late'.
+ * Removed because nothing in the app ever writes state='late' — late
+ * detection is Phase 4. The STATE_MAP entry for 'late' stays so a
+ * future backend write renders correctly without further frontend
+ * changes.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -74,7 +80,6 @@ const TABS = [
   "In progress",
   "Travelling",
   "On break",
-  "Issues",
   "Unassigned",
   "Requested",
 ] as const;
@@ -174,10 +179,6 @@ export function ShiftsList() {
     if (active === "Requested") return reqRows;
     if (active === "Unassigned")
       return shiftRows.filter((r) => r.kind === "shift" && !r.shift.rep_id);
-    if (active === "Issues")
-      return shiftRows.filter(
-        (r) => r.kind === "shift" && effectiveState(r.shift) === "late"
-      );
     const key = active.toLowerCase().replace(" ", "-");
     return shiftRows.filter(
       (r) => r.kind === "shift" && effectiveState(r.shift) === key
