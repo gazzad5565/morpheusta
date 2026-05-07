@@ -28,6 +28,7 @@ import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
+import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import {
   deleteShift,
@@ -660,33 +661,31 @@ export default function SchedulePage() {
               This week
             </Btn>
             <div style={{ flex: 1 }} />
-            <select
+            <Combobox
               value={repFilter}
-              onChange={(e) => setRepFilter(e.target.value)}
-              title="Filter by rep"
-              style={filterSelectStyle}
-            >
-              <option value="All">All reps</option>
-              <option value={UNASSIGNED_KEY}>Unassigned</option>
-              {repsForRows.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {displayName(r)}
-                </option>
-              ))}
-            </select>
-            <select
+              onChange={(v) => setRepFilter(v ?? "All")}
+              clearable={false}
+              triggerIcon="reps"
+              options={[
+                { value: "All", label: "All reps" },
+                { value: UNASSIGNED_KEY, label: "Unassigned" },
+                ...repsForRows.map((r) => ({ value: r.id, label: displayName(r) })),
+              ]}
+            />
+            <Combobox
               value={customerFilter}
-              onChange={(e) => setCustomerFilter(e.target.value)}
-              title="Filter by customer"
-              style={filterSelectStyle}
-            >
-              <option value="All">All customers</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setCustomerFilter(v ?? "All")}
+              clearable={false}
+              triggerIcon="customer"
+              options={[
+                { value: "All", label: "All customers" },
+                ...customers.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                  color: c.color || undefined,
+                })),
+              ]}
+            />
           </div>
         </Card>
 

@@ -18,6 +18,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
+import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import {
   listCustomFields,
@@ -330,18 +331,12 @@ function renderInput(
       );
     case "select":
       return (
-        <select
-          value={(value as string) || ""}
-          onChange={(e) => onChange(e.target.value || null)}
-          style={inputStyle}
-        >
-          <option value="">— Select —</option>
-          {(field.options || []).map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+        <Combobox
+          value={(value as string) || null}
+          onChange={(v) => onChange(v ?? null)}
+          placeholder="— Select —"
+          options={(field.options || []).map((o) => ({ value: o, label: o }))}
+        />
       );
   }
 }

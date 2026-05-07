@@ -26,6 +26,7 @@ import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { SegTabs } from "@/components/ui/SegTabs";
+import { Combobox } from "@/components/ui/Combobox";
 import { RepAvatar } from "@/components/ui/Avatars";
 import {
   SortableHeader,
@@ -290,31 +291,24 @@ export default function TimesheetReportPage() {
         {/* Toolbar */}
         <Card padding={12}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <select
+            <Combobox
               value={repFilter}
-              onChange={(e) => setRepFilter(e.target.value)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: `1px solid ${AC.line}`,
-                background: "#fff",
-                fontFamily: AC.font,
-                fontSize: 12,
-                color: AC.ink,
-                cursor: "pointer",
-                minWidth: 200,
-              }}
-            >
-              <option value="all">All reps</option>
-              {profiles
-                .filter((p) => p.role === "rep")
-                .sort((a, b) => displayName(a).localeCompare(displayName(b)))
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {displayName(p)} · {p.email}
-                  </option>
-                ))}
-            </select>
+              onChange={(v) => setRepFilter(v ?? "all")}
+              clearable={false}
+              triggerIcon="reps"
+              width={220}
+              options={[
+                { value: "all", label: "All reps" },
+                ...profiles
+                  .filter((p) => p.role === "rep")
+                  .sort((a, b) => displayName(a).localeCompare(displayName(b)))
+                  .map((p) => ({
+                    value: p.id,
+                    label: displayName(p),
+                    sublabel: p.email,
+                  })),
+              ]}
+            />
             <label
               style={{
                 display: "inline-flex",

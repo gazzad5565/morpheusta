@@ -26,6 +26,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
+import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import {
   getShiftById,
@@ -366,35 +367,36 @@ export default function EditShiftPage({
           </div>
 
           <Field label="Customer" required>
-            <select
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              style={inputStyle}
-            >
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} · #{c.code}
-                </option>
-              ))}
-            </select>
+            <Combobox
+              value={customerId || null}
+              onChange={(v) => setCustomerId(v ?? "")}
+              triggerIcon="customer"
+              placeholder="Pick a customer…"
+              clearable={false}
+              options={customers.map((c) => ({
+                value: c.id,
+                label: c.name,
+                sublabel: `#${c.code}`,
+                color: c.color || undefined,
+              }))}
+            />
           </Field>
 
           <Field
             label="Assign to rep"
             hint="Leave blank to make the shift claimable by any rep."
           >
-            <select
-              value={repId}
-              onChange={(e) => setRepId(e.target.value)}
-              style={inputStyle}
-            >
-              <option value="">— Unassigned (claimable) —</option>
-              {reps.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {displayName(r)} · {r.email}
-                </option>
-              ))}
-            </select>
+            <Combobox
+              value={repId || null}
+              onChange={(v) => setRepId(v ?? "")}
+              triggerIcon="reps"
+              placeholder="— Unassigned (claimable) —"
+              options={reps.map((r) => ({
+                value: r.id,
+                label: displayName(r),
+                sublabel: r.email,
+              }))}
+            />
           </Field>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>

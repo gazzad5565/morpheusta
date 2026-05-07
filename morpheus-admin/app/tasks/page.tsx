@@ -18,6 +18,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { FilterChip } from "@/components/ui/Filters";
+import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import { listAllTasks, deleteTask, type TaskRow } from "@/lib/tasks-store";
 
@@ -173,28 +174,17 @@ export default function TasksPage() {
                 </button>
               )}
             </div>
-            <select
+            <Combobox
               value={customerFilter}
-              onChange={(e) => setCustomerFilter(e.target.value)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: `1px solid ${AC.line}`,
-                background: "#fff",
-                fontFamily: AC.font,
-                fontSize: 12,
-                color: AC.ink,
-                cursor: "pointer",
-              }}
-            >
-              <option value="All">All customers</option>
-              <option value="Universal">Universal (all-customers tasks)</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setCustomerFilter(v ?? "All")}
+              clearable={false}
+              triggerIcon="customer"
+              options={[
+                { value: "All", label: "All customers" },
+                { value: "Universal", label: "Universal", sublabel: "All-customers tasks" },
+                ...customers.map((c) => ({ value: c.id, label: c.name, icon: "customer" })),
+              ]}
+            />
           </div>
         </Card>
 

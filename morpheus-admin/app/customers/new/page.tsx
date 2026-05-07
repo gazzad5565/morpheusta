@@ -8,6 +8,7 @@ import { Card, SectionTitle } from "@/components/ui/Card";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
+import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import { createCustomer } from "@/lib/customers-store";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
@@ -181,17 +182,13 @@ export default function NewCustomerPage() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <Field label="Region">
-              <select
+              <Combobox
                 value={region}
-                onChange={(e) => setRegion(e.target.value as Customer["region"])}
-                style={inputStyle}
-              >
-                {REGIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setRegion((v ?? REGIONS[0]) as Customer["region"])}
+                triggerIcon="pin"
+                clearable={false}
+                options={REGIONS.map((r) => ({ value: r, label: r }))}
+              />
             </Field>
 
             <Field label="City">

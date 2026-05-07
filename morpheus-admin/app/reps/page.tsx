@@ -15,6 +15,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AdminShell } from "@/components/shell/AdminShell";
+import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { RepAvatar } from "@/components/ui/Avatars";
@@ -120,7 +121,13 @@ export default function RepsPage() {
   return (
     <AdminShell
       breadcrumbs={["Home", "Reps"]}
-      actions={null}
+      actions={
+        <Link href="/schedule/manage" style={{ textDecoration: "none" }}>
+          <Btn icon="settings" size="sm">
+            Manage shifts
+          </Btn>
+        </Link>
+      }
     >
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
         {/* Filter row */}

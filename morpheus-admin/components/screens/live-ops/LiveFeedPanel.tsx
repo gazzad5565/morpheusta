@@ -21,6 +21,7 @@ import { AC } from "@/lib/tokens";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { Btn } from "@/components/ui/Btn";
+import { Combobox } from "@/components/ui/Combobox";
 import {
   listPendingRequests,
   deleteRequest,
@@ -678,27 +679,17 @@ function AllActivityList({
       >
         Show
       </span>
-      <select
+      <Combobox
         value={range}
-        onChange={(e) => onRangeChange(e.target.value as RangeKey)}
-        style={{
-          padding: "4px 8px",
-          borderRadius: 6,
-          border: `1px solid ${AC.line}`,
-          background: "#fff",
-          fontFamily: AC.font,
-          fontSize: 11.5,
-          color: AC.ink,
-          fontWeight: 600,
-          cursor: "pointer",
-        }}
-      >
-        {(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => (
-          <option key={k} value={k}>
-            {RANGE_LABEL[k]}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => onRangeChange((v ?? "today") as RangeKey)}
+        clearable={false}
+        triggerIcon={null}
+        searchable={false}
+        options={(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => ({
+          value: k,
+          label: RANGE_LABEL[k],
+        }))}
+      />
       <div style={{ flex: 1 }} />
       <span
         style={{

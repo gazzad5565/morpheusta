@@ -14,6 +14,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
+import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
 import {
@@ -155,17 +156,13 @@ export default function EditLibraryFilePage({
           </Field>
 
           <Field label="Category" required>
-            <select
+            <Combobox
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              style={inputStyle}
-            >
-              {LIBRARY_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setCategory(v ?? "")}
+              triggerIcon="lib"
+              clearable={false}
+              options={LIBRARY_CATEGORIES.map((c) => ({ value: c, label: c }))}
+            />
           </Field>
 
           <Field label="Customers" hint="Pick all (universal), one, or many.">

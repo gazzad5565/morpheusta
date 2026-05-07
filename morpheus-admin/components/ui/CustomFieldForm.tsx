@@ -10,6 +10,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
+import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import {
   FIELD_ENTITIES,
@@ -87,17 +88,16 @@ export function CustomFieldForm({
         <SectionTitle>Field details</SectionTitle>
 
         <Field label="Where does it apply" required>
-          <select
+          <Combobox
             value={values.applies_to}
-            onChange={(e) => set("applies_to", e.target.value as FieldEntity)}
-            style={inputStyle}
-          >
-            {FIELD_ENTITIES.map((e) => (
-              <option key={e} value={e}>
-                {FIELD_ENTITY_LABEL[e]}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => set("applies_to", (v ?? FIELD_ENTITIES[0]) as FieldEntity)}
+            clearable={false}
+            triggerIcon={null}
+            options={FIELD_ENTITIES.map((e) => ({
+              value: e,
+              label: FIELD_ENTITY_LABEL[e],
+            }))}
+          />
         </Field>
 
         <Field label="Field name" required>
@@ -110,17 +110,16 @@ export function CustomFieldForm({
         </Field>
 
         <Field label="Type" required>
-          <select
+          <Combobox
             value={values.field_type}
-            onChange={(e) => set("field_type", e.target.value as FieldType)}
-            style={inputStyle}
-          >
-            {FIELD_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {FIELD_TYPE_LABEL[t]}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => set("field_type", (v ?? FIELD_TYPES[0]) as FieldType)}
+            clearable={false}
+            triggerIcon={null}
+            options={FIELD_TYPES.map((t) => ({
+              value: t,
+              label: FIELD_TYPE_LABEL[t],
+            }))}
+          />
         </Field>
 
         {values.field_type === "select" && (

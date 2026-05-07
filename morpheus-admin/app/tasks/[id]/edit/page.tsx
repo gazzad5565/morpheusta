@@ -15,6 +15,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
+import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
 import { getTask, updateTask, deleteTask } from "@/lib/tasks-store";
@@ -145,18 +146,21 @@ export default function EditTaskPage({
           <SectionTitle>Edit task</SectionTitle>
 
           <Field label="Applies to" required>
-            <select
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              style={inputStyle}
-            >
-              <option value="">All customers (universal)</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} · {c.code}
-                </option>
-              ))}
-            </select>
+            <Combobox
+              value={customerId || ""}
+              onChange={(v) => setCustomerId(v ?? "")}
+              triggerIcon="customer"
+              placeholder="All customers (universal)"
+              options={[
+                { value: "", label: "All customers", sublabel: "Universal task" },
+                ...customers.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                  sublabel: c.code,
+                  color: c.color || undefined,
+                })),
+              ]}
+            />
           </Field>
 
           <Field label="Task name" required>

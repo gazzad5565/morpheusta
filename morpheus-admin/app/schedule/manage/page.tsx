@@ -24,6 +24,7 @@ import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
+import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import {
   listShiftSeries,
@@ -968,44 +969,41 @@ function EditFutureModal({
         </div>
 
         <FormField label="Customer">
-          <select
-            value={customerId}
-            onChange={(e) => setCustomerId(e.target.value)}
-            style={selectStyle}
-          >
-            <option value="">
-              {series.customerIds.length === 1
+          <Combobox
+            value={customerId || null}
+            onChange={(v) => setCustomerId(v ?? "")}
+            triggerIcon="customer"
+            placeholder={
+              series.customerIds.length === 1
                 ? "(unchanged — same customer)"
-                : "(unchanged — multiple customers)"}
-            </option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} · #{c.code}
-              </option>
-            ))}
-          </select>
+                : "(unchanged — multiple customers)"
+            }
+            options={customers.map((c) => ({
+              value: c.id,
+              label: c.name,
+              sublabel: `#${c.code}`,
+              color: c.color || undefined,
+            }))}
+          />
         </FormField>
 
         <FormField label="Rep">
-          <select
-            value={repId}
-            onChange={(e) => setRepId(e.target.value)}
-            style={selectStyle}
-          >
-            <option value="">
-              {series.repIds.length === 1
+          <Combobox
+            value={repId || null}
+            onChange={(v) => setRepId(v ?? "")}
+            triggerIcon="reps"
+            placeholder={
+              series.repIds.length === 1
                 ? "(unchanged — same rep)"
-                : "(unchanged — multiple reps)"}
-            </option>
-            <option value="__unassigned__">— Unassigned (claimable) —</option>
-            {reps
-              .filter((r) => r.role === "rep")
-              .map((r) => (
-                <option key={r.id} value={r.id}>
-                  {displayName(r)}
-                </option>
-              ))}
-          </select>
+                : "(unchanged — multiple reps)"
+            }
+            options={[
+              { value: "__unassigned__", label: "Unassigned", sublabel: "Claimable" },
+              ...reps
+                .filter((r) => r.role === "rep")
+                .map((r) => ({ value: r.id, label: displayName(r) })),
+            ]}
+          />
         </FormField>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
