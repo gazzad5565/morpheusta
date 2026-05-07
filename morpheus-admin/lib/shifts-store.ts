@@ -560,6 +560,156 @@ export async function updateShiftSeries(
 }
 
 /**
+ * Regenerate the future portion of a series with a new pattern.
+ *
+ * Conceptually: "edit future" is too narrow when the manager wants
+ * to change the ACTUAL DAYS the shifts run on (e.g. flip from
+ * Mon-Fri to Mon-Wed-Fri). Doing that in-place per row is fragile —
+ * fewer days means orphaned shifts, more days means new rows that
+ * have to attach to the same series. So we instead:
+ *
+ *   1. Delete every still-scheduled shift in the series whose
+ *      shift_date ≥ fromDate.
+ *   2. Walk the new (weekdays × dateRange) pattern and create one
+ *      shift per (customer × rep × generated date), all sharing
+ *      the original series_id.
+ *
+ * Running + complete + past shifts in the series are never
+ * touched. Returns the count deleted + count inserted so the UI
+ * can report "Replaced 32 shifts → 18 shifts".
+ *
+ * If the new pattern produces zero dates (e.g. weekdays array is
+ * empty or fromDate > untilDate) the function refuses rather than
+ * silently turning the regen into a pure delete.
+ */
+export interface SeriesRegenerateInput {
+  customerIds: string[];
+  /** rep_ids, or [null] for "unassigned/claimable". */
+  repIds: (string | null)[];
+  /** 0..6, Mon=0..Sun=6 — matches the schedule/new form. */
+  weekdays: number[];
+  /** YYYY-MM-DD, inclusive. Earliest date a new shift can land on. */
+  fromDate: string;
+  /** YYYY-MM-DD, inclusive. Latest date a new shift can land on. */
+  untilDate: string;
+  startTime: string; // HH:MM
+  endTime: string; // HH:MM
+}
+
+export async function regenerateShiftSeries(
+  series_id: string,
+  input: SeriesRegenerateInput
+): Promise<{
+  ok: boolean;
+  error?: string;
+  deleted?: number;
+  created?: number;
+}> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  if (input.weekdays.length === 0) {
+    return { ok: false, error: "Pick at least one weekday." };
+  }
+  if (input.untilDate < input.fromDate) {
+    return { ok: false, error: "'Until' date must be on or after the start." };
+  }
+  if (input.startTime >= input.endTime) {
+    return { ok: false, error: "End time must be after start time." };
+  }
+  if (input.customerIds.length === 0) {
+    return { ok: false, error: "Pick at least one customer." };
+  }
+  if (input.repIds.length === 0) {
+    return { ok: false, error: "Pick at least one rep (or 'Unassigned')." };
+  }
+
+  // Walk the new date pattern. Same anchor-at-noon trick used in
+  // /schedule/new to dodge DST flips at midnight.
+  const dates: string[] = [];
+  const start = new Date(input.fromDate + "T12:00:00");
+  const end = new Date(input.untilDate + "T12:00:00");
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const jsDay = d.getDay();
+    const idx = (jsDay + 6) % 7; // Mon=0..Sun=6
+    if (input.weekdays.includes(idx)) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      dates.push(`${y}-${m}-${day}`);
+    }
+  }
+  if (dates.length === 0) {
+    return {
+      ok: false,
+      error: "No dates fall in that range with those weekdays selected.",
+    };
+  }
+
+  // Delete the existing future shifts in the series.
+  const { error: delErr, count: deletedCount } = await supabase
+    .from("shifts")
+    .delete({ count: "exact" })
+    .eq("series_id", series_id)
+    .eq("state", "scheduled")
+    .gte("shift_date", input.fromDate);
+  if (delErr) {
+    notifySaveError(delErr.message, "shift series");
+    return { ok: false, error: delErr.message };
+  }
+
+  // Build the insert payload. tasks_total stays 0 here — admin's
+  // /shifts/[id]/edit + Live Ops both auto-derive it from
+  // customer_tasks via countTasksForCustomers, so the column is
+  // just a denormalised cache.
+  const rows: Array<Record<string, unknown>> = [];
+  for (const date of dates) {
+    for (const cid of input.customerIds) {
+      for (const rid of input.repIds) {
+        rows.push({
+          customer_id: cid,
+          shift_date: date,
+          start_time: input.startTime,
+          end_time: input.endTime,
+          rep_id: rid || null,
+          distance_label: "",
+          tasks_total: 0,
+          series_id,
+        });
+      }
+    }
+  }
+
+  // Bulk insert. Supabase chunks at ~1000 rows by default; we
+  // rarely cross that for a 4-week regen, but split just in case.
+  let createdCount = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error: insErr } = await supabase.from("shifts").insert(chunk);
+    if (insErr) {
+      notifySaveError(insErr.message, "shift series");
+      return { ok: false, error: insErr.message, deleted: deletedCount ?? 0, created: createdCount };
+    }
+    createdCount += chunk.length;
+  }
+
+  await logEvent({
+    event_type: "shift.scheduled",
+    message: `Regenerated series — replaced ${deletedCount ?? 0} shifts with ${createdCount}`,
+    meta: {
+      series_id,
+      from_date: input.fromDate,
+      until_date: input.untilDate,
+      weekdays: input.weekdays,
+      deleted: deletedCount ?? 0,
+      created: createdCount,
+    },
+  });
+  notifySaved("series regenerated");
+  return { ok: true, deleted: deletedCount ?? 0, created: createdCount };
+}
+
+/**
  * Cancel every shift in a series. By default we only delete shifts
  * still in the 'scheduled' state — running / complete shifts are
  * untouched (deleting them would corrupt audit history). Pass

@@ -30,6 +30,7 @@ import { AC } from "@/lib/tokens";
 import {
   getShiftById,
   updateShift,
+  createShift,
   deleteShift,
   isShiftEditable,
 } from "@/lib/shifts-store";
@@ -41,7 +42,18 @@ import {
   type Profile,
 } from "@/lib/profiles-store";
 import { countTasksForCustomers } from "@/lib/tasks-store";
+import { localISO } from "@/lib/format";
 import type { Customer } from "@/lib/types";
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+function jsDayToIndex(jsDay: number): number {
+  return (jsDay + 6) % 7;
+}
+function addDaysISO(iso: string, days: number): string {
+  const d = new Date(iso + "T12:00:00");
+  d.setDate(d.getDate() + days);
+  return localISO(d);
+}
 
 export default function EditShiftPage({
   params,
@@ -70,6 +82,18 @@ export default function EditShiftPage({
   // first count to arrive.
   const [liveTaskCount, setLiveTaskCount] = useState<number | null>(null);
   const [storedTasksTotal, setStoredTasksTotal] = useState<number>(0);
+  // Existing series id, if this shift came from a recurring create.
+  // We preserve it so any siblings spawned from this edit page join the
+  // same group.
+  const [seriesId, setSeriesId] = useState<string | null>(null);
+
+  // Recurrence section — off by default. When toggled, the manager can
+  // promote this single shift into a series by ticking weekdays + an
+  // until-date. On save we update this row AND insert siblings for the
+  // other dates, all sharing the same series_id.
+  const [repeatOn, setRepeatOn] = useState(false);
+  const [weekdays, setWeekdays] = useState<Set<number>>(new Set());
+  const [untilDate, setUntilDate] = useState<string>("");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,8 +129,17 @@ export default function EditShiftPage({
       setStartTime((shift.start_time || "").slice(0, 5));
       setEndTime((shift.end_time || "").slice(0, 5));
       setStoredTasksTotal(shift.tasks_total ?? 0);
+      setSeriesId(shift.series_id ?? null);
       setOriginalState(shift.state);
       setCustomers(cs);
+      // Default until = +27 days from this shift's date. Same
+      // off-by-one-safe value /schedule/new uses.
+      setUntilDate(addDaysISO(shift.shift_date, 27));
+      // Pre-tick today's weekday so the picker isn't empty when the
+      // manager flicks Repeat on.
+      setWeekdays(
+        new Set([jsDayToIndex(new Date(shift.shift_date + "T12:00:00").getDay())])
+      );
 
       // If the assigned rep isn't in the role='rep' list (e.g. a manager
       // who happens to have a shift for testing), back-fill them so the
@@ -152,6 +185,35 @@ export default function EditShiftPage({
 
   const effectiveTaskTotal = liveTaskCount ?? storedTasksTotal;
 
+  // When Repeat is on, compute the additional sibling dates we'd
+  // generate. Excludes the current shift's date (already covered by
+  // the update). Empty when repeat is off or settings are invalid.
+  const siblingDates = useMemo(() => {
+    if (!repeatOn) return [];
+    if (!shiftDate || !untilDate || untilDate < shiftDate) return [];
+    if (weekdays.size === 0) return [];
+    const out: string[] = [];
+    const start = new Date(shiftDate + "T12:00:00");
+    const end = new Date(untilDate + "T12:00:00");
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const iso = localISO(d);
+      if (iso === shiftDate) continue; // skip the row we're editing
+      if (weekdays.has(jsDayToIndex(d.getDay()))) {
+        out.push(iso);
+      }
+    }
+    return out;
+  }, [repeatOn, shiftDate, untilDate, weekdays]);
+
+  const toggleWeekday = (i: number) => {
+    setWeekdays((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+
   const onSave = async () => {
     if (busy) return;
     setError(null);
@@ -159,23 +221,72 @@ export default function EditShiftPage({
     if (!shiftDate) return setError("Pick a date.");
     if (!startTime || !endTime) return setError("Set start and end times.");
     if (startTime >= endTime) return setError("End time must be after start time.");
+    if (repeatOn && weekdays.size === 0) {
+      return setError("Pick at least one weekday for the recurrence.");
+    }
+    if (repeatOn && untilDate && untilDate < shiftDate) {
+      return setError("Until-date must be on or after this shift's date.");
+    }
 
     setBusy(true);
-    const r = await updateShift(id, {
+
+    // 1. Decide whether we need a series_id. Reuse the existing one
+    //    if the shift is already part of a series; mint a fresh uuid
+    //    when promoting a one-off into a series for the first time.
+    //    If repeat is off and there are no siblings to create, leave
+    //    the existing series_id untouched.
+    let nextSeriesId = seriesId;
+    if (repeatOn && siblingDates.length > 0 && !nextSeriesId) {
+      nextSeriesId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `series-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    // 2. Update this shift first.
+    const updateRes = await updateShift(id, {
       customer_id: customerId,
       rep_id: repId || null,
       shift_date: shiftDate,
       start_time: startTime,
       end_time: endTime,
-      // Distance label is no longer surfaced in the form. We
-      // intentionally do NOT pass distance_label here so the existing
-      // value (if any) stays untouched. The rep app derives a live
-      // distance from the customer coords + rep location.
       tasks_total: effectiveTaskTotal,
+      // updateShift doesn't currently accept series_id in its patch
+      // shape — that's fine, the row's existing series_id is left
+      // untouched on update. Siblings below pick it up via createShift.
     });
+    if (!updateRes.ok) {
+      setBusy(false);
+      setError(updateRes.error || "Couldn't save.");
+      return;
+    }
+
+    // 3. Spawn siblings. Sequential so we can collect partial errors;
+    //    same pattern as /schedule/new.
+    const errs: string[] = [];
+    for (const date of siblingDates) {
+      const cr = await createShift({
+        customer_id: customerId,
+        rep_id: repId || null,
+        shift_date: date,
+        start_time: startTime,
+        end_time: endTime,
+        tasks_total: effectiveTaskTotal,
+        distance_label: "",
+        series_id: nextSeriesId,
+      });
+      if (!cr.ok) errs.push(`${date}: ${cr.error || "failed"}`);
+    }
+
     setBusy(false);
-    if (!r.ok) {
-      setError(r.error || "Couldn't save.");
+    if (errs.length > 0) {
+      setError(
+        `Saved this shift, but ${errs.length} sibling${
+          errs.length === 1 ? "" : "s"
+        } failed:\n` +
+          errs.slice(0, 5).join("\n") +
+          (errs.length > 5 ? `\n…and ${errs.length - 5} more` : "")
+      );
       return;
     }
     router.push(`/schedule`);
@@ -380,6 +491,182 @@ export default function EditShiftPage({
             </Link>
           </div>
 
+          {/* Repeat / promote-to-series — same controls as
+              /schedule/new's Step 2 recurrence panel. Off by default
+              (the common case is "edit just this one"). When on, we
+              keep this row + spawn siblings for the picked weekdays
+              within the until-date range, all sharing series_id so
+              they show up linked on /schedule/manage. */}
+          <div
+            style={{
+              border: `1px solid ${AC.line}`,
+              borderRadius: 10,
+              background: "#fff",
+              marginBottom: 16,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setRepeatOn((v) => !v)}
+              style={{
+                width: "100%",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "12px 14px",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                textAlign: "left",
+              }}
+            >
+              <span
+                style={{
+                  width: 36,
+                  height: 22,
+                  borderRadius: 99,
+                  background: repeatOn ? AC.brand : AC.line,
+                  position: "relative",
+                  flexShrink: 0,
+                  transition: "background 160ms ease",
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 3,
+                    left: repeatOn ? 17 : 3,
+                    width: 16,
+                    height: 16,
+                    borderRadius: 99,
+                    background: "#fff",
+                    boxShadow: "0 1px 2px rgba(10,15,30,.25)",
+                    transition: "left 160ms ease",
+                  }}
+                />
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    color: AC.ink,
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  Repeat across more days
+                </div>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 11.5,
+                    color: AC.mute,
+                    marginTop: 2,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {seriesId
+                    ? "This shift is part of an existing series. Adding more days extends it."
+                    : "Promote this single shift into a recurring series — new shifts share the same customer, rep, and time."}
+                </div>
+              </div>
+              <AGlyph
+                name={repeatOn ? "chev-u" : "chev-d"}
+                size={14}
+                color={AC.mute}
+              />
+            </button>
+            {repeatOn && (
+              <div
+                style={{
+                  borderTop: `1px solid ${AC.lineDim}`,
+                  padding: 14,
+                  background: AC.bg,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 11,
+                    color: AC.mute,
+                    fontWeight: 700,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                    marginBottom: 8,
+                  }}
+                >
+                  On these days
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    flexWrap: "wrap",
+                    marginBottom: 14,
+                  }}
+                >
+                  {WEEKDAYS.map((label, i) => {
+                    const on = weekdays.has(i);
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => toggleWeekday(i)}
+                        style={{
+                          padding: "7px 14px",
+                          borderRadius: 99,
+                          background: on ? AC.brand : "#fff",
+                          color: on ? "#fff" : AC.ink2,
+                          border: `1px solid ${on ? AC.brand : AC.line}`,
+                          fontFamily: AC.font,
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          letterSpacing: -0.1,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <Field label="Until (inclusive)" required>
+                  <input
+                    type="date"
+                    value={untilDate}
+                    min={shiftDate}
+                    onChange={(e) => setUntilDate(e.target.value)}
+                    style={inputStyle}
+                  />
+                </Field>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 12,
+                    color: AC.ink2,
+                    background: "#fff",
+                    border: `1px solid ${AC.lineDim}`,
+                    borderRadius: 8,
+                    padding: "8px 10px",
+                    marginTop: 6,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {siblingDates.length === 0
+                    ? "No additional dates from these settings — pick more weekdays or extend the until-date."
+                    : `Will create ${siblingDates.length} additional shift${
+                        siblingDates.length === 1 ? "" : "s"
+                      } between ${siblingDates[0]} and ${
+                        siblingDates[siblingDates.length - 1]
+                      }, plus update this one. ${
+                        siblingDates.length + 1
+                      } total.`}
+                </div>
+              </div>
+            )}
+          </div>
+
           {error && (
             <div
               style={{
@@ -418,7 +705,11 @@ export default function EditShiftPage({
                 Cancel
               </Btn>
               <Btn kind="primary" icon="check" onClick={onSave} disabled={busy}>
-                {busy ? "Saving…" : "Save changes"}
+                {busy
+                  ? "Saving…"
+                  : siblingDates.length > 0
+                  ? `Save + create ${siblingDates.length} more`
+                  : "Save changes"}
               </Btn>
             </div>
           </div>
