@@ -63,7 +63,6 @@ function stateRank(s: ShiftRow): number {
 }
 
 const UNASSIGNED_KEY = "__unassigned__";
-type ViewMode = "days" | "reps";
 
 // ─── Time grid constants ──────────────────────────────────────────────
 //
@@ -113,6 +112,87 @@ function shiftOverlapsRange(
   endMin: number
 ): boolean {
   return timeToMin(s.start_time) < endMin && startMin < timeToMin(s.end_time);
+}
+
+/**
+ * Lay overlapping shifts side-by-side instead of stacking them on top
+ * of each other. Returns a Map<shift_id, { lane, lanes }> where:
+ *   - lane  is this shift's column index inside its overlap cluster
+ *   - lanes is the total column count for that cluster
+ *
+ * We split the day into "clusters" (connected components of overlap)
+ * so a single dense morning doesn't squish a quiet afternoon. Inside
+ * each cluster a sweep-line greedy reuses the earliest free lane.
+ *
+ * Why we needed this:
+ *   1. With every shift positioned at left:4 / right:4, two shifts at
+ *      the same time rendered on top of each other — the calendar
+ *      "looked a mess" and only the topmost (later DOM-order) card
+ *      received pointer events.
+ *   2. The card-on-top problem broke drag silently. Sort order put
+ *      complete shifts last, so a complete card occluded the
+ *      scheduled card behind it; the user grabbed nothing because
+ *      complete shifts have draggable=false. Lanes eliminate the
+ *      occlusion entirely.
+ */
+function assignLanes(
+  shifts: ShiftRow[]
+): Map<string, { lane: number; lanes: number }> {
+  const result = new Map<string, { lane: number; lanes: number }>();
+  if (shifts.length === 0) return result;
+
+  // Sort by start, then end (so longer shifts that start at the same
+  // time go into the leftmost lane — feels more natural when scanning).
+  const sorted = [...shifts].sort((a, b) => {
+    const sa = timeToMin(a.start_time);
+    const sb = timeToMin(b.start_time);
+    if (sa !== sb) return sa - sb;
+    return timeToMin(b.end_time) - timeToMin(a.end_time);
+  });
+
+  // Walk shifts; whenever the next start is >= max end of the current
+  // cluster, the cluster is closed and we flush lane assignments.
+  let cluster: ShiftRow[] = [];
+  let clusterMaxEnd = -1;
+
+  const flush = () => {
+    if (cluster.length === 0) return;
+    const laneEnds: number[] = []; // end-time per lane
+    const laneOf: number[] = [];
+    for (const s of cluster) {
+      const start = timeToMin(s.start_time);
+      const end = timeToMin(s.end_time);
+      let lane = laneEnds.findIndex((laneEnd) => laneEnd <= start);
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(end);
+      } else {
+        laneEnds[lane] = end;
+      }
+      laneOf.push(lane);
+    }
+    const lanes = laneEnds.length;
+    cluster.forEach((s, i) =>
+      result.set(s.id, { lane: laneOf[i], lanes })
+    );
+    cluster = [];
+    clusterMaxEnd = -1;
+  };
+
+  for (const s of sorted) {
+    const start = timeToMin(s.start_time);
+    const end = timeToMin(s.end_time);
+    if (cluster.length === 0 || start < clusterMaxEnd) {
+      cluster.push(s);
+      clusterMaxEnd = Math.max(clusterMaxEnd, end);
+    } else {
+      flush();
+      cluster.push(s);
+      clusterMaxEnd = end;
+    }
+  }
+  flush();
+  return result;
 }
 
 // Shared dropdown style for the toolbar filters (rep + customer). Kept
@@ -174,14 +254,6 @@ export default function SchedulePage() {
   // "show me Hayid's whole week" without switching to the Reps view.
   const [repFilter, setRepFilter] = useState<string>("All");
   const [loading, setLoading] = useState(true);
-
-  // View toggle (Days / Reps). The page ALWAYS opens on Days — that's
-  // the canonical "what's happening this week?" lens. Switching to
-  // Reps stays in effect for the session so the manager can keep
-  // moving between rep cards, but a refresh / fresh tab brings them
-  // back to Days. Drop the localStorage restore that previously
-  // pinned the view per-browser.
-  const [view, setView] = useState<ViewMode>("days");
 
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
@@ -269,26 +341,7 @@ export default function SchedulePage() {
     return out;
   }, [filteredShifts]);
 
-  // Reps view: { repId-or-unassigned -> dayISO -> shifts[] }
-  const byRepDay = useMemo(() => {
-    const out = new Map<string, Map<string, ShiftRow[]>>();
-    for (const s of filteredShifts) {
-      const repKey = s.rep_id ?? UNASSIGNED_KEY;
-      if (!out.has(repKey)) out.set(repKey, new Map());
-      const dayMap = out.get(repKey)!;
-      if (!dayMap.has(s.shift_date)) dayMap.set(s.shift_date, []);
-      dayMap.get(s.shift_date)!.push(s);
-    }
-    for (const dayMap of out.values()) {
-      for (const arr of dayMap.values()) {
-        arr.sort((a, b) => a.start_time.localeCompare(b.start_time));
-      }
-    }
-    return out;
-  }, [filteredShifts]);
-
   const totalVisible = filteredShifts.length;
-  const hasUnassigned = byRepDay.has(UNASSIGNED_KEY);
 
   // Transient banner messages for drag-and-drop feedback. Keeps the
   // alert() noise off while still telling the manager what happened on
@@ -496,7 +549,6 @@ export default function SchedulePage() {
             <Btn size="sm" onClick={goThisWeek}>
               This week
             </Btn>
-            <ViewToggle view={view} onChange={setView} />
             <div style={{ flex: 1 }} />
             <select
               value={repFilter}
@@ -530,59 +582,22 @@ export default function SchedulePage() {
 
         {moveBanner && <MoveBanner banner={moveBanner} />}
 
-        {/* Body */}
-        {view === "days" ? (
-          <Card padding={0}>
-            <DaysHeaderWithGutter days={days} todayISO={todayISO} />
-            <DaysCalendar
-              days={days}
-              todayISO={todayISO}
-              byDay={byDay}
-              repNameMap={repNameMap}
-              customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
-              onMove={applyShiftMove}
-            />
-          </Card>
-        ) : (
-          <Card padding={0}>
-            <RepsHeader days={days} todayISO={todayISO} />
-            {hasUnassigned && (
-              <UnassignedRow
-                days={days}
-                todayISO={todayISO}
-                dayMap={byRepDay.get(UNASSIGNED_KEY) || new Map()}
-                repNameMap={repNameMap}
-                onMove={applyShiftMove}
-              />
-            )}
-            {repsForRows.length === 0 && !loading ? (
-              <div
-                style={{
-                  padding: 28,
-                  textAlign: "center",
-                  fontFamily: AC.font,
-                  fontSize: 13,
-                  color: AC.mute,
-                }}
-              >
-                No reps signed up yet.
-              </div>
-            ) : (
-              repsForRows.map((rep) => (
-                <RepRow
-                  key={rep.id}
-                  rep={rep}
-                  days={days}
-                  todayISO={todayISO}
-                  dayMap={byRepDay.get(rep.id) || new Map()}
-                  repNameMap={repNameMap}
-                  customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
-                  onMove={applyShiftMove}
-                />
-              ))
-            )}
-          </Card>
-        )}
+        {/* Body — single time-axis Days view. The previous "Reps" view
+            (one row per rep × 7 day columns) was retired in favour of
+            the rep filter dropdown above: pick a rep there to see only
+            their shifts inside this calendar, or leave it on All to
+            see everyone in one stack. */}
+        <Card padding={0}>
+          <DaysHeaderWithGutter days={days} todayISO={todayISO} />
+          <DaysCalendar
+            days={days}
+            todayISO={todayISO}
+            byDay={byDay}
+            repNameMap={repNameMap}
+            customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
+            onMove={applyShiftMove}
+          />
+        </Card>
 
         <div
           style={{
@@ -592,9 +607,7 @@ export default function SchedulePage() {
             textAlign: "center",
           }}
         >
-          {view === "days"
-            ? "Drag a scheduled shift to move it. Click + to add a new one. Click a card for its detail page."
-            : "Drag a card across reps and days to reassign — time-of-day stays the same. Click + to add."}
+          Drag a scheduled shift to move it. Click + to add a new one. Click a card for its detail page.
         </div>
       </div>
     </AdminShell>
@@ -639,64 +652,6 @@ function MoveBanner({
           to   { transform: translateY(0);    opacity: 1; }
         }
       `}</style>
-    </div>
-  );
-}
-
-// ─── Toolbar: View toggle ───────────────────────────────────────────────
-
-function ViewToggle({
-  view,
-  onChange,
-}: {
-  view: ViewMode;
-  onChange: (v: ViewMode) => void;
-}) {
-  return (
-    <div
-      role="tablist"
-      aria-label="View mode"
-      style={{
-        display: "inline-flex",
-        background: AC.bg,
-        border: `1px solid ${AC.line}`,
-        borderRadius: 8,
-        padding: 2,
-        gap: 2,
-      }}
-    >
-      {(
-        [
-          { key: "days", label: "Days" },
-          { key: "reps", label: "Reps" },
-        ] as const
-      ).map((opt) => {
-        const active = view === opt.key;
-        return (
-          <button
-            key={opt.key}
-            role="tab"
-            aria-selected={active}
-            type="button"
-            onClick={() => onChange(opt.key)}
-            style={{
-              padding: "5px 12px",
-              borderRadius: 6,
-              border: "none",
-              background: active ? "#fff" : "transparent",
-              boxShadow: active ? "0 1px 2px rgba(10,15,30,.06)" : "none",
-              fontFamily: AC.font,
-              fontSize: 12,
-              fontWeight: 600,
-              color: active ? AC.ink : AC.mute,
-              cursor: "pointer",
-              letterSpacing: -0.1,
-            }}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -1029,17 +984,27 @@ function DayColumn({
         );
       })}
 
-      {/* Shift cards positioned by start_time / duration */}
-      {shifts.map((s) => (
-        <DraggableShiftCard
-          key={s.id}
-          shift={s}
-          repLabel={s.rep_id ? repNameMap[s.rep_id] || "Rep" : "Unassigned"}
-          dimmed={drag?.shift.id === s.id}
-          onBeginDrag={onBeginDrag}
-          onEndDrag={onEndDrag}
-        />
-      ))}
+      {/* Shift cards positioned by start_time / duration. Overlapping
+          shifts are split into lanes so they render side-by-side
+          instead of stacking on top of each other. */}
+      {(() => {
+        const laneMap = assignLanes(shifts);
+        return shifts.map((s) => {
+          const meta = laneMap.get(s.id) ?? { lane: 0, lanes: 1 };
+          return (
+            <DraggableShiftCard
+              key={s.id}
+              shift={s}
+              repLabel={s.rep_id ? repNameMap[s.rep_id] || "Rep" : "Unassigned"}
+              dimmed={drag?.shift.id === s.id}
+              lane={meta.lane}
+              lanes={meta.lanes}
+              onBeginDrag={onBeginDrag}
+              onEndDrag={onEndDrag}
+            />
+          );
+        });
+      })()}
 
       {/* Hover preview while dragging over this column */}
       {hover && drag && (
@@ -1139,12 +1104,18 @@ function DraggableShiftCard({
   shift,
   repLabel,
   dimmed,
+  lane,
+  lanes,
   onBeginDrag,
   onEndDrag,
 }: {
   shift: ShiftRow;
   repLabel: string;
   dimmed: boolean;
+  /** This card's column index within its overlap cluster (0..lanes-1). */
+  lane: number;
+  /** Total lanes in the cluster. 1 = full width. */
+  lanes: number;
   onBeginDrag: (shift: ShiftRow, pickupOffsetMin: number) => void;
   onEndDrag: () => void;
 }) {
@@ -1155,6 +1126,11 @@ function DraggableShiftCard({
     SLOT_PX - 2,
     (endMin - startMin) * PX_PER_MIN - 2
   );
+  // Side-by-side layout for overlapping shifts. Each lane gets an even
+  // share of the column width with a 2px gap on either side so cards
+  // never visually merge.
+  const lanePct = (lane / lanes) * 100;
+  const remainingPct = ((lanes - lane - 1) / lanes) * 100;
   const c = shift.customers;
   const color = c?.color || "#888";
   const customerName = c?.name || "Unknown customer";
@@ -1196,8 +1172,8 @@ function DraggableShiftCard({
         position: "absolute",
         top,
         height,
-        left: 4,
-        right: 4,
+        left: `calc(${lanePct}% + 2px)`,
+        right: `calc(${remainingPct}% + 2px)`,
         background: `${color}18`,
         borderLeft: `3px solid ${accent}`,
         borderRadius: 5,
@@ -1210,6 +1186,11 @@ function DraggableShiftCard({
         cursor: isDraggable ? "grab" : "pointer",
         overflow: "hidden",
         boxShadow: dimmed ? "none" : "0 1px 2px rgba(10,15,30,.06)",
+        // Make sure scheduled (draggable) cards always sit ABOVE
+        // complete cards in the rare case they share a lane — defends
+        // against the silent "drag does nothing" bug if the layout
+        // sweep ever folds a complete card on top of a scheduled one.
+        zIndex: isDraggable ? 2 : 1,
       }}
     >
       <div
@@ -1280,519 +1261,3 @@ function DraggableShiftCard({
   );
 }
 
-// ─── Reps view ──────────────────────────────────────────────────────────
-
-function RepsHeader({ days, todayISO }: { days: Date[]; todayISO: string }) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "180px repeat(7, 1fr)",
-        borderBottom: `1px solid ${AC.line}`,
-        background: AC.bg,
-      }}
-    >
-      <div
-        style={{
-          padding: "10px 14px",
-          fontFamily: AC.font,
-          fontSize: 11,
-          color: AC.mute,
-          fontWeight: 600,
-          letterSpacing: 0.3,
-          textTransform: "uppercase",
-        }}
-      >
-        Rep / Day
-      </div>
-      {days.map((d) => {
-        const iso = isoDate(d);
-        const isToday = iso === todayISO;
-        return (
-          <div
-            key={iso}
-            style={{
-              padding: "10px 12px",
-              borderLeft: `1px solid ${AC.lineDim}`,
-              background: isToday ? AC.brandSoft : "transparent",
-            }}
-          >
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 11,
-                color: isToday ? AC.brandDeep : AC.mute,
-                fontWeight: 600,
-                letterSpacing: 0.3,
-                textTransform: "uppercase",
-              }}
-            >
-              {d.toLocaleDateString(undefined, { weekday: "short" })}
-            </div>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 14,
-                fontWeight: 700,
-                color: isToday ? AC.brandDeep : AC.ink,
-                letterSpacing: -0.2,
-                marginTop: 1,
-              }}
-            >
-              {d.getDate()}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function RepRow({
-  rep,
-  days,
-  todayISO,
-  dayMap,
-  repNameMap,
-  customerScopeForAdd,
-  onMove,
-}: {
-  rep: Profile;
-  days: Date[];
-  todayISO: string;
-  dayMap: Map<string, ShiftRow[]>;
-  repNameMap: Record<string, string>;
-  customerScopeForAdd: string | null;
-  onMove: (
-    id: string,
-    patch: {
-      shift_date?: string;
-      start_time?: string;
-      end_time?: string;
-      rep_id?: string | null;
-    }
-  ) => Promise<void>;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "180px repeat(7, 1fr)",
-        borderBottom: `1px solid ${AC.lineDim}`,
-      }}
-    >
-      <div
-        style={{
-          padding: "10px 14px",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          background: AC.bg,
-        }}
-      >
-        <div
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 99,
-            background: AC.brandDeep,
-            color: "#fff",
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 700,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >
-          {deriveInitials(rep)}
-        </div>
-        <div
-          style={{
-            fontFamily: AC.font,
-            fontSize: 12.5,
-            fontWeight: 600,
-            color: AC.ink,
-            letterSpacing: -0.1,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            minWidth: 0,
-          }}
-          title={rep.email}
-        >
-          {displayName(rep)}
-        </div>
-      </div>
-      {days.map((d) => {
-        const iso = isoDate(d);
-        const isToday = iso === todayISO;
-        const list = dayMap.get(iso) || [];
-        const addQs = new URLSearchParams({
-          rep: rep.id,
-          date: iso,
-          start: defaultStartTimeFor(iso, list),
-          ...(customerScopeForAdd ? { customer: customerScopeForAdd } : {}),
-        });
-        return (
-          <RepDayCell
-            key={iso}
-            iso={iso}
-            isToday={isToday}
-            shifts={list}
-            repLabelDefault={displayName(rep)}
-            repNameMap={repNameMap}
-            addHref={`/schedule/new?${addQs.toString()}`}
-            dropTargetRepId={rep.id}
-            dropTargetDateISO={iso}
-            onMove={onMove}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function UnassignedRow({
-  days,
-  todayISO,
-  dayMap,
-  repNameMap,
-  onMove,
-}: {
-  days: Date[];
-  todayISO: string;
-  dayMap: Map<string, ShiftRow[]>;
-  repNameMap: Record<string, string>;
-  onMove: (
-    id: string,
-    patch: {
-      shift_date?: string;
-      start_time?: string;
-      end_time?: string;
-      rep_id?: string | null;
-    }
-  ) => Promise<void>;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "180px repeat(7, 1fr)",
-        borderBottom: `2px solid ${AC.line}`,
-        background: "#FFF8F1",
-      }}
-    >
-      <div
-        style={{
-          padding: "10px 14px",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        <div
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 99,
-            border: `1.5px dashed ${AC.warn}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >
-          <AGlyph name="warn" size={13} color={AC.warn} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 12,
-              fontWeight: 700,
-              color: AC.ink,
-            }}
-          >
-            Unassigned
-          </div>
-          <div style={{ fontFamily: AC.font, fontSize: 10.5, color: AC.mute }}>
-            Claimable by any rep
-          </div>
-        </div>
-      </div>
-      {days.map((d) => {
-        const iso = isoDate(d);
-        const isToday = iso === todayISO;
-        const list = dayMap.get(iso) || [];
-        return (
-          <RepDayCell
-            key={iso}
-            iso={iso}
-            isToday={isToday}
-            shifts={list}
-            repLabelDefault="Unassigned"
-            repNameMap={repNameMap}
-            addHref={null}
-            dropTargetRepId={null}
-            dropTargetDateISO={iso}
-            onMove={onMove}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function RepDayCell({
-  iso,
-  isToday,
-  shifts,
-  repLabelDefault,
-  repNameMap,
-  addHref,
-  dropTargetRepId,
-  dropTargetDateISO,
-  onMove,
-}: {
-  iso: string;
-  isToday: boolean;
-  shifts: ShiftRow[];
-  repLabelDefault: string;
-  repNameMap: Record<string, string>;
-  addHref: string | null;
-  /** rep_id this cell drops onto. null → unassigned row. */
-  dropTargetRepId: string | null;
-  /** YYYY-MM-DD this cell drops onto. */
-  dropTargetDateISO: string;
-  onMove: (
-    id: string,
-    patch: {
-      shift_date?: string;
-      start_time?: string;
-      end_time?: string;
-      rep_id?: string | null;
-    }
-  ) => Promise<void>;
-}) {
-  const isWeekend = (() => {
-    const d = new Date(iso);
-    const dow = d.getDay();
-    return dow === 0 || dow === 6;
-  })();
-  // Local drop-hover flag so we can show a brand-tinted overlay only on
-  // the cell currently under the cursor.
-  const [hovered, setHovered] = useState(false);
-  return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        if (!hovered) setHovered(true);
-      }}
-      onDragLeave={() => setHovered(false)}
-      onDrop={async (e) => {
-        e.preventDefault();
-        const id = e.dataTransfer.getData("text/plain");
-        setHovered(false);
-        if (!id) return;
-        // In the Reps view we preserve time-of-day and only mutate
-        // rep_id + shift_date. The store helper short-circuits to a
-        // no-op when nothing actually changed.
-        await onMove(id, {
-          rep_id: dropTargetRepId,
-          shift_date: dropTargetDateISO,
-        });
-      }}
-      style={{
-        position: "relative",
-        // Lock every cell in the rep grid to the same height range so
-        // a single dense day can't stretch the whole rep row to 5x the
-        // height of its empty neighbours. Shifts beyond what fits
-        // become scrollable inside the cell.
-        minHeight: 78,
-        maxHeight: 156,
-        padding: 6,
-        borderLeft: `1px solid ${AC.lineDim}`,
-        background: hovered
-          ? `${AC.brand}12`
-          : isToday
-          ? "#FAFCFD"
-          : isWeekend
-          ? AC.bg
-          : "#fff",
-        outline: hovered ? `1.5px dashed ${AC.brand}` : "none",
-        outlineOffset: -2,
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        overflowY: "auto",
-        transition: "background 120ms ease",
-      }}
-    >
-      {shifts.map((s) => {
-        const repLabel = s.rep_id ? repNameMap[s.rep_id] || repLabelDefault : repLabelDefault;
-        return <RepCellShiftCard key={s.id} shift={s} repLabel={repLabel} />;
-      })}
-      {shifts.length === 0 && addHref && (
-        <Link
-          href={addHref}
-          aria-label={`Add shift on ${iso}`}
-          style={{
-            flex: 1,
-            minHeight: 56,
-            borderRadius: 5,
-            border: `1px dashed ${AC.line}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: 0.6,
-            textDecoration: "none",
-          }}
-        >
-          <AGlyph name="plus" size={11} color={AC.faint} />
-        </Link>
-      )}
-    </div>
-  );
-}
-
-/**
- * The Reps view's compact card — a draggable wrapper around the shared
- * <ShiftCard> below. Time-of-day stays put; the parent cell's onDrop
- * decides which (rep, date) the shift moves to. Only `scheduled`
- * shifts are draggable.
- */
-function RepCellShiftCard({
-  shift,
-  repLabel,
-}: {
-  shift: ShiftRow;
-  repLabel: string;
-}) {
-  const [dragging, setDragging] = useState(false);
-  const isDraggable = shift.state === "scheduled";
-  return (
-    <div
-      draggable={isDraggable}
-      onDragStart={(e) => {
-        if (!isDraggable) {
-          e.preventDefault();
-          return;
-        }
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", shift.id);
-        setDragging(true);
-      }}
-      onDragEnd={() => setDragging(false)}
-      style={{
-        opacity: dragging ? 0.4 : 1,
-        cursor: isDraggable ? "grab" : "default",
-      }}
-      title={
-        isDraggable
-          ? "Drag to another rep or day to reassign"
-          : `${shift.state} — not draggable`
-      }
-    >
-      <ShiftCard shift={shift} repLabel={repLabel} />
-    </div>
-  );
-}
-
-// ─── Shared shift card ──────────────────────────────────────────────────
-
-function ShiftCard({ shift, repLabel }: { shift: ShiftRow; repLabel: string }) {
-  const c = shift.customers;
-  const color = c?.color || "#888";
-  const customerName = c?.name || "Unknown customer";
-  const stateColors: Record<string, string> = {
-    "in-progress": AC.brand,
-    complete: AC.ok,
-    late: AC.danger,
-    scheduled: color,
-  };
-  const accent = stateColors[shift.state] || color;
-  const isComplete = shift.state === "complete";
-
-  return (
-    <Link
-      href={shiftHref(shift)}
-      title={`${repLabel} · ${customerName} · ${shift.state}`}
-      style={{
-        background: `${color}15`,
-        borderLeft: `3px solid ${accent}`,
-        borderRadius: 5,
-        padding: "5px 7px",
-        textDecoration: "none",
-        display: "block",
-        opacity: isComplete ? 0.7 : 1,
-      }}
-    >
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 10.5,
-          fontWeight: 700,
-          color: AC.ink,
-          letterSpacing: -0.1,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          textDecoration: isComplete ? "line-through" : "none",
-        }}
-      >
-        {repLabel}
-      </div>
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 10.5,
-          fontWeight: 600,
-          color: color,
-          letterSpacing: -0.1,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          marginTop: 1,
-          textDecoration: isComplete ? "line-through" : "none",
-        }}
-      >
-        {customerName}
-      </div>
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 10,
-          color: AC.ink2,
-          fontWeight: 500,
-          marginTop: 2,
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          flexWrap: "wrap",
-        }}
-      >
-        {formatTime(shift.start_time, { compact: true })}–
-        {formatTime(shift.end_time, { compact: true })}
-        {shift.state !== "scheduled" && (
-          <span
-            style={{
-              padding: "0 5px",
-              borderRadius: 99,
-              background: `${accent}22`,
-              color: accent,
-              fontSize: 9,
-              fontWeight: 700,
-              letterSpacing: 0.3,
-              textTransform: "uppercase",
-            }}
-          >
-            {shift.state}
-          </span>
-        )}
-      </div>
-    </Link>
-  );
-}

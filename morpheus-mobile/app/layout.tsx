@@ -4,6 +4,7 @@ import "./globals.css";
 import { MenuShell } from "@/components/MenuShell";
 import { AuthGate } from "@/components/AuthGate";
 import { RequestResolutionWatcher } from "@/components/RequestResolutionWatcher";
+import { PendingRequestPill } from "@/components/PendingRequestPill";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -54,6 +55,12 @@ export default function RootLayout({
                 nothing while idle. Mounted at layout level so banners
                 show on whatever page the rep is on. */}
             <RequestResolutionWatcher />
+            {/* Tiny floating "N pending — awaiting approval" reminder
+                that follows the rep across every page until the admin
+                approves or declines. Together with the watcher above
+                this gives full closure: a pill while waiting + a
+                banner when the result lands. */}
+            <PendingRequestPill />
           </AuthGate>
         </div>
       </body>
