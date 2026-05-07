@@ -175,11 +175,20 @@ export function RequestResolutionWatcher() {
           }
           // Already shown / dismissed? Skip.
           if (seenRef.current[evt.id]) return;
-          // Was this for a customer we recently had pending?
+          // Was this for a customer we ever had pending in this session?
+          //
+          // The earlier 5-minute grace gate was the wrong model: if an
+          // admin took longer than five minutes to approve, the
+          // banner stopped firing because the trackedRef stamp from
+          // app-mount had aged out. That made the "I just got
+          // approved!" payoff disappear for any request that wasn't
+          // resolved instantly.
+          //
+          // We just need "is this one of MY requests?" — trackedRef
+          // is in-memory + bounded by the customers a rep ever asked
+          // for in this session, so leaving entries forever is fine.
           if (!evt.customer_id) return;
-          const lastSeen = trackedRef.current.get(evt.customer_id);
-          if (!lastSeen) return;
-          if (Date.now() - lastSeen > RECENT_GRACE_MS) return;
+          if (!trackedRef.current.has(evt.customer_id)) return;
 
           // Mark as seen immediately so a duplicate INSERT (very rare)
           // doesn't double-toast.

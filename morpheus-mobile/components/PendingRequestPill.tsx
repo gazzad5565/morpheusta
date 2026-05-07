@@ -30,6 +30,7 @@ import {
   listRequestedShifts,
   subscribeRequestedShifts,
 } from "@/lib/shift-store";
+import { listMyShiftsToday, subscribeShifts } from "@/lib/shifts-store";
 
 export function PendingRequestPill() {
   const router = useRouter();
@@ -40,16 +41,32 @@ export function PendingRequestPill() {
     let cancelled = false;
     setMounted(true);
 
+    // Compute the EFFECTIVE pending count. Two queries in parallel:
+    //   1. Pending requests (the source of truth from requested_shifts)
+    //   2. My shifts today (so we can mask requests whose approved
+    //      shift has already landed for me — a Supabase realtime
+    //      DELETE on requested_shifts can lag behind the shifts
+    //      INSERT by tens of seconds, so without this cross-check
+    //      the pill stayed visible for ~60s after approval until the
+    //      polling fallback caught up).
     const refresh = async () => {
-      const rows = await listRequestedShifts();
-      if (!cancelled) setCount(rows.length);
+      const [pending, myShifts] = await Promise.all([
+        listRequestedShifts(),
+        listMyShiftsToday(),
+      ]);
+      if (cancelled) return;
+      const myCustomerIds = new Set(myShifts.map((s) => s.id));
+      const stillPending = pending.filter((p) => !myCustomerIds.has(p.id));
+      setCount(stillPending.length);
     };
     void refresh();
 
-    // Realtime + visibility refetch + 60s poll. Mirrors the defence-in-
-    // depth pattern on the admin Sidebar's pending-request badge so
-    // the count can't silently drift if the WebSocket drops.
-    const unsub = subscribeRequestedShifts(refresh);
+    // Realtime + visibility refetch + 60s poll. Subscribe to BOTH
+    // requested_shifts AND shifts so the pill clears the moment the
+    // approval-side INSERT lands, even if the requested_shifts DELETE
+    // event hasn't propagated yet.
+    const unsubRequests = subscribeRequestedShifts(refresh);
+    const unsubShifts = subscribeShifts(refresh);
     const onVis = () => {
       if (document.visibilityState === "visible") void refresh();
     };
@@ -57,7 +74,8 @@ export function PendingRequestPill() {
     const poll = window.setInterval(refresh, 60_000);
     return () => {
       cancelled = true;
-      unsub();
+      unsubRequests();
+      unsubShifts();
       document.removeEventListener("visibilitychange", onVis);
       window.clearInterval(poll);
     };

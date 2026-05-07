@@ -1284,11 +1284,33 @@ function DayColumn({
         if (h) onCommit(h.dayISO, h.startMin, h.endMin);
         else onEndDrag();
       }}
+      onClick={(e) => {
+        // Click-to-add: tapping an empty spot in a day column routes
+        // to /schedule/new with the date AND start time pre-filled
+        // to wherever the user clicked (snapped to 30 min). Skip
+        // when the click landed on a child element (a card, the
+        // overflow pill, or the bottom "+ Add" affordance) — those
+        // have their own handlers.
+        if (e.target !== e.currentTarget) return;
+        if (!colRef.current) return;
+        const rect = colRef.current.getBoundingClientRect();
+        const yPx = e.clientY - rect.top;
+        // Ignore clicks below the slot grid (where the bottom Add pill lives).
+        if (yPx > DAY_TOTAL_PX - 30) return;
+        const startMin = pxToSnappedMin(yPx);
+        const qs = new URLSearchParams({
+          date: iso,
+          start: minToTime(startMin),
+          ...(customerScopeForAdd ? { customer: customerScopeForAdd } : {}),
+        });
+        window.location.assign(`/schedule/new?${qs.toString()}`);
+      }}
       style={{
         position: "relative",
         height: DAY_TOTAL_PX,
         borderLeft: `1px solid ${AC.lineDim}`,
         background: isToday ? "#FAFCFD" : isWeekend ? AC.bg : "#fff",
+        cursor: drag ? "default" : "copy",
       }}
     >
       {/* Slot grid lines (decorative — actual hit-testing uses pixel math) */}

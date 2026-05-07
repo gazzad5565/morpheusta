@@ -10,7 +10,11 @@ import { Glyph, formatTime } from "@/components/Glyph";
 import { getUser } from "@/lib/auth";
 import { logEvent } from "@/lib/events-store";
 import { drainEventQueue } from "@/lib/event-queue";
-import { listMyShiftsToday, subscribeShifts } from "@/lib/shifts-store";
+import {
+  listMyShiftsToday,
+  setShiftTravellingState,
+  subscribeShifts,
+} from "@/lib/shifts-store";
 import { getMyProfile } from "@/lib/profiles-store";
 import { listLibraryFiles } from "@/lib/library-store";
 
@@ -86,7 +90,12 @@ export default function DashboardPage() {
       /* SSR or storage blocked */
     }
   }, []);
-  // Wrap setter so every transition writes to storage AND fires an event.
+  // Wrap setter so every transition writes to storage, fires an audit
+  // event, AND flips the next-up shift's state column so the admin
+  // Live Ops "Travelling" tab can surface this rep mid-route. We pick
+  // "next up" as the earliest scheduled shift today; if none exists
+  // (rep already checked into everything, or has nothing scheduled)
+  // the state flip is a quiet no-op handled inside the store helper.
   const setTravellingSince = (v: number | null) => {
     const wasTravelling = travellingSince !== null;
     setTravellingSinceRaw(v);
@@ -99,17 +108,42 @@ export default function DashboardPage() {
     } catch {
       /* noop */
     }
+    // Find the shift the rep is travelling TO. We can't depend on
+    // refetching here (state might be stale by the next render), so
+    // we read straight off the current `shifts` snapshot. Earliest
+    // scheduled = next destination.
+    const nextScheduled = [...shifts]
+      .filter((s) => s.state === "scheduled")
+      .sort((a, b) => (a.start || "").localeCompare(b.start || ""))[0];
+
     if (v !== null && !wasTravelling) {
       void logEvent({
         event_type: "shift.travel_started",
         message: "Started travelling",
+        ...(nextScheduled?.realId
+          ? { shift_id: nextScheduled.realId, customer_id: nextScheduled.id }
+          : {}),
       });
+      if (nextScheduled?.realId) {
+        void setShiftTravellingState(nextScheduled.realId, true);
+      }
     } else if (v === null && wasTravelling && travellingSince) {
+      // On arrival we flip the FIRST shift currently in 'travelling'
+      // back to 'scheduled' (the rep can only be travelling to one
+      // place at a time, so this is unambiguous). Use the snapshot
+      // we have rather than refetching to avoid a race.
+      const travellingShift = shifts.find((s) => s.state === "travelling");
       void logEvent({
         event_type: "shift.travel_ended",
         message: "Arrived",
         meta: { elapsed_sec: Math.floor((Date.now() - travellingSince) / 1000) },
+        ...(travellingShift?.realId
+          ? { shift_id: travellingShift.realId, customer_id: travellingShift.id }
+          : {}),
       });
+      if (travellingShift?.realId) {
+        void setShiftTravellingState(travellingShift.realId, false);
+      }
     }
   };
 
@@ -233,23 +267,31 @@ export default function DashboardPage() {
               )}
             </div>
           </div>
+          {/* View all — primary action on the dashboard, was a tiny
+              text link that disappeared next to the big shift count.
+              Now a proper pill-style button that's actually tappable
+              on a phone. */}
           <Link
             href="/shifts"
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: 4,
-              padding: "6px 8px",
+              gap: 6,
+              padding: "9px 14px",
+              borderRadius: 10,
+              background: MC.brandTint,
+              border: `1px solid ${MC.brand}33`,
               fontFamily: MC.font,
-              fontSize: 13,
-              fontWeight: 600,
+              fontSize: 13.5,
+              fontWeight: 700,
               color: MC.brandDeep,
               letterSpacing: -0.1,
               textDecoration: "none",
+              boxShadow: `0 2px 6px ${MC.brand}22`,
             }}
           >
             View all
-            <Glyph name="chev-r" size={14} color={MC.brandDeep} />
+            <Glyph name="chev-r" size={15} color={MC.brandDeep} strokeWidth={2.4} />
           </Link>
         </div>
         {/* Progress bar: green = complete, brand = in-progress, grey = scheduled. */}

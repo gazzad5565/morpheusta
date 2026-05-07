@@ -27,6 +27,7 @@ import { RepAvatar } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { listShifts, subscribeShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import { countTasksForCustomers } from "@/lib/tasks-store";
 import {
   listPendingRequests,
   subscribeRequests,
@@ -75,13 +76,10 @@ interface RepLite {
   initials: string;
 }
 
-// "Travelling" used to live here too but no code path anywhere ever
-// writes state='travelling' (Phase 4 work). Same dead-tab bug as the
-// old "Issues" / late state. Drop it until the mobile actually sets
-// that state — at which point we re-add the tab in one place.
 const TABS = [
   "All",
   "In progress",
+  "Travelling",
   "On break",
   "Unassigned",
   "Requested",
@@ -99,17 +97,21 @@ export function ShiftsList() {
   const [rows, setRows] = useState<ShiftRow[]>([]);
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   const [reps, setReps] = useState<Record<string, RepLite>>({});
+  // Live customer-task counts. The shifts.tasks_total column is set
+  // once at shift-creation time (or auto-derived from customer_tasks
+  // on creation) and never updated after — so when a manager adds a
+  // new task to a customer the row stays stuck on the old number.
+  // Recompute the count per visible customer and feed it to the
+  // progress bar so this number is always honest.
+  const [taskCountByCustomer, setTaskCountByCustomer] = useState<
+    Map<string, number>
+  >(() => new Map());
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<string>("All");
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      // Don't filter profiles by role here — we use this map purely to
-      // resolve rep_id → name on each row, and a manager who's checking
-      // in on the mobile app while testing would silently render as
-      // "Unassigned" otherwise. Use role='rep' only when picking a rep
-      // for a NEW shift / assignment.
       const [shiftRows, profileRows, requestRows] = await Promise.all([
         listShifts(),
         listProfiles(),
@@ -128,6 +130,19 @@ export function ShiftsList() {
       setRows(shiftRows);
       setRequests(requestRows);
       setLoading(false);
+
+      // Refresh the per-customer task counts off the visible shifts.
+      // This is N+1-safe — countTasksForCustomers does two batched
+      // queries regardless of customer count.
+      const customerIds = Array.from(
+        new Set(shiftRows.map((s) => s.customer_id).filter(Boolean))
+      );
+      if (customerIds.length > 0) {
+        const counts = await countTasksForCustomers(customerIds);
+        if (!cancelled) setTaskCountByCustomer(counts);
+      } else {
+        if (!cancelled) setTaskCountByCustomer(new Map());
+      }
     };
     load();
     // Realtime + visibility refetch on BOTH shifts and requested_shifts
@@ -203,11 +218,15 @@ export function ShiftsList() {
     const inProgress = rows.filter(
       (s) => effectiveState(s) === "in-progress"
     ).length;
+    const travelling = rows.filter(
+      (s) => effectiveState(s) === "travelling"
+    ).length;
     const onBreak = rows.filter((s) => effectiveState(s) === "on-break").length;
     const unassigned = rows.filter((s) => !s.rep_id).length;
     return {
       All: totalShifts + dedupedRequests.length,
       "In progress": inProgress,
+      Travelling: travelling,
       "On break": onBreak,
       Unassigned: unassigned,
       Requested: dedupedRequests.length,
@@ -291,6 +310,7 @@ export function ShiftsList() {
                 key={`s-${r.shift.id}`}
                 row={r.shift}
                 rep={r.shift.rep_id ? reps[r.shift.rep_id] : undefined}
+                liveTaskTotal={taskCountByCustomer.get(r.shift.customer_id)}
               />
             ) : (
               <RequestRowView key={`r-${r.request.id}`} request={r.request} />
@@ -342,9 +362,16 @@ function ShiftRowView({
   row,
   rep,
   header,
+  liveTaskTotal,
 }: {
   row?: ShiftRow;
   rep?: RepLite;
+  /** Live count of customer_tasks rows for this shift's customer
+   *  (specific + universal). Falls back to row.tasks_total when
+   *  unknown. The shifts.tasks_total column is set once at creation
+   *  and never refreshed; this prop keeps the progress bar honest
+   *  when a customer's task list grows after the shift was scheduled. */
+  liveTaskTotal?: number;
   header?: boolean;
 }) {
   if (header) {
@@ -520,7 +547,10 @@ function ShiftRowView({
         </span>
       </div>
 
-      <TaskBar done={row.tasks_done} total={row.tasks_total} />
+      <TaskBar
+        done={row.tasks_done}
+        total={liveTaskTotal ?? row.tasks_total}
+      />
 
       <div
         style={{

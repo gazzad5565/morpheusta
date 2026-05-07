@@ -89,8 +89,20 @@ export default function ShiftsListPage() {
     };
   }, []);
 
-  const onCheckIn = (shiftId: string) =>
+  // Track which shift the user just tapped Check-in / Resume on so we
+  // can show "Opening…" feedback immediately. The destination page
+  // does its own loading once it mounts, but on a slow network the
+  // gap between tap and that page rendering can be a couple of
+  // seconds — without this the button feels dead.
+  const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
+  const onCheckIn = (shiftId: string) => {
+    setNavigatingTo(shiftId);
     router.push(`/check-in?shift=${shiftId}`);
+  };
+  const onResumeShift = (shiftId: string) => {
+    setNavigatingTo(shiftId);
+    router.push("/active");
+  };
 
   const onClaim = async (shiftRealId: string) => {
     setClaiming(shiftRealId);
@@ -196,6 +208,32 @@ export default function ShiftsListPage() {
         </Link>
       </div>
 
+      {/* Pending requests pinned to the top — moved out of the
+          "Unscheduled · available" section because reps want to see
+          at a glance "what am I waiting on?" before scanning today's
+          schedule. Renders nothing when there are no pending
+          requests so the section disappears cleanly. */}
+      {requestedNonDup.length > 0 && (
+        <>
+          <SectionLabel count={requestedNonDup.length}>
+            Awaiting approval
+          </SectionLabel>
+          <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {requestedNonDup.map((s) => (
+              <ShiftRow
+                key={s.id}
+                shift={s}
+                expanded={false}
+                unscheduled
+                requested
+                requestedAt={s.requestedAt}
+                onRemove={() => onRemoveRequested(s.id)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
       <SectionLabel count={mine.length}>Scheduled for me</SectionLabel>
 
       <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -210,48 +248,36 @@ export default function ShiftsListPage() {
               shift={s}
               state={s.state}
               expanded={expandedId === s.realId}
+              navigating={navigatingTo === s.realId}
               onToggle={() =>
                 setExpandedId(expandedId === s.realId ? null : s.realId)
               }
               onCheckIn={() => onCheckIn(s.realId)}
-              onResume={() => router.push("/active")}
+              onResume={() => onResumeShift(s.realId)}
             />
           ))
         )}
       </div>
 
-      <SectionLabel count={unassigned.length + requestedNonDup.length}>
+      <SectionLabel count={unassigned.length}>
         Unscheduled · available
       </SectionLabel>
 
       <div style={{ padding: "0 16px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {!loaded ? null : unassigned.length === 0 && requestedNonDup.length === 0 ? (
+        {!loaded ? null : unassigned.length === 0 ? (
           <EmptyState text="Nothing available right now." />
         ) : (
-          <>
-            {unassigned.map((s) => (
-              <ShiftRow
-                key={s.realId}
-                shift={s}
-                expanded={false}
-                unscheduled
-                claimable
-                claiming={claiming === s.realId}
-                onClaim={() => onClaim(s.realId)}
-              />
-            ))}
-            {requestedNonDup.map((s) => (
-              <ShiftRow
-                key={s.id}
-                shift={s}
-                expanded={false}
-                unscheduled
-                requested
-                requestedAt={s.requestedAt}
-                onRemove={() => onRemoveRequested(s.id)}
-              />
-            ))}
-          </>
+          unassigned.map((s) => (
+            <ShiftRow
+              key={s.realId}
+              shift={s}
+              expanded={false}
+              unscheduled
+              claimable
+              claiming={claiming === s.realId}
+              onClaim={() => onClaim(s.realId)}
+            />
+          ))
         )}
       </div>
 
@@ -307,6 +333,7 @@ function ShiftRow({
   requestedAt,
   claimable,
   claiming,
+  navigating,
   onToggle,
   onCheckIn,
   onResume,
@@ -323,6 +350,8 @@ function ShiftRow({
   requestedAt?: number;
   claimable?: boolean;
   claiming?: boolean;
+  /** True while the parent is in flight routing to /check-in or /active for this shift. */
+  navigating?: boolean;
   onToggle?: () => void;
   onCheckIn?: () => void;
   onResume?: () => void;
@@ -597,7 +626,13 @@ function ShiftRow({
               <button
                 type="button"
                 onClick={onResume}
-                style={{ ...secondaryBtn, flex: 1.4 }}
+                disabled={navigating}
+                style={{
+                  ...secondaryBtn,
+                  flex: 1.4,
+                  opacity: navigating ? 0.7 : 1,
+                  cursor: navigating ? "wait" : "pointer",
+                }}
               >
                 <span
                   style={{
@@ -612,9 +647,15 @@ function ShiftRow({
                     marginRight: 6,
                   }}
                 >
-                  <Glyph name="arrow-r" size={14} color="#fff" strokeWidth={2.2} />
+                  {navigating ? (
+                    <NavSpinner />
+                  ) : (
+                    <Glyph name="arrow-r" size={14} color="#fff" strokeWidth={2.2} />
+                  )}
                 </span>
-                <span style={{ color: MC.brandDeep, fontWeight: 600 }}>Resume shift</span>
+                <span style={{ color: MC.brandDeep, fontWeight: 600 }}>
+                  {navigating ? "Opening…" : "Resume shift"}
+                </span>
               </button>
             </div>
           ) : (
@@ -626,7 +667,13 @@ function ShiftRow({
               <button
                 type="button"
                 onClick={onCheckIn}
-                style={{ ...secondaryBtn, flex: 1.4 }}
+                disabled={navigating}
+                style={{
+                  ...secondaryBtn,
+                  flex: 1.4,
+                  opacity: navigating ? 0.7 : 1,
+                  cursor: navigating ? "wait" : "pointer",
+                }}
               >
                 <span
                   style={{
@@ -641,15 +688,45 @@ function ShiftRow({
                     marginRight: 6,
                   }}
                 >
-                  <Glyph name="log" size={14} color="#fff" strokeWidth={2.2} />
+                  {navigating ? (
+                    <NavSpinner />
+                  ) : (
+                    <Glyph name="log" size={14} color="#fff" strokeWidth={2.2} />
+                  )}
                 </span>
-                <span style={{ color: MC.brandDeep, fontWeight: 600 }}>Check in</span>
+                <span style={{ color: MC.brandDeep, fontWeight: 600 }}>
+                  {navigating ? "Opening…" : "Check in"}
+                </span>
               </button>
             </div>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+/** Tiny inline spinner used inside the Check-in / Resume buttons while
+ *  the parent is in flight routing to the destination page. The
+ *  destination does its own loading state once it mounts, but on a
+ *  slow network the gap between tap and that page rendering can be a
+ *  couple of seconds — without this the button just sits there. */
+function NavSpinner() {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 12,
+        height: 12,
+        borderRadius: 99,
+        border: "2px solid rgba(255,255,255,.4)",
+        borderTopColor: "#fff",
+        animation: "shift-spin 0.7s linear infinite",
+        display: "inline-block",
+      }}
+    >
+      <style>{`@keyframes shift-spin{to{transform:rotate(360deg)}}`}</style>
+    </span>
   );
 }
 

@@ -431,6 +431,45 @@ export async function setShiftBreakState(
 }
 
 /**
+ * Flip a scheduled shift's state to/from 'travelling'.
+ *
+ * Called from the homepage Travelling toggle so the admin's Live Ops
+ * "Travelling" tab actually surfaces the rep's en-route status. We
+ * gate the transition the same way setShiftBreakState does:
+ *   travelling=true   → state must be 'scheduled' to flip to 'travelling'
+ *   travelling=false  → state must be 'travelling' to flip back to 'scheduled'
+ *
+ * Any other state (in-progress, complete, late, on-break) is left
+ * alone so a stale travel-ended event after check-in can't bump the
+ * shift back to scheduled.
+ */
+export async function setShiftTravellingState(
+  shiftId: string,
+  travelling: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { data: row } = await supabase
+    .from("shifts")
+    .select("state")
+    .eq("id", shiftId)
+    .maybeSingle();
+  const currentState = (row as { state?: string } | null)?.state || "";
+  const targetState = travelling ? "travelling" : "scheduled";
+  const requiredCurrent = travelling ? "scheduled" : "travelling";
+  if (currentState !== requiredCurrent) {
+    return { ok: true };
+  }
+  const { error } = await supabase
+    .from("shifts")
+    .update({ state: targetState })
+    .eq("id", shiftId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/**
  * Subscribe to realtime changes on the shifts table. The callback fires
  * on any insert/update/delete; the caller is expected to refetch its
  * own shape (listMyShiftsToday, etc).
