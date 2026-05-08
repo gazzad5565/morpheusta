@@ -1,7 +1,7 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`755e4a3`** (May 7, 2026). Late-session push covers calendar consistency, RESET wipe fix, dead-button cleanup, full QA test plan + Playwright scaffold, the `Combobox` rollout, mobile dashboard polish (welcome strip, all-done state, break-or-travel card, sticky footer), customer edit form rewrite for full CRUD, `LoadingBar` / `Spinner` / `Skeleton` primitives plumbed into the worst-offender pages, `/notify` stubbed out (was full of dead buttons), and a `qa-audit` skill at `~/.claude/skills/`. Working tree clean.
+> Latest commit: **`9b501d1`** (May 8, 2026). Today's session shipped the entire **multi-site customer** feature in one vertical slice: schema + migration + admin Sites tab + scheduling integration + mobile site display + site-aware geofence + head-office Overview card + per-site contacts (tap-to-call, email, access notes). Three follow-up migrations to run in Supabase before this is fully live — see "Migrations to run for May 8" below. Working tree clean.
 > Repo: https://github.com/gazzad5565/morpheusta · Live: https://morpheus-admin.vercel.app + https://morpheusta-khaki-omega.vercel.app · DB: Supabase project `otweltzwwhrvhtvaqsci`
 > **Don't ask the user for context — read this whole file first.** Section "Where things stand right now" (around line 100) is the canonical handover. The "Today's session — what shipped" sections list every commit by hash, newest day first. The "Top of the deferred list" tells you what to start on next.
 > If you make changes, update this file before you push. Phase 4 RLS is still the highest-priority open item; do not deploy to real users without it.
@@ -104,11 +104,21 @@ If you switch computers (or hand this project to a developer), this section is t
 
 ### Where things stand right now (handover for the next chat)
 
-**Last commit:** `c028b0a` — "Calendar popover via portal; Edit-future on /schedule/manage" (about to push the tasks/library consistency pass on top)
+**Last commit:** `9b501d1` — "Sites — per-site contact: name, phone, email, access notes" (May 8, 2026; multi-site customer feature shipped end-to-end)
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
 **Working end-to-end on real data — both apps build clean, all 31 admin routes + 15 mobile routes return 200, no mock fallbacks left in the rep flow.**
+
+#### Customers + sites (May 8 — new today)
+
+- **Multi-site model.** Customers have ≥1 site; each site holds its own address, lat/lng, geofence radius, contact (name/phone/email), and access notes. Schema: `customer_sites` with FK to `customers`, plus `shifts.site_id` FK with `ON DELETE SET NULL`.
+- **`/customers/[id]` Overview tab** — head-office card prominent (map + geofence + address + contact + access notes + Edit), additional-sites section listing the rest. Single-site customers see only the head-office card.
+- **`/customers/[id]` Sites tab** — full CRUD per site. SiteEditor is two-column: form with AddressAutocomplete + geofence slider + Contact section on the left, live map preview with geofence circle on the right.
+- **Schedule integration** — `/schedule/new` site picker only renders for customers with >1 active site (single-site auto-resolves invisibly). Customers with 0 sites show a hard-error blocking Submit. `/shifts/[id]/edit` mirrors the same pattern.
+- **Geofence** — `/check-in` and `/check-out` haversine target the **site**'s coords + radius, with fallback to legacy customer fields for pre-2026-05-08 rows.
+- **Mobile site display** — site name shown as a sublabel when not "Head office" on dashboard up-next, `/shifts` rows, `/active` header. Tap-to-call + email pills + access notes block on `/active`, on expanded `/shifts` rows, and on `/check-in` (right under the customer header so a rep who's off-site or late can call the contact in one tap).
+- **Audit trail** — `customer.site_added` / `_updated` / `_deactivated` / `_reactivated` / `_deleted` event types with labels and tones (delete=danger, deactivate/reactivate=warn).
 
 #### Admin (manager console)
 
@@ -250,6 +260,93 @@ Done as one push, in narrative order:
 
 Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`).
 
+### Today's session — what shipped (May 8, 2026)
+
+The whole day was one feature shipped end-to-end: **multi-site customers**.
+Earlier the system modelled every customer as a single location (one
+address, one geofence). Real customers — chains, multi-warehouse
+retailers, anything with more than one physical site — couldn't be
+modelled, so managers had been creating "Aria Cosmetics — Cape Town"
+and "Aria Cosmetics — Sea Point" as two separate customer records.
+Now the customer is the company; each customer has one or more
+**sites**; every shift pins to a specific site.
+
+Seven commits, in order:
+
+#### Stage 1A — schema + admin Sites tab (`6f98c48`)
+
+- New `customer_sites` table: `id uuid pk`, `customer_id text fk→customers`, `name`, `address`, `latitude`, `longitude`, `geofence_radius_m`, `active`, timestamps. Trigger keeps `updated_at` fresh. Realtime publication on. RLS matches the rest of the schema (permissive Phase-pre-4: any authenticated user, separate select/insert/update/delete policies).
+- `shifts.site_id` nullable FK with `ON DELETE SET NULL` + partial index.
+- Backfill: every existing customer becomes a "Main" site (renamed to "Head office" later in this session). Every existing shift's `site_id` is filled in to that backfilled site. Both backfills are NOT-EXISTS-guarded so re-runs are safe.
+- New `lib/sites-store.ts`: list / get / create / update / deactivate / reactivate / hard-delete. Hard-delete refuses if any shift references the site (suggests deactivate). Every action emits a `customer.site_*` audit event.
+- New `components/customers/SitesTab.tsx`: per-customer Sites tab on the customer detail page. SiteCard with map + geofence + per-site actions; SiteEditor with AddressAutocomplete + slider (extended later this session into a two-column layout with a live map preview).
+- `createCustomer` auto-creates a Head-office site so single-site customers never see a "now add a site" step.
+- Customer detail's old `Address & geofence` tab and the dead `AddressTab` component (~180 LOC) deleted.
+- Four new event types — `customer.site_added` / `_updated` / `_deactivated` / `_reactivated` / `_deleted` — with labels in `EVENT_LABEL` and tones in `eventTone()`.
+
+#### Stage 1B + 1C — shifts know their site, geofence uses site coords (`4a155f1`)
+
+- Admin `ShiftRow` + mobile `ShiftWithMeta` types both gain a joined `site` block. Every `select(...)` for shifts pulls the site row.
+- `/schedule/new`: site picker only renders for customers with >1 active site (single-site auto-resolves invisibly). Customers with 0 active sites surface a hard-error banner blocking Submit. The cartesian (dates × customers × reps) writes `site_id` per row.
+- `/shifts/[id]/edit`: same picker pattern; ShiftPatch + sibling-create both pass `site_id`.
+- `/schedule` calendar popover + `/shifts/[id]` detail header: show site name + address when it's not the default ("Head office" after this session's rename).
+- Mobile dashboard up-next card, `/shifts` list rows, `/active` header all show the site name as a sublabel when not default.
+- `/check-in` + `/check-out` `offsiteInfo` memo prefers `shift.siteLat` / `siteLng` / `siteGeofenceM`; falls back to legacy customer fields for pre-2026-05-08 rows. The haversine target is the **site**, so multi-site customers get the right geofence per shift.
+
+#### Audit fixes round 1 (`6b6224d`)
+
+Self-review found four issues:
+
+- `updateSite` / `deactivateSite` / `deleteSite` weren't firing audit events. Each now reads name + customer_id before mutating, fires the right `event_type`, activity feed gets a row per change.
+- `reactivateSite` was firing the generic `site_updated` instead of a dedicated event. Added `customer.site_reactivated` (label + warn tone).
+- Mobile `DashboardMap` was pinning shifts at the **customer's** lat/lng — two shifts at different sites of the same customer would have collapsed onto one pin. Now prefers `shift.siteLat`/`Lng`; falls back to customer coords for legacy rows. Two shifts at the same customer but different sites correctly drop two separate pins.
+- Mobile `shifts-store` had triple-union type artifacts (`Array<ShiftWithMeta|ShiftWithMeta|ShiftWithMeta>`) left over from a perl bulk-replace during the rollout. Collapsed.
+- `customer.site_deleted` added to the **danger** tone group in `eventTone()` so deletes show red in the activity feed.
+
+#### Migration FK type fix (`8e13ce5`)
+
+- The first version of the customer_sites migration declared `customer_id uuid`. `customers.id` is actually a slug-style **text** key (e.g. `aria-cosmetics-x9f2`). Supabase rejected the FK with `42804: incompatible types: uuid and text`.
+- Changed to `customer_id text` (matches `customer_tasks`, `library_files`, `shifts`, every other FK to customers).
+- Whole migration wrapped in `BEGIN; … COMMIT;` so a partial apply can never leave the schema half-broken.
+- Realtime `ALTER PUBLICATION supabase_realtime ADD TABLE` guarded by a `pg_publication_tables` check so re-running doesn't error with "relation already member".
+
+#### Migration RLS posture aligned (`54ba85f`)
+
+- The first version had stricter manager-only writes via `profiles.role = 'manager'`. That diverged from the rest of the schema (`customer_tasks`, `custom_fields`, `library_files` are all permissive `TO authenticated USING (true) WITH CHECK (true)` until Phase 4 tightens everything in one pass).
+- Aligned: split into `customer_sites_select` / `_insert` / `_update` / `_delete` policies, all permissive for authenticated users. Phase 4 will tighten them along with every other table.
+
+#### Head office Overview + live map preview + rename "Main" → "Head office" (`48d20a9`)
+
+Three product feedback items in one push:
+
+- **Overview tab is rich again.** Head office (the customer's primary site) renders prominently in its own card: map with live geofence circle, address, coords, geofence radius, plus a one-click "Edit" button that jumps to the Sites tab. Below, an "Additional sites" list appears only when the customer has more than one site — each row links to Sites for full CRUD. Single-site customers see only the head-office card and no noise.
+- **SiteEditor is now a two-column layout.** Form on the left (name, address, geofence slider, contact section), live map preview on the right. Map updates as the manager picks an address from the autocomplete OR slides the geofence radius — geofence circle shown by default. The AddressAutocomplete is the same component `/customers/new` uses, so the type-to-search-then-pick flow is identical and the geocode-on-save fallback still kicks in if the manager skips the suggestions.
+- **Auto-seeded site name renamed** from "Main" to "Head office" (the term Gary actually uses). Schema migration `2026_05_08_customer_sites_head_office.sql` renames any row still named "Main". The "show site only when not <default>" heuristic in 5 places (admin `/schedule` popover + `/shifts/[id]` header + mobile dashboard up-next + `/shifts` list rows + `/active` header) updated to compare against "Head office".
+
+#### Per-site contact details (`9b501d1`)
+
+- Migration `2026_05_08_customer_sites_contact.sql`: 4 nullable text columns added to `customer_sites` — `contact_name`, `contact_phone`, `contact_email`, `notes`. Idempotent.
+- `lib/sites-store.ts` types extended (CustomerSite + NewSite + SitePatch).
+- Mobile `ShiftSiteFields` gained `siteContactName` / `siteContactPhone` / `siteContactEmail` / `siteNotes`. Every shift `select()` (admin + mobile) pulls the contact columns.
+- Admin SiteEditor adds a "Contact (optional)" section: name + phone (`type=tel`) + email (`type=email`) + access notes textarea.
+- Admin SiteCard renders a contact block (tap-to-call/mailto in admin too) + an amber "Access notes" call-out.
+- Admin Overview head-office card mirrors the same contact + notes block.
+- Mobile `/active` shift screen: cyan "Call · phone" pill (tap-to-call) + Email button + amber Access notes block under the customer header.
+- Mobile `/shifts` list expanded row: "Call site · contact name" tap-to-call pill + access notes block.
+- Mobile `/check-in`: Call pill + access notes shown right under the customer header so a rep who's off-site or running late can call the contact in one tap to explain.
+
+#### Migrations to run for May 8
+
+Three new files in `db/migrations/` — run in order in the Supabase SQL editor before the May 8 features hit prod:
+
+1. `2026_05_08_customer_sites.sql` — creates the table, FK on shifts, backfill, trigger, RLS, realtime
+2. `2026_05_08_customer_sites_head_office.sql` — renames the auto-seeded `Main` rows to `Head office`
+3. `2026_05_08_customer_sites_contact.sql` — adds the 4 contact columns
+
+All three are idempotent and wrapped in `BEGIN; … COMMIT;` so failures roll back cleanly.
+
+Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`).
+
 ### Today's session — what shipped (May 6, 2026)
 
 Big day. Roughly in order:
@@ -355,17 +452,24 @@ Schema lives on the shared Supabase project, code lives on GitHub. Just clone + 
 | `2026_05_06_shift_task_completions.sql` | Per-shift task completion log (which tasks the rep ticked off, when) |
 | `2026_05_06_shifts_check_out_at.sql` | Adds `shifts.check_out_at` column + backfills from events log |
 | `2026_05_06_shifts_indexes.sql` | Hot-path indexes on shifts + requested_shifts (perf — was missing) |
+| `2026_05_07_custom_fields_organisation.sql` | Extends `custom_fields.applies_to` CHECK to include `'organisation'` |
+| `2026_05_07_shifts_series_id.sql` | Nullable `shifts.series_id uuid` + partial index for grouped series edits |
+| `2026_05_08_customer_sites.sql` | **NEW** — `customer_sites` table + `shifts.site_id` FK + backfill + RLS + realtime |
+| `2026_05_08_customer_sites_head_office.sql` | **NEW** — renames auto-seeded `Main` rows to `Head office` |
+| `2026_05_08_customer_sites_contact.sql` | **NEW** — adds `contact_name` / `contact_phone` / `contact_email` / `notes` columns |
 
-**Top of the deferred list — pick any one and run with it tomorrow:**
+**Top of the deferred list — pick any one and run with it next session:**
 
-1. **Phase 4 RLS — security debt** ⚠️ HIGHEST PRIORITY before opening to real users. Every table is currently `TO authenticated USING (true)`. Reps and managers have the same DB write powers; the apps gate by role at the UI but the DB doesn't. A motivated rep could `curl` Supabase directly and modify customers / shifts / tasks / library files / app_settings / profiles. The path: write a single coordinated migration that uses a `is_manager()` SECURITY DEFINER helper and rewrites every table's policies. Test in a staging Supabase first. Note: `profiles` UPDATE was deliberately opened for promote/demote — narrow that too.
-2. **Capacitor wrap** for proper background GPS + push notifications. Browsers don't expose persistent background geolocation, so the rep app can only track location while `/active` is foregrounded. Wrapping the existing React app in Capacitor (1-2 weeks) gives: real background location, push notifications, App Store / Play Store presence. The codebase doesn't change much — replace `navigator.geolocation` calls with `@capacitor/geolocation` (same API), plus shell config + permission requests.
-3. **Custom report builder.** The 3 fixed reports (Operations / Rep performance / Timesheet) are good but the user wanted "users can build their own". Picture: a builder UI where a manager picks metrics, dimensions, filters, and a chart type, then saves. Multi-week project — needs builder UI + query AST + saved-report storage + per-user permissions on saves.
-4. **Background sweep (`pg_cron`).** Today `sweepStaleShifts()` only runs when an admin opens the Live Ops home or focuses the tab. If no admin opens for several days, stale shifts and orphan rep_locations rows accumulate. Either a Vercel Cron route hitting `/api/sweep` or a Postgres `pg_cron` job (cleaner). 1-hour task.
-5. **Error monitoring.** Drop in Sentry or Vercel Analytics before user count grows past ~10. You're flying blind on prod errors right now. ~30 minutes of work, saves a lot of guessing.
-6. **Push notifications via Web Push.** Service worker + VAPID setup. Works on Chrome/Firefox/Safari 16+. Cleaner alternative to Capacitor if iOS install isn't a priority. ~1 day of work.
-7. **Email confirmation** turned back on for production self-signups. Admin-created users are already auto-confirmed.
-8. **Tests.** No tests yet — at minimum smoke tests for auth + the critical CRUD paths and the check-in / check-out flow.
+1. **Cancellation / unable-to-attend flow** ⚠️ NEXT FEATURE. Already designed in the May 8 plan: shifts gain an `attention` overlay column (null | 'unable_to_attend' | 'no_show' | …); rep gets an "I can't make it" link on `/active` and `/shifts` rows that opens a reason picker; Live Ops gets a "Needs action" tab with Reassign / Release / Acknowledge / Cancel buttons; full audit via `shift_events`. ~3 commits, no new external dependencies. Picks up where the Sites push left off.
+2. **Real routing + traffic** ⚠️ THE BIG ONE. Server-proxied Google Routes API for ETAs + optimization. Mobile `/route` page with deep links to Google Maps for actual nav. Risk pills per leg ("Leave by 13:50"). Site-aware (already works post-May-8 since shifts have site coords). Cap spending with per-rep daily quotas. ~$10/month at full scale. 3 commits to ship the foundation; Google API key wired later as a flip-on.
+3. **Phase 4 RLS — security debt** ⚠️ HIGHEST PRIORITY before opening to real users. Every table is currently `TO authenticated USING (true)`. Reps and managers have the same DB write powers; the apps gate by role at the UI but the DB doesn't. A motivated rep could `curl` Supabase directly and modify customers / shifts / tasks / library files / app_settings / profiles. The path: write a single coordinated migration that uses an `is_manager()` SECURITY DEFINER helper and rewrites every table's policies. `customer_sites` already follows the permissive Phase-pre-4 pattern so it'll tighten alongside everything else. Test in a staging Supabase first. Note: `profiles` UPDATE was deliberately opened for promote/demote — narrow that too.
+4. **Capacitor wrap** for proper background GPS + push notifications. Browsers don't expose persistent background geolocation, so the rep app can only track location while `/active` is foregrounded. Wrapping the existing React app in Capacitor (1-2 weeks) gives: real background location, push notifications, App Store / Play Store presence. The codebase doesn't change much — replace `navigator.geolocation` calls with `@capacitor/geolocation` (same API), plus shell config + permission requests.
+5. **Custom report builder.** The 3 fixed reports (Operations / Rep performance / Timesheet) are good but the user wanted "users can build their own". Picture: a builder UI where a manager picks metrics, dimensions, filters, and a chart type, then saves. Multi-week project — needs builder UI + query AST + saved-report storage + per-user permissions on saves.
+6. **Background sweep (`pg_cron`).** Today `sweepStaleShifts()` only runs when an admin opens the Live Ops home or focuses the tab. If no admin opens for several days, stale shifts and orphan rep_locations rows accumulate. Either a Vercel Cron route hitting `/api/sweep` or a Postgres `pg_cron` job (cleaner). 1-hour task.
+7. **Error monitoring.** Drop in Sentry or Vercel Analytics before user count grows past ~10. You're flying blind on prod errors right now. ~30 minutes of work, saves a lot of guessing.
+8. **Push notifications via Web Push.** Service worker + VAPID setup. Works on Chrome/Firefox/Safari 16+. Cleaner alternative to Capacitor if iOS install isn't a priority. ~1 day of work.
+9. **Email confirmation** turned back on for production self-signups. Admin-created users are already auto-confirmed.
+10. **Tests.** Skeleton already in `qa/` (May 7). Run the Playwright suite against a non-prod Supabase project (needs you to create one + seed an admin/rep user) and start filling in the high-priority spec files from `qa/QA_PLAN.md`.
 
 **Smaller cleanups that didn't make the cut today:**
 - 8 `deriveInitials` definitions still scattered across pages — dedupe to `initialsFromNameOrEmail` from `lib/format.ts` next time you touch each file. Same for 3 `formatTimeRange` copies. Functionally equivalent; just maintenance.
