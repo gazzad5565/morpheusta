@@ -3,16 +3,19 @@
 /**
  * DashboardMap — real MapLibre map for the rep's "today's route" card.
  *
- * - Plots a pin per shift the rep has today (using the customer's
- *   latitude/longitude from the customers table).
+ * - Plots one pin per shift the rep has today using the SHIFT'S SITE
+ *   coordinates (post 2026-05-08 sites rollout). Two shifts at the
+ *   same customer but different sites pin in two different places.
+ * - Falls back to the customer's legacy lat/lng when a shift has no
+ *   site_id (pre-rollout rows still in the DB).
  * - Plots the rep's own dot using browser geolocation (no DB write
  *   here — that's the location-tracker's job during an active shift).
  * - Auto-fits the map to all pins on first load.
  *
- * Customers without coordinates are skipped (with a small footer hint
- * so the rep knows). With zero placeable customers the whole component
- * renders nothing — the dashboard already shows the shift count
- * separately.
+ * Shifts without resolvable coordinates are skipped (with a small
+ * footer hint so the rep knows). With zero placeable shifts the whole
+ * component renders nothing — the dashboard already shows the shift
+ * count separately.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -41,12 +44,16 @@ export function DashboardMap({
   shifts,
 }: {
   // Mirrors the DbShift shape the dashboard already has — id is customer id.
+  // siteLat/siteLng are preferred when present (post-sites rollout).
   shifts: Array<{
     id: string;
     name: string;
     initials: string;
     color: string;
     state: string;
+    siteLat?: number | null;
+    siteLng?: number | null;
+    siteName?: string | null;
   }>;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -72,20 +79,32 @@ export function DashboardMap({
       const next: PlacedShift[] = [];
       let skipped = 0;
       for (const s of shifts) {
+        // Prefer the shift's site coords. Fall back to the customer's
+        // legacy lat/lng for shifts that pre-date the sites rollout.
+        const siteHasCoords =
+          typeof s.siteLat === "number" && typeof s.siteLng === "number";
         const c = byId.get(s.id);
-        if (
-          c &&
-          typeof c.latitude === "number" &&
-          typeof c.longitude === "number"
-        ) {
+        const customerHasCoords =
+          c && typeof c.latitude === "number" && typeof c.longitude === "number";
+        if (siteHasCoords) {
           next.push({
             id: s.id,
             name: s.name,
             initials: s.initials,
             color: s.color,
             state: s.state,
-            latitude: c.latitude,
-            longitude: c.longitude,
+            latitude: s.siteLat as number,
+            longitude: s.siteLng as number,
+          });
+        } else if (customerHasCoords) {
+          next.push({
+            id: s.id,
+            name: s.name,
+            initials: s.initials,
+            color: s.color,
+            state: s.state,
+            latitude: c!.latitude as number,
+            longitude: c!.longitude as number,
           });
         } else {
           skipped += 1;

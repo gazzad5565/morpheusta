@@ -40,6 +40,7 @@ export type EventType =
   | "customer.site_added"
   | "customer.site_updated"
   | "customer.site_deactivated"
+  | "customer.site_reactivated"
   | "customer.site_deleted"
   // Library
   | "library.uploaded"
@@ -184,6 +185,7 @@ export const EVENT_LABEL: Record<EventType, string> = {
   "customer.site_added": "added a site",
   "customer.site_updated": "updated a site",
   "customer.site_deactivated": "deactivated a site",
+  "customer.site_reactivated": "reactivated a site",
   "customer.site_deleted": "deleted a site",
   "library.uploaded": "uploaded a file",
   "library.deleted": "deleted a file",
@@ -199,6 +201,7 @@ export function eventTone(type: EventType): "ok" | "warn" | "danger" | "info" {
     type === "shift.checked_out_offsite" ||
     type === "shift.deleted" ||
     type === "customer.deleted" ||
+    type === "customer.site_deleted" ||
     type === "library.deleted" ||
     type === "task.deleted"
   )
@@ -207,7 +210,9 @@ export function eventTone(type: EventType): "ok" | "warn" | "danger" | "info" {
     type === "shift.checked_in_late" ||
     type === "shift.checked_in_early" ||
     type === "shift.checked_out_early" ||
-    type === "shift.auto_checked_out"
+    type === "shift.auto_checked_out" ||
+    type === "customer.site_deactivated" ||
+    type === "customer.site_reactivated"
   )
     return "warn";
   if (type === "request.submitted") return "info";

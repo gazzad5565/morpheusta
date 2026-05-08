@@ -135,11 +135,27 @@ export async function updateSite(
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
+  // Read the row first so the audit log can include the human-friendly
+  // site name + customer id without an extra round-trip after the update.
+  const { data: before } = await supabase
+    .from("customer_sites")
+    .select("name, customer_id")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase.from("customer_sites").update(patch).eq("id", id);
   if (error) {
     notifySaveError(error.message, "site");
     return { ok: false, error: error.message };
   }
+  const name = (before as { name?: string } | null)?.name ?? "site";
+  const customerId =
+    (before as { customer_id?: string } | null)?.customer_id ?? undefined;
+  await logEvent({
+    event_type: "customer.site_updated",
+    customer_id: customerId,
+    message: `Updated site "${name}"`,
+    meta: { fields: Object.keys(patch) },
+  });
   notifySaved("site");
   return { ok: true };
 }
@@ -148,17 +164,71 @@ export async function updateSite(
  * Soft-delete by flipping active=false. Hard delete is only allowed
  * when no shifts (past or future) reference this site — checked
  * client-side by deleteSite below. Soft-delete is the safe default.
+ *
+ * Bypasses updateSite so the audit row gets the right event type
+ * (site_deactivated rather than the generic site_updated) and so a
+ * dashboard "Recent activity" reader can colour it as a warn event.
  */
 export async function deactivateSite(
   id: string
 ): Promise<{ ok: boolean; error?: string }> {
-  return updateSite(id, { active: false });
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { data: before } = await supabase
+    .from("customer_sites")
+    .select("name, customer_id")
+    .eq("id", id)
+    .maybeSingle();
+  const { error } = await supabase
+    .from("customer_sites")
+    .update({ active: false })
+    .eq("id", id);
+  if (error) {
+    notifySaveError(error.message, "site");
+    return { ok: false, error: error.message };
+  }
+  const name = (before as { name?: string } | null)?.name ?? "site";
+  const customerId =
+    (before as { customer_id?: string } | null)?.customer_id ?? undefined;
+  await logEvent({
+    event_type: "customer.site_deactivated",
+    customer_id: customerId,
+    message: `Deactivated site "${name}"`,
+  });
+  notifySaved("site");
+  return { ok: true };
 }
 
 export async function reactivateSite(
   id: string
 ): Promise<{ ok: boolean; error?: string }> {
-  return updateSite(id, { active: true });
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { data: before } = await supabase
+    .from("customer_sites")
+    .select("name, customer_id")
+    .eq("id", id)
+    .maybeSingle();
+  const { error } = await supabase
+    .from("customer_sites")
+    .update({ active: true })
+    .eq("id", id);
+  if (error) {
+    notifySaveError(error.message, "site");
+    return { ok: false, error: error.message };
+  }
+  const name = (before as { name?: string } | null)?.name ?? "site";
+  const customerId =
+    (before as { customer_id?: string } | null)?.customer_id ?? undefined;
+  await logEvent({
+    event_type: "customer.site_reactivated",
+    customer_id: customerId,
+    message: `Reactivated site "${name}"`,
+  });
+  notifySaved("site");
+  return { ok: true };
 }
 
 /**
@@ -172,6 +242,12 @@ export async function deleteSite(
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
+  // Get name + customer for audit before we nuke the row.
+  const { data: before } = await supabase
+    .from("customer_sites")
+    .select("name, customer_id")
+    .eq("id", id)
+    .maybeSingle();
   const { count, error: cntErr } = await supabase
     .from("shifts")
     .select("id", { count: "exact", head: true })
@@ -192,6 +268,14 @@ export async function deleteSite(
     notifySaveError(error.message, "site");
     return { ok: false, error: error.message };
   }
+  const name = (before as { name?: string } | null)?.name ?? "site";
+  const customerId =
+    (before as { customer_id?: string } | null)?.customer_id ?? undefined;
+  await logEvent({
+    event_type: "customer.site_deleted",
+    customer_id: customerId,
+    message: `Deleted site "${name}"`,
+  });
   notifySaved("site");
   return { ok: true };
 }

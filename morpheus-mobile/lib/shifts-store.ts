@@ -122,7 +122,7 @@ import { todayLocalISO as todayISO } from "./format";
 
 /** Shifts assigned to the current user, today. */
 export async function listMyShiftsToday(): Promise<
-  Array<ShiftWithMeta|ShiftWithMeta|ShiftWithMeta>
+  Array<ShiftWithMeta>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data: userData } = await supabase.auth.getUser();
@@ -173,7 +173,7 @@ export async function listMyShiftsToday(): Promise<
  * returns the most recently checked-in one.
  */
 export async function getMyActiveShift(): Promise<
-  (ShiftWithMeta|ShiftWithMeta|ShiftWithMeta) | null
+  (ShiftWithMeta) | null
 > {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data: userData } = await supabase.auth.getUser();
@@ -200,7 +200,7 @@ export async function getMyActiveShift(): Promise<
 
 /** Unassigned shifts today — anyone authenticated can see + claim. */
 export async function listUnassignedShiftsToday(): Promise<
-  Array<ShiftWithMeta|ShiftWithMeta|ShiftWithMeta>
+  Array<ShiftWithMeta>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
@@ -317,7 +317,7 @@ export async function selfCreateImmediateShift(
 /** Fetch a single shift by id, joined with its customer. */
 export async function getShiftById(
   shiftId: string
-): Promise<(ShiftWithMeta|ShiftWithMeta|ShiftWithMeta) | null> {
+): Promise<(ShiftWithMeta) | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")
