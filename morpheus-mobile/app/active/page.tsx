@@ -40,6 +40,10 @@ interface ShiftData {
   customerId: string;
   /** The real `shifts.id` UUID — used for persisting task completions. */
   shiftId: string;
+  /** Site name for the shift, when the customer has more than the
+   *  auto-created "Main" site. Null otherwise so the UI can hide the
+   *  pin row entirely for single-site customers. */
+  siteName: string | null;
 }
 
 export default function ActiveShiftPage() {
@@ -72,6 +76,7 @@ export default function ActiveShiftPage() {
         checkInAt: s.checkInAt,
         customerId: s.id,
         shiftId: s.realId,
+        siteName: s.siteName,
       });
       setLoadedShift(true);
       const [rows, alreadyDone] = await Promise.all([
@@ -451,6 +456,23 @@ export default function ActiveShiftPage() {
               >
                 {shift.name}
               </div>
+              {shift.siteName && shift.siteName !== "Main" && (
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: MC.brandDeep,
+                    marginTop: 2,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <Glyph name="pin" size={12} color={MC.brandDeep} strokeWidth={2.4} />
+                  {shift.siteName}
+                </div>
+              )}
               <div
                 style={{
                   fontFamily: MC.font,

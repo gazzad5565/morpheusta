@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
-import { type Shift, type Customer } from "@/lib/mock-data";
+import { type Customer } from "@/lib/mock-data";
 import {
   AppHeader,
   AppFooter,
@@ -19,6 +19,7 @@ import {
   getMyActiveShift,
   checkOutOfShift,
   getTasksForCustomer,
+  type ShiftWithMeta,
 } from "@/lib/shifts-store";
 import { getCustomerById } from "@/lib/customers-store";
 import { getEarlyGraceMinutes } from "@/lib/settings-store";
@@ -81,9 +82,7 @@ function CheckOutPage() {
 
   // Fetch the rep's currently in-progress shift so we know which row to
   // mark complete and which tasks were required at this customer.
-  const [shift, setShift] = useState<
-    (Shift & { realId: string; repId: string | null; checkInAt: string | null }) | null
-  >(null);
+  const [shift, setShift] = useState<ShiftWithMeta | null>(null);
   const [shiftLoaded, setShiftLoaded] = useState(false);
   const [compulsoryTaskIds, setCompulsoryTaskIds] = useState<string[]>([]);
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -162,9 +161,14 @@ function CheckOutPage() {
   // Off-site: same Haversine logic as /check-in.
   const offsiteInfo = useMemo(() => {
     if (!shift) return null;
-    const radius = customer?.geofence_radius_m ?? 100;
-    if (!customer?.latitude || !customer?.longitude) {
-      return { triggered: false as const, reason: "Customer has no address pinned." };
+    // Prefer the site's own coords + geofence over the customer-level
+    // legacy fields. Same fallback chain as /check-in.
+    const targetLat = shift.siteLat ?? customer?.latitude ?? null;
+    const targetLng = shift.siteLng ?? customer?.longitude ?? null;
+    const radius =
+      shift.siteGeofenceM ?? customer?.geofence_radius_m ?? 100;
+    if (targetLat == null || targetLng == null) {
+      return { triggered: false as const, reason: "This site has no coordinates pinned." };
     }
     if (positionLoading) return null;
     if (!position) {
@@ -178,8 +182,8 @@ function CheckOutPage() {
     const distanceM = haversineMeters(
       position.lat,
       position.lon,
-      customer.latitude,
-      customer.longitude
+      targetLat,
+      targetLng
     );
     if (distanceM > radius) {
       return {

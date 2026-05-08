@@ -275,6 +275,29 @@ export default function ShiftDetailPage({
                   #{customer?.code ?? "—"} · {formatDate(shift.shift_date)} ·{" "}
                   {formatTimeRange(shift.start_time, shift.end_time)}
                 </div>
+                {/* Site row — only when the customer has a non-default
+                    site name. Quiet for single-site customers. */}
+                {shift.site && shift.site.name && shift.site.name !== "Main" && (
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 12.5,
+                      color: AC.ink2,
+                      marginTop: 6,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <AGlyph name="pin" size={12} color={AC.brand} />
+                    {shift.site.name}
+                    {shift.site.address && (
+                      <span style={{ color: AC.mute }}>
+                        · {shift.site.address}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

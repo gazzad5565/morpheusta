@@ -2342,6 +2342,11 @@ function ShiftQuickPopover({
           }}
         >
           <PopRow label="Rep" value={repLabel} />
+          {/* Show site only when it's not the implicit "Main" default —
+              keeps the popover quiet for single-site customers. */}
+          {shift.site && shift.site.name && shift.site.name !== "Main" && (
+            <PopRow label="Site" value={shift.site.name} />
+          )}
           <PopRow
             label="When"
             value={`${dateLabel} · ${formatTime(shift.start_time, {

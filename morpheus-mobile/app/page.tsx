@@ -31,6 +31,14 @@ type DbShift = Shift & {
   repId: string | null;
   checkInAt: string | null;
   state: string;
+  /** Site fields — flat for ergonomic access on cards. Mirror the shape
+   *  exposed by lib/shifts-store.ts ShiftWithMeta. */
+  siteId?: string | null;
+  siteName?: string | null;
+  siteAddress?: string | null;
+  siteLat?: number | null;
+  siteLng?: number | null;
+  siteGeofenceM?: number | null;
 };
 
 function formatTodayHeader(): string {
@@ -652,6 +660,22 @@ function UpNextCard({
                 }}
               >
                 {next.name}
+                {/* Site sublabel — only for customers with a non-default
+                    site name. Quiet for the single-site case. */}
+                {next.siteName && next.siteName !== "Main" && (
+                  <span
+                    style={{
+                      fontFamily: MC.font,
+                      fontSize: 12.5,
+                      fontWeight: 500,
+                      color: MC.mute,
+                      letterSpacing: 0,
+                      marginLeft: 6,
+                    }}
+                  >
+                    · {next.siteName}
+                  </span>
+                )}
               </div>
               <div
                 style={{

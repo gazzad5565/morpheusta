@@ -6,11 +6,11 @@ import { MC } from "@/lib/tokens";
 import { AppHeader, CustomerTile, ReasonChip, PrimaryButton } from "@/components/Chrome";
 import { LoadingBar } from "@/components/Loading";
 import { Glyph, type GlyphName } from "@/components/Glyph";
-import { getShiftById, checkInToShift } from "@/lib/shifts-store";
+import { getShiftById, checkInToShift, type ShiftWithMeta } from "@/lib/shifts-store";
 import { getCustomerById } from "@/lib/customers-store";
 import { getLateGraceMinutes, getEarlyGraceMinutes } from "@/lib/settings-store";
 import { logEvent } from "@/lib/events-store";
-import type { Shift, Customer } from "@/lib/mock-data";
+import type { Customer } from "@/lib/mock-data";
 
 // Distance between two lat/lng pairs in meters (Haversine).
 function haversineMeters(
@@ -89,7 +89,7 @@ function CheckInPage() {
   const params = useSearchParams();
   const shiftId = params.get("shift");
 
-  const [shift, setShift] = useState<(Shift & { realId: string }) | null>(null);
+  const [shift, setShift] = useState<ShiftWithMeta | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [shiftError, setShiftError] = useState<string | null>(null);
   const [graceMinutes, setGraceMinutes] = useState<number>(10);
@@ -165,11 +165,17 @@ function CheckInPage() {
   //   reason so the admin sees the gap.
   const offsiteInfo = useMemo(() => {
     if (!shift) return null;
-    const radius = customer?.geofence_radius_m ?? 100;
-    if (!customer?.latitude || !customer?.longitude) {
+    // Prefer the site's own coords + geofence; fall back to the legacy
+    // customer-level fields for shifts that pre-date sites. Default
+    // radius stays 100m if neither side carries one.
+    const targetLat = shift.siteLat ?? customer?.latitude ?? null;
+    const targetLng = shift.siteLng ?? customer?.longitude ?? null;
+    const radius =
+      shift.siteGeofenceM ?? customer?.geofence_radius_m ?? 100;
+    if (targetLat == null || targetLng == null) {
       return {
         triggered: false as const,
-        reason: "Customer has no address pinned yet — geofence skipped.",
+        reason: "This site has no coordinates yet — geofence skipped.",
       };
     }
     if (positionLoading) return null;
@@ -184,8 +190,8 @@ function CheckInPage() {
     const distanceM = haversineMeters(
       position.lat,
       position.lon,
-      customer.latitude,
-      customer.longitude
+      targetLat,
+      targetLng
     );
     if (distanceM > radius) {
       return {

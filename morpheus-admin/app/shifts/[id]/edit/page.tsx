@@ -36,6 +36,7 @@ import {
   isShiftEditable,
 } from "@/lib/shifts-store";
 import { listCustomers } from "@/lib/customers-store";
+import { listSitesForCustomer, type CustomerSite } from "@/lib/sites-store";
 import {
   listProfiles,
   getProfileById,
@@ -74,6 +75,11 @@ export default function EditShiftPage({
   // Form fields
   const [customerId, setCustomerId] = useState("");
   const [repId, setRepId] = useState<string>("");
+  // Sites for the currently-selected customer + the chosen site_id.
+  // Auto-resolves when the customer has a single active site;
+  // requires a manual pick when there are multiple.
+  const [sites, setSites] = useState<CustomerSite[]>([]);
+  const [siteId, setSiteId] = useState<string>("");
   const [shiftDate, setShiftDate] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
@@ -123,6 +129,7 @@ export default function EditShiftPage({
 
       // Hydrate the form.
       setCustomerId(shift.customer_id);
+      setSiteId(shift.site_id ?? "");
       setRepId(shift.rep_id ?? "");
       setShiftDate(shift.shift_date);
       // start_time/end_time come back as "HH:MM:SS"; <input type="time">
@@ -184,6 +191,30 @@ export default function EditShiftPage({
     };
   }, [customerId]);
 
+  // Load the customer's active sites. Auto-resolve to the only site
+  // when there's exactly one (so single-site customers never see a
+  // picker). When the customer changes, clear the existing site_id
+  // unless it's still valid for the new customer.
+  useEffect(() => {
+    if (!customerId) {
+      setSites([]);
+      return;
+    }
+    let cancelled = false;
+    listSitesForCustomer(customerId).then((rows) => {
+      if (cancelled) return;
+      setSites(rows);
+      setSiteId((prev) => {
+        if (rows.length === 1) return rows[0].id;
+        if (prev && rows.some((r) => r.id === prev)) return prev;
+        return "";
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
   const effectiveTaskTotal = liveTaskCount ?? storedTasksTotal;
 
   // When Repeat is on, compute the additional sibling dates we'd
@@ -219,6 +250,12 @@ export default function EditShiftPage({
     if (busy) return;
     setError(null);
     if (!customerId) return setError("Pick a customer.");
+    if (sites.length === 0) {
+      return setError(
+        "This customer has no active sites. Open the customer's Sites tab and add one before scheduling."
+      );
+    }
+    if (!siteId) return setError("Pick a site for this shift.");
     if (!shiftDate) return setError("Pick a date.");
     if (!startTime || !endTime) return setError("Set start and end times.");
     if (startTime >= endTime) return setError("End time must be after start time.");
@@ -247,6 +284,7 @@ export default function EditShiftPage({
     // 2. Update this shift first.
     const updateRes = await updateShift(id, {
       customer_id: customerId,
+      site_id: siteId || null,
       rep_id: repId || null,
       shift_date: shiftDate,
       start_time: startTime,
@@ -268,6 +306,7 @@ export default function EditShiftPage({
     for (const date of siblingDates) {
       const cr = await createShift({
         customer_id: customerId,
+        site_id: siteId || null,
         rep_id: repId || null,
         shift_date: date,
         start_time: startTime,
@@ -381,6 +420,49 @@ export default function EditShiftPage({
               }))}
             />
           </Field>
+
+          {/* Site picker — only renders for multi-site customers.
+              Single-site customers auto-resolve so the field is
+              invisible. Customers with no active sites surface the
+              warning state. */}
+          {customerId && sites.length === 0 && (
+            <div
+              style={{
+                padding: "10px 12px",
+                background: AC.dangerTint,
+                color: "#9c1a3c",
+                borderRadius: 10,
+                fontFamily: AC.font,
+                fontSize: 12.5,
+                marginBottom: 14,
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-start",
+              }}
+            >
+              <AGlyph name="warn" size={14} color="#9c1a3c" />
+              <span>
+                This customer has no active sites yet. Open their <b>Sites</b>{" "}
+                tab to add one before scheduling.
+              </span>
+            </div>
+          )}
+          {sites.length > 1 && (
+            <Field label="Site" required hint="Where will this shift happen?">
+              <Combobox
+                value={siteId || null}
+                onChange={(v) => setSiteId(v ?? "")}
+                triggerIcon="pin"
+                placeholder="Pick a site…"
+                clearable={false}
+                options={sites.map((s) => ({
+                  value: s.id,
+                  label: s.name,
+                  sublabel: s.address ?? undefined,
+                }))}
+              />
+            </Field>
+          )}
 
           <Field
             label="Assign to rep"

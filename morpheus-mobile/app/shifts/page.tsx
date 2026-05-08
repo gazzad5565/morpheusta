@@ -30,6 +30,13 @@ type DbShift = Shift & {
   rawStartTime: string;
   rawEndTime: string;
   shiftDate: string;
+  /** Site fields — see ShiftWithMeta in lib/shifts-store.ts. */
+  siteId?: string | null;
+  siteName?: string | null;
+  siteAddress?: string | null;
+  siteLat?: number | null;
+  siteLng?: number | null;
+  siteGeofenceM?: number | null;
 };
 
 export default function ShiftsListPage() {
@@ -486,7 +493,11 @@ function ShiftRow({
   onRemove,
   onClaim,
 }: {
-  shift: Shift;
+  shift: Shift & {
+    siteId?: string | null;
+    siteName?: string | null;
+    siteAddress?: string | null;
+  };
   /** The shift's lifecycle state (scheduled | in-progress | complete | late). Only meaningful for "Mine". */
   state?: string;
   expanded: boolean;
@@ -577,6 +588,23 @@ function ShiftRow({
             }}
           >
             {shift.name}
+            {/* Site sublabel — only when the customer has a named site
+                that's not the default "Main". Same rule as the
+                dashboard up-next card. */}
+            {shift.siteName && shift.siteName !== "Main" && (
+              <span
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: MC.mute,
+                  letterSpacing: 0,
+                  marginLeft: 6,
+                }}
+              >
+                · {shift.siteName}
+              </span>
+            )}
           </div>
           <div
             style={{

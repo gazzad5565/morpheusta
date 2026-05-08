@@ -14,6 +14,9 @@ import { notifySaved, notifySaveError } from "./save-status";
 export interface ShiftRow {
   id: string;
   customer_id: string;
+  /** Which site of the customer this shift is at. Nullable for legacy
+   *  rows pre-2026-05-08; new shifts always set it. */
+  site_id: string | null;
   rep_id: string | null;
   shift_date: string;
   start_time: string;
@@ -38,6 +41,17 @@ export interface ShiftRow {
     color: string;
     code: number;
   } | null;
+  /** Joined site row when the shift has a site_id. The customer's
+   *  legacy address fields are still populated for back-compat but
+   *  every read path should prefer the site coords / address. */
+  site: {
+    id: string;
+    name: string;
+    address: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    geofence_radius_m: number | null;
+  } | null;
 }
 
 export async function listShifts(opts?: {
@@ -48,7 +62,7 @@ export async function listShifts(opts?: {
   const date = opts?.date || todayLocalISO();
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
     .eq("shift_date", date)
     .order("start_time", { ascending: true })
     .limit(opts?.limit ?? 100);
@@ -71,7 +85,7 @@ export async function listShiftsInRange(
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
     .gte("shift_date", startISO)
     .lte("shift_date", endISO)
     .order("shift_date", { ascending: true })
@@ -86,6 +100,15 @@ export async function listShiftsInRange(
 
 export interface NewShift {
   customer_id: string;
+  /**
+   * Specific site of the customer for this shift. Required when the
+   * customer has >1 active site; auto-resolved to the customer's only
+   * active site otherwise (the form / cartesian builder fills it in).
+   * Pre-2026-05-08 customers may have no site at all — those shifts
+   * still insert with site_id=null (the FK is nullable) until the
+   * one-time backfill catches up.
+   */
+  site_id?: string | null;
   shift_date: string; // YYYY-MM-DD
   start_time: string; // HH:MM
   end_time: string; // HH:MM
@@ -129,7 +152,7 @@ export async function getShiftById(id: string): Promise<ShiftRow | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
     .eq("id", id)
     .maybeSingle();
   if (error) {
@@ -150,6 +173,7 @@ export async function createShift(
     .from("shifts")
     .insert({
       customer_id: s.customer_id,
+      site_id: s.site_id ?? null,
       shift_date: s.shift_date,
       start_time: s.start_time,
       end_time: s.end_time,
@@ -185,6 +209,7 @@ export async function createShift(
  */
 export interface ShiftPatch {
   customer_id?: string;
+  site_id?: string | null;
   rep_id?: string | null;
   shift_date?: string;
   start_time?: string;

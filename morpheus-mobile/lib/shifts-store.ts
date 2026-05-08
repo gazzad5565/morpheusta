@@ -16,6 +16,8 @@ import type { Shift } from "./mock-data";
 interface ShiftRow {
   id: string;
   customer_id: string;
+  /** Specific site for this shift. Nullable for legacy rows. */
+  site_id: string | null;
   rep_id: string | null;
   shift_date: string;
   start_time: string;
@@ -32,6 +34,17 @@ interface ShiftRow {
     color: string;
     code: number;
   } | null;
+  /** Joined site row when site_id is set. The mobile rep app prefers
+   *  these coords/address/geofence over the customer's legacy fields
+   *  for the geofence + map dot + directions deep link. */
+  site: {
+    id: string;
+    name: string;
+    address: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    geofence_radius_m: number | null;
+  } | null;
 }
 
 /** Convert "08:00:00" → "08:00 AM" */
@@ -44,21 +57,39 @@ function formatTimeLabel(t: string): string {
   return `${h12}:${mm} ${ampm}`;
 }
 
-function rowToShift(
-  row: ShiftRow
-): Shift & {
-  realId: string;
-  repId: string | null;
-  checkInAt: string | null;
-  state: string;
-  /** Raw HH:MM[:SS] from the DB so the rep app can compute relative
-   *  countdowns ("in 50 min" / "10 min late") without re-parsing
-   *  the human-formatted display strings. */
-  rawStartTime: string;
-  rawEndTime: string;
-  shiftDate: string;
-} {
+/**
+ * Site fields exposed to the rep app — flattened so screens don't
+ * have to dig through `shift.site?.lat`. Nullable on every field
+ * because pre-2026-05-08 rows might not have a site joined.
+ */
+export interface ShiftSiteFields {
+  siteId: string | null;
+  siteName: string | null;
+  siteAddress: string | null;
+  siteLat: number | null;
+  siteLng: number | null;
+  /** Site-level geofence override; falls back to customer/org default
+   *  when null (handled at the consumer). */
+  siteGeofenceM: number | null;
+}
+
+export type ShiftWithMeta = Shift &
+  ShiftSiteFields & {
+    realId: string;
+    repId: string | null;
+    checkInAt: string | null;
+    state: string;
+    /** Raw HH:MM[:SS] from the DB so the rep app can compute relative
+     *  countdowns ("in 50 min" / "10 min late") without re-parsing
+     *  the human-formatted display strings. */
+    rawStartTime: string;
+    rawEndTime: string;
+    shiftDate: string;
+  };
+
+function rowToShift(row: ShiftRow): ShiftWithMeta {
   const c = row.customers;
+  const s = row.site;
   return {
     // The "id" used by mobile UI for matching is customer id
     id: c?.id || row.customer_id,
@@ -77,6 +108,12 @@ function rowToShift(
     rawStartTime: row.start_time || "",
     rawEndTime: row.end_time || "",
     shiftDate: row.shift_date || "",
+    siteId: s?.id ?? row.site_id ?? null,
+    siteName: s?.name ?? null,
+    siteAddress: s?.address ?? null,
+    siteLat: s?.latitude ?? null,
+    siteLng: s?.longitude ?? null,
+    siteGeofenceM: s?.geofence_radius_m ?? null,
   };
 }
 
@@ -85,7 +122,7 @@ import { todayLocalISO as todayISO } from "./format";
 
 /** Shifts assigned to the current user, today. */
 export async function listMyShiftsToday(): Promise<
-  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string; rawStartTime: string; rawEndTime: string; shiftDate: string }>
+  Array<ShiftWithMeta|ShiftWithMeta|ShiftWithMeta>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data: userData } = await supabase.auth.getUser();
@@ -95,7 +132,7 @@ export async function listMyShiftsToday(): Promise<
   const today = todayISO();
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
     .eq("rep_id", userId)
     .eq("shift_date", today)
     .order("start_time", { ascending: true });
@@ -136,7 +173,7 @@ export async function listMyShiftsToday(): Promise<
  * returns the most recently checked-in one.
  */
 export async function getMyActiveShift(): Promise<
-  (Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string; rawStartTime: string; rawEndTime: string; shiftDate: string }) | null
+  (ShiftWithMeta|ShiftWithMeta|ShiftWithMeta) | null
 > {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data: userData } = await supabase.auth.getUser();
@@ -145,7 +182,7 @@ export async function getMyActiveShift(): Promise<
 
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
     .eq("rep_id", userId)
     .eq("state", "in-progress")
     .order("check_in_at", { ascending: false })
@@ -163,12 +200,12 @@ export async function getMyActiveShift(): Promise<
 
 /** Unassigned shifts today — anyone authenticated can see + claim. */
 export async function listUnassignedShiftsToday(): Promise<
-  Array<Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string; rawStartTime: string; rawEndTime: string; shiftDate: string }>
+  Array<ShiftWithMeta|ShiftWithMeta|ShiftWithMeta>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
     .is("rep_id", null)
     .eq("shift_date", todayISO())
     .order("start_time", { ascending: true });
@@ -280,11 +317,11 @@ export async function selfCreateImmediateShift(
 /** Fetch a single shift by id, joined with its customer. */
 export async function getShiftById(
   shiftId: string
-): Promise<(Shift & { realId: string; repId: string | null; checkInAt: string | null; state: string; rawStartTime: string; rawEndTime: string; shiftDate: string }) | null> {
+): Promise<(ShiftWithMeta|ShiftWithMeta|ShiftWithMeta) | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
     .eq("id", shiftId)
     .maybeSingle();
   if (error || !data) {

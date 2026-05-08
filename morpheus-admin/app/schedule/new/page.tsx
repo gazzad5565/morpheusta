@@ -18,9 +18,11 @@ import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
+import { Combobox } from "@/components/ui/Combobox";
 import { inputStyle } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
+import { listSitesByCustomerIds, type CustomerSite } from "@/lib/sites-store";
 import { createShift, listShiftsInRange } from "@/lib/shifts-store";
 import { listProfiles, getProfileById, displayName, type Profile } from "@/lib/profiles-store";
 import { deleteRequest } from "@/lib/requests-store";
@@ -132,6 +134,18 @@ function NewShiftPage() {
   const [tasksByCustomer, setTasksByCustomer] = useState<Map<string, number>>(
     () => new Map()
   );
+
+  // Sites per customer. Populated for every selected customer so we
+  // know whether to show the per-customer site picker (>1 active site)
+  // or auto-resolve invisibly (exactly 1 active site). Customers with
+  // ZERO active sites can't be scheduled — the form blocks with a
+  // clear "add a site to this customer first" error.
+  const [sitesByCustomer, setSitesByCustomer] = useState<
+    Record<string, CustomerSite[]>
+  >({});
+  // Manager's chosen site per customer. Filled in automatically for
+  // single-site customers; required user pick for multi-site.
+  const [siteChoice, setSiteChoice] = useState<Record<string, string>>({});
 
   // Conflicts found for the picked (rep × date × time) tuple. Each
   // entry represents a shift that already exists for one of the
@@ -255,6 +269,68 @@ function NewShiftPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetedCustomerIds.join(",")]);
 
+  // Load sites for every selected customer. Auto-resolve to the only
+  // active site when a customer has exactly one (so single-site
+  // customers never see a picker), preserve existing manual choices
+  // when the scope grows.
+  useEffect(() => {
+    let cancelled = false;
+    if (targetedCustomerIds.length === 0) {
+      setSitesByCustomer({});
+      setSiteChoice({});
+      return;
+    }
+    listSitesByCustomerIds(targetedCustomerIds).then((map) => {
+      if (cancelled) return;
+      setSitesByCustomer(map);
+      setSiteChoice((prev) => {
+        const next: Record<string, string> = { ...prev };
+        for (const cid of targetedCustomerIds) {
+          const sites = map[cid] ?? [];
+          if (sites.length === 0) {
+            delete next[cid];
+          } else if (sites.length === 1) {
+            // Single-site → auto-pick. Always overwrite so a stale pick
+            // from a previously-multi-site customer can't linger.
+            next[cid] = sites[0].id;
+          } else if (!next[cid] || !sites.some((s) => s.id === next[cid])) {
+            // Multi-site: leave unset until the manager picks. If the
+            // previously chosen site is no longer in the active list
+            // (deactivated since), clear it so the form forces a re-pick.
+            delete next[cid];
+          }
+        }
+        // Drop choices for customers no longer in scope.
+        for (const id of Object.keys(next)) {
+          if (!targetedCustomerIds.includes(id)) delete next[id];
+        }
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetedCustomerIds.join(",")]);
+
+  // Customers in scope that need a manual site pick (>1 active site
+  // and the manager hasn't chosen yet). Used both to show the picker
+  // section and to gate Submit.
+  const customersNeedingSite = useMemo(() => {
+    return targetedCustomerIds.filter((cid) => {
+      const sites = sitesByCustomer[cid] ?? [];
+      return sites.length > 1 && !siteChoice[cid];
+    });
+  }, [targetedCustomerIds, sitesByCustomer, siteChoice]);
+
+  // Customers in scope with NO active sites at all. These can't be
+  // scheduled — the form surfaces them as a hard error.
+  const customersWithoutSite = useMemo(() => {
+    return targetedCustomerIds.filter(
+      (cid) => (sitesByCustomer[cid] ?? []).length === 0
+    );
+  }, [targetedCustomerIds, sitesByCustomer]);
+
   // Detect collisions: any existing shift for one of the picked reps
   // on one of the generated dates that overlaps the chosen time
   // window. Skipped when scope is "Unassigned" (null) since unassigned
@@ -332,6 +408,20 @@ function NewShiftPage() {
     if (targetedCustomerIds.length === 0) {
       return setError("No customers to schedule against.");
     }
+    if (customersWithoutSite.length > 0) {
+      const names = customersWithoutSite
+        .map((cid) => customers.find((c) => c.id === cid)?.name || cid)
+        .join(", ");
+      return setError(
+        `These customers have no active site — add one before scheduling: ${names}`
+      );
+    }
+    if (customersNeedingSite.length > 0) {
+      const names = customersNeedingSite
+        .map((cid) => customers.find((c) => c.id === cid)?.name || cid)
+        .join(", ");
+      return setError(`Pick a site for: ${names}`);
+    }
     if (repScope !== null && repScope.length === 0) {
       return setError("Pick at least one rep, or switch to 'Unassigned'.");
     }
@@ -390,12 +480,13 @@ function NewShiftPage() {
         for (const rid of targetedRepIds) {
           const r = await createShift({
             customer_id: cid,
+            site_id: siteChoice[cid] ?? null,
             shift_date: date,
             start_time: startTime,
             end_time: endTime,
             // Distance label is left blank — the rep app derives "X km
-            // away" from the customer's saved coordinates and the
-            // rep's live location at check-in time.
+            // away" from the site's saved coordinates and the rep's
+            // live location at check-in time.
             distance_label: "",
             tasks_total: tasksByCustomer.get(cid) ?? 0,
             rep_id: rid,
@@ -483,6 +574,22 @@ function NewShiftPage() {
                 tasksByCustomer={tasksByCustomer}
               />
             </Field>
+
+            {/* Site picker — only renders for customers with multiple
+                active sites. Single-site customers auto-resolve;
+                customers with no active sites surface a hard error
+                below so the manager can't accidentally schedule into
+                a missing location. */}
+            <SitesNeedingPick
+              customers={customers}
+              targetedCustomerIds={targetedCustomerIds}
+              sitesByCustomer={sitesByCustomer}
+              siteChoice={siteChoice}
+              onPick={(cid, siteId) =>
+                setSiteChoice((prev) => ({ ...prev, [cid]: siteId }))
+              }
+              customersWithoutSite={customersWithoutSite}
+            />
 
             <Field
               label="Rep(s)"
@@ -1275,6 +1382,136 @@ function formatTimeLabel(t: string): string {
  *   - Specific (multi customer): summary range + customer count.
  *   - Empty (nothing picked): renders nothing.
  */
+/**
+ * Renders one row per selected customer that needs a site decision.
+ * - Customers with exactly one active site auto-resolve and render
+ *   nothing (the picker stays invisible — single-site is the common
+ *   case and we don't want to add UI noise for it).
+ * - Customers with multiple active sites get a Combobox to pick from.
+ * - Customers with zero active sites surface a red banner so the
+ *   manager fixes that before submitting.
+ */
+function SitesNeedingPick({
+  customers,
+  targetedCustomerIds,
+  sitesByCustomer,
+  siteChoice,
+  onPick,
+  customersWithoutSite,
+}: {
+  customers: Customer[];
+  targetedCustomerIds: string[];
+  sitesByCustomer: Record<string, CustomerSite[]>;
+  siteChoice: Record<string, string>;
+  onPick: (customerId: string, siteId: string) => void;
+  customersWithoutSite: string[];
+}) {
+  const multiSite = targetedCustomerIds.filter(
+    (cid) => (sitesByCustomer[cid] ?? []).length > 1
+  );
+  if (multiSite.length === 0 && customersWithoutSite.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      {customersWithoutSite.length > 0 && (
+        <div
+          style={{
+            padding: "10px 12px",
+            background: AC.dangerTint,
+            color: "#9c1a3c",
+            borderRadius: 10,
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            fontWeight: 500,
+            display: "flex",
+            gap: 8,
+            alignItems: "flex-start",
+            marginBottom: 12,
+          }}
+        >
+          <AGlyph name="warn" size={14} color="#9c1a3c" />
+          <span>
+            <b>
+              {customersWithoutSite.length} customer
+              {customersWithoutSite.length === 1 ? "" : "s"}
+            </b>{" "}
+            with no active site. Open the customer&apos;s Sites tab and add one
+            before scheduling:{" "}
+            {customersWithoutSite
+              .map((cid) => customers.find((c) => c.id === cid)?.name || cid)
+              .join(", ")}
+            .
+          </span>
+        </div>
+      )}
+      {multiSite.length > 0 && (
+        <div
+          style={{
+            padding: 12,
+            background: AC.bg,
+            border: `1px solid ${AC.line}`,
+            borderRadius: 10,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              color: AC.mute,
+              fontWeight: 700,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+            }}
+          >
+            Site for each customer
+          </div>
+          {multiSite.map((cid) => {
+            const customer = customers.find((c) => c.id === cid);
+            const sites = sitesByCustomer[cid] ?? [];
+            const value = siteChoice[cid] ?? null;
+            return (
+              <div
+                key={cid}
+                style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+              >
+                <div
+                  style={{
+                    flex: "0 0 auto",
+                    fontFamily: AC.font,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: AC.ink,
+                    minWidth: 140,
+                  }}
+                >
+                  {customer?.name || cid}
+                </div>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <Combobox
+                    value={value}
+                    onChange={(v) => v && onPick(cid, v)}
+                    triggerIcon="pin"
+                    placeholder="Pick a site…"
+                    clearable={false}
+                    options={sites.map((s) => ({
+                      value: s.id,
+                      label: s.name,
+                      sublabel: s.address ?? undefined,
+                    }))}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CustomerContextChips({
   customers,
   customerScope,
