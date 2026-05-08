@@ -20,10 +20,21 @@
 -- customer_sites going forward. Once every read path is migrated
 -- a follow-up migration drops those columns.
 
+-- Wrap the whole migration in a transaction so a partial apply can't
+-- leave the schema in a half-broken state — if any step fails, the
+-- table, index, FK, backfill, trigger, RLS, and realtime add are all
+-- rolled back atomically and the next run starts clean.
+BEGIN;
+
 -- 1. Sites table.
+--
+-- customer_id is TEXT — customers.id is a slug-style text key
+-- (e.g. "aria-cosmetics-x9f2"), not a uuid, so the FK column type
+-- has to match. Site's own id stays uuid because nothing references
+-- it as a slug elsewhere.
 CREATE TABLE IF NOT EXISTS public.customer_sites (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  customer_id uuid NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
+  customer_id text NOT NULL REFERENCES public.customers(id) ON DELETE CASCADE,
   name text NOT NULL,
   address text,
   latitude double precision,
@@ -131,4 +142,19 @@ CREATE POLICY customer_sites_write
 -- 7. Realtime — surface site changes the same way customers do, so
 --    the admin Live Ops view + mobile dashboards refresh when a
 --    site's coords or geofence change.
-ALTER PUBLICATION supabase_realtime ADD TABLE public.customer_sites;
+--    Guarded so re-running the migration doesn't error with "relation
+--    already member of publication" — ALTER PUBLICATION ... ADD TABLE
+--    has no IF NOT EXISTS form, so we check pg_publication_tables.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'customer_sites'
+  ) THEN
+    EXECUTE 'ALTER PUBLICATION supabase_realtime ADD TABLE public.customer_sites';
+  END IF;
+END $$;
+
+COMMIT;
