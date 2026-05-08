@@ -14,7 +14,6 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
@@ -22,6 +21,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { LoadingBar } from "@/components/ui/LoadingBar";
+import { SitesTab } from "@/components/customers/SitesTab";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
 import {
@@ -46,17 +46,11 @@ import { listShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
 
-// MapLibre needs `window`; load on client only.
-const AddressMap = dynamic(
-  () => import("@/components/CustomerAddressMap").then((m) => m.CustomerAddressMap),
-  { ssr: false }
-);
-
-type TabKey = "overview" | "address" | "reps" | "tasks" | "library" | "shifts" | "custom";
+type TabKey = "overview" | "sites" | "reps" | "tasks" | "library" | "shifts" | "custom";
 
 const TABS: { key: TabKey; label: string; glyph: GlyphName }[] = [
   { key: "overview", label: "Overview", glyph: "info" },
-  { key: "address", label: "Address & geofence", glyph: "pin" },
+  { key: "sites", label: "Sites", glyph: "pin" },
   { key: "reps", label: "Reps", glyph: "reps" },
   { key: "tasks", label: "Tasks", glyph: "tasks" },
   { key: "library", label: "Library", glyph: "lib" },
@@ -103,10 +97,6 @@ export default function CustomerDetailPage() {
   const [savingAssignments, setSavingAssignments] = useState(false);
   const [taskBusyId, setTaskBusyId] = useState<string | null>(null);
 
-  // Geofence radius local state for the slider on the Address tab.
-  const [geofenceRadius, setGeofenceRadius] = useState<number>(100);
-  const [savingGeofence, setSavingGeofence] = useState(false);
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -125,7 +115,6 @@ export default function CustomerDetailPage() {
       setTasks(taskRows);
       setFiles(fileRows);
       setShifts(shiftRows.filter((s) => s.customer_id === id));
-      if (customerRow) setGeofenceRadius(customerRow.geofence ?? 100);
       setLoading(false);
     })();
     return () => {
@@ -190,18 +179,6 @@ export default function CustomerDetailPage() {
       return;
     }
     setAssignedRepIds(newIds);
-  }
-
-  async function onSaveGeofence() {
-    if (savingGeofence || !c) return;
-    setSavingGeofence(true);
-    const r = await updateCustomer(id, { geofence_radius_m: geofenceRadius });
-    setSavingGeofence(false);
-    if (!r.ok) {
-      setActionError(r.error || "Failed to update geofence.");
-      return;
-    }
-    setC({ ...c, geofence: geofenceRadius });
   }
 
   async function onDeleteTask(t: TaskRow) {
@@ -378,16 +355,7 @@ export default function CustomerDetailPage() {
           />
         )}
 
-        {activeTab === "address" && (
-          <AddressTab
-            customer={c}
-            geofenceRadius={geofenceRadius}
-            setGeofenceRadius={setGeofenceRadius}
-            saving={savingGeofence}
-            onSave={onSaveGeofence}
-            onEdit={() => router.push(`/customers/${id}/edit`)}
-          />
-        )}
+        {activeTab === "sites" && <SitesTab customer={c} />}
 
         {activeTab === "reps" && (
           <RepsTab
@@ -466,9 +434,9 @@ function OverviewTab({
             lineHeight: 1.5,
           }}
         >
-          Use the tabs above to manage this customer's address &amp; geofence, assigned reps,
-          tasks, library files, today's shifts, and any custom fields you've defined in
-          Settings.
+          Use the tabs above to manage this customer&apos;s sites (locations + geofences),
+          assigned reps, tasks, library files, today&apos;s shifts, and any custom fields
+          you&apos;ve defined in Settings.
         </div>
       </Card>
       <Card padding={16}>
@@ -513,7 +481,7 @@ function OverviewTab({
           </div>
         ) : (
           <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.mute }}>
-            No address set yet. Open the Address tab to add one.
+            No sites yet. Open the Sites tab to add one.
           </div>
         )}
       </Card>
@@ -521,188 +489,6 @@ function OverviewTab({
   );
 }
 
-function AddressTab({
-  customer,
-  geofenceRadius,
-  setGeofenceRadius,
-  saving,
-  onSave,
-  onEdit,
-}: {
-  customer: Customer;
-  geofenceRadius: number;
-  setGeofenceRadius: (v: number) => void;
-  saving: boolean;
-  onSave: () => void;
-  onEdit: () => void;
-}) {
-  const hasCoords = customer.latitude != null && customer.longitude != null;
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, alignItems: "start" }}>
-      <Card padding={0}>
-        {hasCoords ? (
-          <AddressMap
-            lat={customer.latitude!}
-            lng={customer.longitude!}
-            radiusM={geofenceRadius}
-            color={customer.color}
-            initials={customer.initials}
-          />
-        ) : (
-          <div
-            style={{
-              height: 360,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexDirection: "column",
-              fontFamily: AC.font,
-              color: AC.mute,
-              fontSize: 13,
-              gap: 10,
-              background: "#F1F4F7",
-            }}
-          >
-            <AGlyph name="pin" size={28} color={AC.faint} />
-            <div>No address set yet.</div>
-            <Btn icon="edit" size="sm" onClick={onEdit}>
-              Set address
-            </Btn>
-          </div>
-        )}
-      </Card>
-
-      <Card padding={16}>
-        <div
-          style={{
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 600,
-            color: AC.mute,
-            letterSpacing: 0.4,
-            textTransform: "uppercase",
-            marginBottom: 8,
-          }}
-        >
-          Address
-        </div>
-        {customer.address ? (
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 13,
-              color: AC.ink,
-              lineHeight: 1.5,
-              marginBottom: 12,
-            }}
-          >
-            {customer.address}
-            {hasCoords && (
-              <div
-                style={{
-                  fontFamily: AC.fontMono,
-                  fontSize: 11,
-                  color: AC.mute,
-                  marginTop: 4,
-                }}
-              >
-                {customer.latitude!.toFixed(5)}, {customer.longitude!.toFixed(5)}
-              </div>
-            )}
-          </div>
-        ) : (
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 12.5,
-              color: AC.mute,
-              marginBottom: 12,
-            }}
-          >
-            None yet.
-          </div>
-        )}
-        <Btn size="sm" icon="edit" onClick={onEdit}>
-          Change address
-        </Btn>
-
-        <div
-          style={{
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 600,
-            color: AC.mute,
-            letterSpacing: 0.4,
-            textTransform: "uppercase",
-            marginTop: 22,
-            marginBottom: 8,
-          }}
-        >
-          Geofence radius
-        </div>
-        <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.mute, marginBottom: 10, lineHeight: 1.5 }}>
-          The check-in distance allowance for reps. Smaller = stricter on-site check-in.
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <input
-            type="range"
-            min={25}
-            max={500}
-            step={5}
-            value={geofenceRadius}
-            onChange={(e) => setGeofenceRadius(parseInt(e.target.value, 10))}
-            style={{ flex: 1, accentColor: AC.brand }}
-          />
-          <div
-            style={{
-              fontFamily: AC.fontMono,
-              fontSize: 13,
-              color: AC.ink,
-              fontWeight: 700,
-              minWidth: 56,
-              textAlign: "right",
-            }}
-          >
-            {geofenceRadius}m
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 4, marginTop: 8 }}>
-          {[50, 75, 100, 150, 250].map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setGeofenceRadius(v)}
-              style={{
-                flex: 1,
-                padding: "5px 0",
-                borderRadius: 6,
-                background: v === geofenceRadius ? AC.ink : "#fff",
-                color: v === geofenceRadius ? "#fff" : AC.ink2,
-                border: `1px solid ${v === geofenceRadius ? AC.ink : AC.line}`,
-                fontFamily: AC.font,
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              {v}m
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
-          <Btn
-            kind="primary"
-            size="sm"
-            onClick={onSave}
-            disabled={saving || customer.geofence === geofenceRadius}
-          >
-            {saving ? "Saving…" : "Save geofence"}
-          </Btn>
-        </div>
-      </Card>
-    </div>
-  );
-}
 
 function RepsTab({
   allReps,

@@ -118,6 +118,18 @@ export async function createCustomer(
     notifySaveError(error.message, "customer");
     return { ok: false, error: error.message };
   }
+  // Every customer needs a Main site immediately — single-site customers
+  // never see a site picker, so the auto-create is what makes that
+  // invisible. Multi-site customers add more sites from /customers/[id]
+  // → Sites tab afterwards.
+  await supabase.from("customer_sites").insert({
+    customer_id: id,
+    name: "Main",
+    address: c.address || null,
+    latitude: c.latitude ?? null,
+    longitude: c.longitude ?? null,
+    geofence_radius_m: 100,
+  });
   await logEvent({
     event_type: "customer.created",
     customer_id: id,

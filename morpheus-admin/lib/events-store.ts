@@ -37,6 +37,10 @@ export type EventType =
   | "customer.deactivated"
   | "customer.reactivated"
   | "customer.deleted"
+  | "customer.site_added"
+  | "customer.site_updated"
+  | "customer.site_deactivated"
+  | "customer.site_deleted"
   // Library
   | "library.uploaded"
   | "library.deleted"
@@ -177,6 +181,10 @@ export const EVENT_LABEL: Record<EventType, string> = {
   "customer.deactivated": "deactivated a customer",
   "customer.reactivated": "reactivated a customer",
   "customer.deleted": "deleted a customer",
+  "customer.site_added": "added a site",
+  "customer.site_updated": "updated a site",
+  "customer.site_deactivated": "deactivated a site",
+  "customer.site_deleted": "deleted a site",
   "library.uploaded": "uploaded a file",
   "library.deleted": "deleted a file",
   "task.created": "added a task",
