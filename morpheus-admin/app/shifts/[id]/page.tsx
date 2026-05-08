@@ -277,7 +277,7 @@ export default function ShiftDetailPage({
                 </div>
                 {/* Site row — only when the customer has a non-default
                     site name. Quiet for single-site customers. */}
-                {shift.site && shift.site.name && shift.site.name !== "Main" && (
+                {shift.site && shift.site.name && shift.site.name !== "Head office" && (
                   <div
                     style={{
                       fontFamily: AC.font,

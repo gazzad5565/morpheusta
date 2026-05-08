@@ -14,15 +14,26 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
-import { LoadingBar } from "@/components/ui/LoadingBar";
+import { LoadingBar, Spinner } from "@/components/ui/LoadingBar";
 import { SitesTab } from "@/components/customers/SitesTab";
 import { CustomerSwatch } from "@/components/ui/Avatars";
+import {
+  listSitesForCustomer,
+  type CustomerSite,
+} from "@/lib/sites-store";
+
+// MapLibre needs `window`; client-only.
+const AddressMap = dynamic(
+  () => import("@/components/CustomerAddressMap").then((m) => m.CustomerAddressMap),
+  { ssr: false }
+);
 import { AC } from "@/lib/tokens";
 import {
   getCustomer,
@@ -352,6 +363,7 @@ export default function CustomerDetailPage() {
               files: files.length,
               shiftsToday: shifts.length,
             }}
+            onJumpToSites={() => setActiveTab("sites")}
           />
         )}
 
@@ -396,6 +408,7 @@ export default function CustomerDetailPage() {
 function OverviewTab({
   customer,
   stats,
+  onJumpToSites,
 }: {
   customer: Customer;
   stats: {
@@ -404,87 +417,326 @@ function OverviewTab({
     files: number;
     shiftsToday: number;
   };
+  onJumpToSites: () => void;
 }) {
+  // Load sites for the head-office card (the oldest active site is the
+  // head office; the rest list as "additional sites" below). Loaded
+  // here rather than threaded as a prop because OverviewTab is a leaf
+  // component and the small extra fetch keeps the parent simple.
+  const [sites, setSites] = useState<CustomerSite[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    listSitesForCustomer(customer.id).then((rows) => {
+      if (!cancelled) setSites(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customer.id]);
+
+  const headOffice = useMemo(
+    () => (sites ?? []).find((s) => s.active) ?? null,
+    [sites]
+  );
+  const additional = useMemo(
+    () => (sites ?? []).filter((s) => s.active && s.id !== headOffice?.id),
+    [sites, headOffice]
+  );
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16, alignItems: "start" }}>
-      <Card padding={20}>
-        <SectionTitle>Quick summary</SectionTitle>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: 12,
-            marginTop: 12,
-          }}
-        >
-          <Stat label="Reps assigned" value={stats.repsAssigned} />
-          <Stat label="Tasks defined" value={stats.tasks} />
-          <Stat label="Library files" value={stats.files} />
-          <Stat label="Shifts today" value={stats.shiftsToday} />
-        </div>
-        <div
-          style={{
-            marginTop: 16,
-            padding: "12px 14px",
-            background: AC.brandSoft,
-            borderRadius: 10,
-            fontFamily: AC.font,
-            fontSize: 12.5,
-            color: AC.brandInk,
-            lineHeight: 1.5,
-          }}
-        >
-          Use the tabs above to manage this customer&apos;s sites (locations + geofences),
-          assigned reps, tasks, library files, today&apos;s shifts, and any custom fields
-          you&apos;ve defined in Settings.
-        </div>
-      </Card>
-      <Card padding={16}>
-        <div
-          style={{
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 600,
-            color: AC.mute,
-            letterSpacing: 0.4,
-            textTransform: "uppercase",
-            marginBottom: 8,
-          }}
-        >
-          Address
-        </div>
-        {customer.address ? (
-          <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.ink, lineHeight: 1.5 }}>
-            <AGlyph name="pin" size={12} color={AC.mute} /> {customer.address}
-            {customer.latitude != null && customer.longitude != null && (
-              <div
-                style={{
-                  fontFamily: AC.fontMono,
-                  fontSize: 11,
-                  color: AC.mute,
-                  marginTop: 4,
-                }}
-              >
-                {customer.latitude.toFixed(4)}, {customer.longitude.toFixed(4)}
-              </div>
-            )}
-            <div
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
+        {/* Left: Quick summary */}
+        <Card padding={20}>
+          <SectionTitle>Quick summary</SectionTitle>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, 1fr)",
+              gap: 12,
+              marginTop: 12,
+            }}
+          >
+            <Stat label="Reps assigned" value={stats.repsAssigned} />
+            <Stat label="Tasks defined" value={stats.tasks} />
+            <Stat label="Library files" value={stats.files} />
+            <Stat label="Shifts today" value={stats.shiftsToday} />
+          </div>
+          <div
+            style={{
+              marginTop: 16,
+              padding: "12px 14px",
+              background: AC.brandSoft,
+              borderRadius: 10,
+              fontFamily: AC.font,
+              fontSize: 12.5,
+              color: AC.brandInk,
+              lineHeight: 1.5,
+            }}
+          >
+            Use the tabs above to manage this customer&apos;s sites
+            (locations + geofences), assigned reps, tasks, library
+            files, today&apos;s shifts, and any custom fields you&apos;ve
+            defined in Settings.
+          </div>
+        </Card>
+
+        {/* Right: Head office card — the customer's primary location.
+            Map + geofence circle render by default. Click the address
+            chip or the action button to jump straight to the Sites tab. */}
+        <Card padding={0}>
+          <div
+            style={{
+              padding: "14px 16px",
+              borderBottom: `1px solid ${AC.lineDim}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <span
               style={{
                 fontFamily: AC.font,
                 fontSize: 11,
+                fontWeight: 700,
                 color: AC.mute,
-                marginTop: 4,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
               }}
             >
-              Geofence: {customer.geofence}m
+              Head office
+            </span>
+            <div style={{ flex: 1 }} />
+            <Btn size="sm" icon="settings" onClick={onJumpToSites}>
+              {sites && sites.length > 1
+                ? `Manage ${sites.filter((s) => s.active).length} sites`
+                : "Edit"}
+            </Btn>
+          </div>
+
+          {sites === null ? (
+            <div
+              style={{
+                height: 240,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
+                color: AC.mute,
+                fontFamily: AC.font,
+                fontSize: 12.5,
+              }}
+            >
+              <Spinner size={14} /> Loading head office…
             </div>
+          ) : headOffice ? (
+            <>
+              <div style={{ overflow: "hidden" }}>
+                {headOffice.latitude != null && headOffice.longitude != null ? (
+                  <AddressMap
+                    lat={headOffice.latitude}
+                    lng={headOffice.longitude}
+                    radiusM={headOffice.geofence_radius_m ?? 100}
+                    color={customer.color}
+                    initials={customer.initials}
+                    height={220}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      height: 220,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexDirection: "column",
+                      fontFamily: AC.font,
+                      color: AC.mute,
+                      fontSize: 13,
+                      gap: 8,
+                      background: "#F1F4F7",
+                    }}
+                  >
+                    <AGlyph name="pin" size={26} color={AC.faint} />
+                    <div>No coordinates yet</div>
+                    <Btn size="sm" icon="edit" onClick={onJumpToSites}>
+                      Add an address
+                    </Btn>
+                  </div>
+                )}
+              </div>
+              <div style={{ padding: "12px 16px 16px" }}>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 13.5,
+                    color: AC.ink,
+                    fontWeight: 600,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {headOffice.address || (
+                    <span style={{ fontWeight: 500, color: AC.mute, fontStyle: "italic" }}>
+                      No address yet — open Sites to add one.
+                    </span>
+                  )}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    marginTop: 8,
+                    fontFamily: AC.font,
+                    fontSize: 11.5,
+                    color: AC.mute,
+                  }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <AGlyph name="pin" size={11} color={AC.mute} />
+                    Geofence · {headOffice.geofence_radius_m ?? 100} m
+                  </span>
+                  {headOffice.latitude != null && headOffice.longitude != null && (
+                    <span style={{ fontFamily: AC.fontMono }}>
+                      {headOffice.latitude.toFixed(4)}, {headOffice.longitude.toFixed(4)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div
+              style={{
+                padding: 24,
+                textAlign: "center",
+                fontFamily: AC.font,
+                fontSize: 13,
+                color: AC.mute,
+              }}
+            >
+              No sites yet.
+              <div style={{ marginTop: 10 }}>
+                <Btn size="sm" icon="plus" kind="primary" onClick={onJumpToSites}>
+                  Add head office
+                </Btn>
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* Additional sites — only renders when the customer has more
+          than just the head office. Compact row per site, click to
+          jump to the Sites tab for full CRUD. */}
+      {additional.length > 0 && (
+        <Card padding={0}>
+          <div
+            style={{
+              padding: "12px 16px",
+              borderBottom: `1px solid ${AC.lineDim}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: AC.font,
+                fontSize: 11,
+                fontWeight: 700,
+                color: AC.mute,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+              }}
+            >
+              Additional sites
+            </span>
+            <span
+              style={{
+                padding: "2px 8px",
+                borderRadius: 99,
+                background: AC.bg,
+                color: AC.mute,
+                fontFamily: AC.font,
+                fontSize: 11,
+                fontWeight: 600,
+              }}
+            >
+              {additional.length}
+            </span>
+            <div style={{ flex: 1 }} />
+            <Btn size="sm" icon="settings" onClick={onJumpToSites}>
+              Manage
+            </Btn>
           </div>
-        ) : (
-          <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.mute }}>
-            No sites yet. Open the Sites tab to add one.
+          <div>
+            {additional.map((s, i) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={onJumpToSites}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "12px 16px",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom:
+                    i < additional.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: AC.brandSoft,
+                    color: AC.brandDeep,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  <AGlyph name="pin" size={14} color={AC.brandDeep} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 13.5,
+                      fontWeight: 700,
+                      color: AC.ink,
+                      letterSpacing: -0.2,
+                    }}
+                  >
+                    {s.name}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 12,
+                      color: AC.mute,
+                      marginTop: 2,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {s.address || "No address yet"}
+                    {" · Geofence "}
+                    {s.geofence_radius_m ?? 100} m
+                  </div>
+                </div>
+                <AGlyph name="chev-r" size={14} color={AC.hint} />
+              </button>
+            ))}
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
     </div>
   );
 }

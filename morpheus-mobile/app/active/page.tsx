@@ -456,7 +456,7 @@ export default function ActiveShiftPage() {
               >
                 {shift.name}
               </div>
-              {shift.siteName && shift.siteName !== "Main" && (
+              {shift.siteName && shift.siteName !== "Head office" && (
                 <div
                   style={{
                     fontFamily: MC.font,

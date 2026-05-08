@@ -591,7 +591,7 @@ function ShiftRow({
             {/* Site sublabel — only when the customer has a named site
                 that's not the default "Main". Same rule as the
                 dashboard up-next card. */}
-            {shift.siteName && shift.siteName !== "Main" && (
+            {shift.siteName && shift.siteName !== "Head office" && (
               <span
                 style={{
                   fontFamily: MC.font,

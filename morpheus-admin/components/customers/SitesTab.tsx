@@ -491,91 +491,112 @@ function SiteEditor({
     await onSaved();
   }
 
+  // Live coords for the map preview: the picked-from-autocomplete
+  // override wins over the original. When neither exists yet we just
+  // render the empty placeholder.
+  const liveCoords = pickedCoords ?? coords;
+
   return (
-    <Card padding={18}>
+    <Card padding={0}>
       <div
         style={{
-          fontFamily: AC.font,
-          fontSize: 11,
-          fontWeight: 700,
-          color: AC.mute,
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
-          marginBottom: 12,
+          display: "grid",
+          gridTemplateColumns: "1fr 340px",
+          gap: 0,
+          alignItems: "stretch",
         }}
       >
-        {mode === "create" ? "New site" : "Edit site"}
-      </div>
-
-      <FieldRow label="Name" required>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Main store, Warehouse B"
-          autoFocus={mode === "create"}
-          style={inputStyle}
-        />
-      </FieldRow>
-
-      <FieldRow
-        label="Address"
-        hint={
-          pickedCoords
-            ? `New coordinates: ${pickedCoords.lat.toFixed(5)}, ${pickedCoords.lng.toFixed(5)}`
-            : coords
-            ? `Current: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
-            : "Start typing — pick a match to lock coordinates."
-        }
-      >
-        <AddressAutocomplete
-          value={address}
-          onChange={(v) => {
-            setAddress(v);
-            if (pickedCoords) setPickedCoords(null);
+        {/* Form side */}
+        <div
+          style={{
+            padding: 18,
+            borderRight: `1px solid ${AC.lineDim}`,
+            minWidth: 0,
           }}
-          onSelect={(s) => {
-            setPickedCoords({ lat: s.latitude, lng: s.longitude });
-          }}
-          placeholder="e.g. 1480 Riverside Way, Cape Town"
-        />
-      </FieldRow>
+        >
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              fontWeight: 700,
+              color: AC.mute,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              marginBottom: 12,
+            }}
+          >
+            {mode === "create" ? "New site" : "Edit site"}
+          </div>
 
-      <FieldRow
-        label={`Geofence radius · ${geofenceM} m`}
-        hint="Reps must be inside this radius to check in without an off-site exception."
-      >
-        <input
-          type="range"
-          min={25}
-          max={500}
-          step={5}
-          value={geofenceM}
-          onChange={(e) => setGeofenceM(parseInt(e.target.value, 10))}
-          style={{ width: "100%" }}
-        />
-        <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-          {[50, 75, 100, 150, 250].map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setGeofenceM(m)}
-              style={{
-                padding: "4px 10px",
-                borderRadius: 99,
-                border: `1px solid ${geofenceM === m ? AC.ink : AC.line}`,
-                background: geofenceM === m ? AC.ink : "#fff",
-                color: geofenceM === m ? "#fff" : AC.ink2,
-                fontFamily: AC.font,
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: "pointer",
+          <FieldRow label="Name" required>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Main store, Warehouse B"
+              autoFocus={mode === "create"}
+              style={inputStyle}
+            />
+          </FieldRow>
+
+          <FieldRow
+            label="Address"
+            hint={
+              pickedCoords
+                ? `New coordinates: ${pickedCoords.lat.toFixed(5)}, ${pickedCoords.lng.toFixed(5)}`
+                : coords
+                ? `Current: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
+                : "Start typing — pick a match to lock coordinates."
+            }
+          >
+            <AddressAutocomplete
+              value={address}
+              onChange={(v) => {
+                setAddress(v);
+                if (pickedCoords) setPickedCoords(null);
               }}
-            >
-              {m} m
-            </button>
-          ))}
-        </div>
-      </FieldRow>
+              onSelect={(s) => {
+                setPickedCoords({ lat: s.latitude, lng: s.longitude });
+              }}
+              placeholder="e.g. 1480 Riverside Way, Cape Town"
+            />
+          </FieldRow>
+
+          <FieldRow
+            label={`Geofence radius · ${geofenceM} m`}
+            hint="Reps must be inside this radius to check in without an off-site exception."
+          >
+            <input
+              type="range"
+              min={25}
+              max={500}
+              step={5}
+              value={geofenceM}
+              onChange={(e) => setGeofenceM(parseInt(e.target.value, 10))}
+              style={{ width: "100%" }}
+            />
+            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+              {[50, 75, 100, 150, 250].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setGeofenceM(m)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 99,
+                    border: `1px solid ${geofenceM === m ? AC.ink : AC.line}`,
+                    background: geofenceM === m ? AC.ink : "#fff",
+                    color: geofenceM === m ? "#fff" : AC.ink2,
+                    fontFamily: AC.font,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {m} m
+                </button>
+              ))}
+            </div>
+          </FieldRow>
 
       {note && (
         <div
@@ -612,13 +633,62 @@ function SiteEditor({
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <Btn size="sm" onClick={onCancel} disabled={busy}>
-          Cancel
-        </Btn>
-        <Btn size="sm" kind="primary" icon="check" onClick={onSave} disabled={busy}>
-          {busy ? "Saving…" : mode === "create" ? "Add site" : "Save"}
-        </Btn>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Btn size="sm" onClick={onCancel} disabled={busy}>
+              Cancel
+            </Btn>
+            <Btn size="sm" kind="primary" icon="check" onClick={onSave} disabled={busy}>
+              {busy ? "Saving…" : mode === "create" ? "Add site" : "Save"}
+            </Btn>
+          </div>
+        </div>
+
+        {/* Map side — live preview that updates as the manager picks
+            an address from the autocomplete and slides the geofence.
+            Shows a dashed empty placeholder until coordinates exist. */}
+        <div
+          style={{
+            minHeight: 320,
+            background: "#F1F4F7",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+            borderTopRightRadius: 14,
+            borderBottomRightRadius: 14,
+          }}
+        >
+          {liveCoords ? (
+            <AddressMap
+              lat={liveCoords.lat}
+              lng={liveCoords.lng}
+              radiusM={geofenceM}
+              color={customer.color}
+              initials={customer.initials}
+              height={320}
+            />
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 8,
+                fontFamily: AC.font,
+                color: AC.mute,
+                fontSize: 12.5,
+                padding: 16,
+                textAlign: "center",
+              }}
+            >
+              <AGlyph name="pin" size={26} color={AC.faint} />
+              <div>Pick an address to preview</div>
+              <div style={{ fontSize: 11, color: AC.hint }}>
+                The geofence circle updates as you slide.
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </Card>
   );

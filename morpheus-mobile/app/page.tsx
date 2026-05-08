@@ -662,7 +662,7 @@ function UpNextCard({
                 {next.name}
                 {/* Site sublabel — only for customers with a non-default
                     site name. Quiet for the single-site case. */}
-                {next.siteName && next.siteName !== "Main" && (
+                {next.siteName && next.siteName !== "Head office" && (
                   <span
                     style={{
                       fontFamily: MC.font,
