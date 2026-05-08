@@ -107,37 +107,30 @@ CREATE TRIGGER customer_sites_touch_updated_at
   BEFORE UPDATE ON public.customer_sites
   FOR EACH ROW EXECUTE FUNCTION public.touch_customer_sites_updated_at();
 
--- 6. RLS — same envelope as customers (managers full CRUD, reps read
---    sites for customers they're assigned to). Keep parity with the
---    customers table policy: anyone authenticated can read; only
---    managers can write. Reps need read access so the mobile app
---    can render shift cards with the right site name + coords.
+-- 6. RLS — matches the permissive Phase-pre-4 envelope every other
+--    customer-adjacent table uses (customer_tasks, custom_fields,
+--    library_files): RLS is enabled so the table is "secure", but any
+--    authenticated user can read + write. Phase 4 will tighten every
+--    write policy to managers-only in one coordinated pass — going
+--    stricter just on this table now would diverge from the schema
+--    and break CRUD for managers whose profiles.role isn't set.
 ALTER TABLE public.customer_sites ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS customer_sites_read ON public.customer_sites;
-CREATE POLICY customer_sites_read
-  ON public.customer_sites
-  FOR SELECT
-  TO authenticated
-  USING (true);
+DROP POLICY IF EXISTS "customer_sites_select" ON public.customer_sites;
+CREATE POLICY "customer_sites_select"
+  ON public.customer_sites FOR SELECT TO authenticated USING (true);
 
-DROP POLICY IF EXISTS customer_sites_write ON public.customer_sites;
-CREATE POLICY customer_sites_write
-  ON public.customer_sites
-  FOR ALL
-  TO authenticated
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role = 'manager'
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role = 'manager'
-    )
-  );
+DROP POLICY IF EXISTS "customer_sites_insert" ON public.customer_sites;
+CREATE POLICY "customer_sites_insert"
+  ON public.customer_sites FOR INSERT TO authenticated WITH CHECK (true);
+
+DROP POLICY IF EXISTS "customer_sites_update" ON public.customer_sites;
+CREATE POLICY "customer_sites_update"
+  ON public.customer_sites FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "customer_sites_delete" ON public.customer_sites;
+CREATE POLICY "customer_sites_delete"
+  ON public.customer_sites FOR DELETE TO authenticated USING (true);
 
 -- 7. Realtime — surface site changes the same way customers do, so
 --    the admin Live Ops view + mobile dashboards refresh when a
