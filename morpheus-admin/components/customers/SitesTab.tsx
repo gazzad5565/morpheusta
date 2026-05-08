@@ -383,6 +383,91 @@ function SiteCard({
             Geofence · {radius} m
           </div>
 
+          {/* Contact — only renders the lines that are actually filled
+              in. Phone/email get tap targets so a manager can call or
+              email straight from the admin (matches the rep app's UX). */}
+          {(site.contact_name || site.contact_phone || site.contact_email) && (
+            <div
+              style={{
+                marginTop: 8,
+                padding: "8px 10px",
+                background: AC.bg,
+                borderRadius: 8,
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                fontFamily: AC.font,
+                fontSize: 12,
+                color: AC.ink2,
+              }}
+            >
+              {site.contact_name && (
+                <div style={{ fontWeight: 600, color: AC.ink }}>
+                  {site.contact_name}
+                </div>
+              )}
+              {site.contact_phone && (
+                <a
+                  href={`tel:${site.contact_phone}`}
+                  style={{
+                    color: AC.brandDeep,
+                    textDecoration: "none",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <AGlyph name="clock" size={11} color={AC.brandDeep} />
+                  {site.contact_phone}
+                </a>
+              )}
+              {site.contact_email && (
+                <a
+                  href={`mailto:${site.contact_email}`}
+                  style={{
+                    color: AC.brandDeep,
+                    textDecoration: "none",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <AGlyph name="mail" size={11} color={AC.brandDeep} />
+                  {site.contact_email}
+                </a>
+              )}
+            </div>
+          )}
+          {site.notes && (
+            <div
+              style={{
+                marginTop: 8,
+                padding: "8px 10px",
+                background: AC.warnTint,
+                borderRadius: 8,
+                fontFamily: AC.font,
+                fontSize: 12,
+                color: "#6d4808",
+                lineHeight: 1.45,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                  marginBottom: 4,
+                  color: "#7d5708",
+                }}
+              >
+                Access notes
+              </div>
+              {site.notes}
+            </div>
+          )}
+
           <div style={{ flex: 1 }} />
 
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -426,6 +511,12 @@ function SiteEditor({
   const [geofenceM, setGeofenceM] = useState<number>(
     initial?.geofence_radius_m ?? DEFAULT_GEOFENCE_M
   );
+  // Per-site contact details — every field optional. Reps see these
+  // on the mobile shift detail (tap-to-call, tap-to-mail, access notes).
+  const [contactName, setContactName] = useState(initial?.contact_name ?? "");
+  const [contactPhone, setContactPhone] = useState(initial?.contact_phone ?? "");
+  const [contactEmail, setContactEmail] = useState(initial?.contact_email ?? "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -477,6 +568,10 @@ function SiteEditor({
       latitude,
       longitude,
       geofence_radius_m: geofenceM,
+      contact_name: contactName.trim() || null,
+      contact_phone: contactPhone.trim() || null,
+      contact_email: contactEmail.trim() || null,
+      notes: notes.trim() || null,
     };
 
     const r =
@@ -596,6 +691,72 @@ function SiteEditor({
                 </button>
               ))}
             </div>
+          </FieldRow>
+
+          {/* Contact section — every field optional. Reps see these on
+              the mobile shift detail (tap-to-call, mailto, access
+              notes shown while travelling). */}
+          <div
+            style={{
+              borderTop: `1px solid ${AC.lineDim}`,
+              paddingTop: 14,
+              marginTop: 4,
+              marginBottom: 4,
+              fontFamily: AC.font,
+              fontSize: 11,
+              fontWeight: 700,
+              color: AC.mute,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+            }}
+          >
+            Contact (optional)
+          </div>
+          <FieldRow label="Contact name">
+            <input
+              value={contactName}
+              onChange={(e) => setContactName(e.target.value)}
+              placeholder="e.g. Sarah Lewis — Store Manager"
+              style={inputStyle}
+            />
+          </FieldRow>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <FieldRow label="Phone" hint="Tappable on mobile.">
+              <input
+                type="tel"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="+1 555 010 1234"
+                style={inputStyle}
+              />
+            </FieldRow>
+            <FieldRow label="Email">
+              <input
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder="site@example.com"
+                style={inputStyle}
+              />
+            </FieldRow>
+          </div>
+          <FieldRow
+            label="Access notes"
+            hint="Where to park, buzzer codes, back-entrance instructions, etc."
+          >
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder={'e.g. "Use back entrance after 6pm. Buzz #1234. Park in lot B."'}
+              rows={3}
+              style={{
+                ...inputStyle,
+                resize: "vertical",
+                minHeight: 64,
+                fontFamily: AC.font,
+                lineHeight: 1.5,
+              }}
+            />
           </FieldRow>
 
       {note && (

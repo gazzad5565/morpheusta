@@ -21,6 +21,15 @@ export interface CustomerSite {
   latitude: number | null;
   longitude: number | null;
   geofence_radius_m: number | null;
+  /**
+   * Per-site contact details. All optional — small sites won't bother,
+   * multi-site customers usually fill these in so reps can call ahead
+   * or read the access notes ("buzz #1234, park in lot B") on arrival.
+   */
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  notes: string | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -86,6 +95,10 @@ export interface NewSite {
   latitude?: number | null;
   longitude?: number | null;
   geofence_radius_m?: number | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  contact_email?: string | null;
+  notes?: string | null;
 }
 
 export async function createSite(
@@ -103,6 +116,10 @@ export async function createSite(
       latitude: s.latitude ?? null,
       longitude: s.longitude ?? null,
       geofence_radius_m: s.geofence_radius_m ?? null,
+      contact_name: s.contact_name ?? null,
+      contact_phone: s.contact_phone ?? null,
+      contact_email: s.contact_email ?? null,
+      notes: s.notes ?? null,
     })
     .select()
     .single();
@@ -125,6 +142,10 @@ export interface SitePatch {
   latitude?: number | null;
   longitude?: number | null;
   geofence_radius_m?: number | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  contact_email?: string | null;
+  notes?: string | null;
   active?: boolean;
 }
 

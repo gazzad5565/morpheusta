@@ -497,6 +497,9 @@ function ShiftRow({
     siteId?: string | null;
     siteName?: string | null;
     siteAddress?: string | null;
+    siteContactPhone?: string | null;
+    siteContactName?: string | null;
+    siteNotes?: string | null;
   };
   /** The shift's lifecycle state (scheduled | in-progress | complete | late). Only meaningful for "Mine". */
   state?: string;
@@ -784,6 +787,75 @@ function ShiftRow({
             padding: "12px 14px 14px",
           }}
         >
+          {/* Site contact strip — phone is tap-to-call, useful when
+              the rep is travelling and needs to give an ETA or ask
+              for the back-entrance code. Only renders when the site
+              has a phone or notes worth surfacing. */}
+          {(shift.siteContactPhone || shift.siteNotes) && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                marginBottom: 10,
+              }}
+            >
+              {shift.siteContactPhone && (
+                <a
+                  href={`tel:${shift.siteContactPhone}`}
+                  style={{
+                    display: "inline-flex",
+                    alignSelf: "flex-start",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "8px 12px",
+                    borderRadius: 99,
+                    background: MC.brand,
+                    color: "#fff",
+                    fontFamily: MC.font,
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    textDecoration: "none",
+                    boxShadow: `0 4px 10px ${MC.brand}55`,
+                  }}
+                >
+                  <Glyph name="clock" size={13} color="#fff" strokeWidth={2.4} />
+                  Call site
+                  {shift.siteContactName ? ` · ${shift.siteContactName}` : ""}
+                </a>
+              )}
+              {shift.siteNotes && (
+                <div
+                  style={{
+                    padding: "8px 10px",
+                    background: "#FFF6E2",
+                    border: "1px solid #F2D17A",
+                    borderRadius: 8,
+                    fontFamily: MC.font,
+                    fontSize: 12,
+                    color: "#6d4808",
+                    lineHeight: 1.45,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: 0.4,
+                      textTransform: "uppercase",
+                      marginBottom: 4,
+                      color: "#7d5708",
+                    }}
+                  >
+                    Access notes
+                  </div>
+                  {shift.siteNotes}
+                </div>
+              )}
+            </div>
+          )}
+
           {isComplete ? (
             <div
               style={{

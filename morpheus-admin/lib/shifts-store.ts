@@ -51,6 +51,10 @@ export interface ShiftRow {
     latitude: number | null;
     longitude: number | null;
     geofence_radius_m: number | null;
+    contact_name: string | null;
+    contact_phone: string | null;
+    contact_email: string | null;
+    notes: string | null;
   } | null;
 }
 
@@ -62,7 +66,7 @@ export async function listShifts(opts?: {
   const date = opts?.date || todayLocalISO();
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("shift_date", date)
     .order("start_time", { ascending: true })
     .limit(opts?.limit ?? 100);
@@ -85,7 +89,7 @@ export async function listShiftsInRange(
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .gte("shift_date", startISO)
     .lte("shift_date", endISO)
     .order("shift_date", { ascending: true })
@@ -152,7 +156,7 @@ export async function getShiftById(id: string): Promise<ShiftRow | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("id", id)
     .maybeSingle();
   if (error) {

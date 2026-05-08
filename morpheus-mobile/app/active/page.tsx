@@ -41,9 +41,16 @@ interface ShiftData {
   /** The real `shifts.id` UUID — used for persisting task completions. */
   shiftId: string;
   /** Site name for the shift, when the customer has more than the
-   *  auto-created "Main" site. Null otherwise so the UI can hide the
-   *  pin row entirely for single-site customers. */
+   *  auto-created "Head office" site. Null otherwise so the UI can
+   *  hide the pin row entirely for single-site customers. */
   siteName: string | null;
+  /** Per-site contact details. Reps tap the phone to call ahead, the
+   *  email to send a quick "running 10 min late" note, and read the
+   *  access notes block while travelling for parking / buzzer info. */
+  siteContactName: string | null;
+  siteContactPhone: string | null;
+  siteContactEmail: string | null;
+  siteNotes: string | null;
 }
 
 export default function ActiveShiftPage() {
@@ -77,6 +84,10 @@ export default function ActiveShiftPage() {
         customerId: s.id,
         shiftId: s.realId,
         siteName: s.siteName,
+        siteContactName: s.siteContactName,
+        siteContactPhone: s.siteContactPhone,
+        siteContactEmail: s.siteContactEmail,
+        siteNotes: s.siteNotes,
       });
       setLoadedShift(true);
       const [rows, alreadyDone] = await Promise.all([
@@ -485,6 +496,116 @@ export default function ActiveShiftPage() {
               </div>
             </div>
           </div>
+
+          {/* Site contact strip — only renders when the site has any
+              contact info filled in. Phone + email are tappable so a
+              rep can call or message the site without leaving the
+              shift screen. */}
+          {(shift.siteContactName ||
+            shift.siteContactPhone ||
+            shift.siteContactEmail) && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: "10px 12px",
+                background: MC.bg,
+                borderRadius: 10,
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              {shift.siteContactName && (
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: MC.ink,
+                  }}
+                >
+                  {shift.siteContactName}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {shift.siteContactPhone && (
+                  <a
+                    href={`tel:${shift.siteContactPhone}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "7px 11px",
+                      borderRadius: 99,
+                      background: MC.brand,
+                      color: "#fff",
+                      fontFamily: MC.font,
+                      fontSize: 12.5,
+                      fontWeight: 700,
+                      textDecoration: "none",
+                      boxShadow: `0 4px 10px ${MC.brand}55`,
+                    }}
+                  >
+                    <Glyph name="clock" size={13} color="#fff" strokeWidth={2.4} />
+                    Call · {shift.siteContactPhone}
+                  </a>
+                )}
+                {shift.siteContactEmail && (
+                  <a
+                    href={`mailto:${shift.siteContactEmail}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "7px 11px",
+                      borderRadius: 99,
+                      background: "#fff",
+                      color: MC.brandDeep,
+                      border: `1px solid ${MC.brand}55`,
+                      fontFamily: MC.font,
+                      fontSize: 12.5,
+                      fontWeight: 700,
+                      textDecoration: "none",
+                    }}
+                  >
+                    Email
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Access notes — pre-arrival info ("buzz #1234, lot B"). */}
+          {shift.siteNotes && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: "10px 12px",
+                background: "#FFF6E2",
+                border: "1px solid #F2D17A",
+                borderRadius: 10,
+                fontFamily: MC.font,
+                fontSize: 12.5,
+                color: "#6d4808",
+                lineHeight: 1.5,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                  marginBottom: 4,
+                  color: "#7d5708",
+                }}
+              >
+                Access notes
+              </div>
+              {shift.siteNotes}
+            </div>
+          )}
         </div>
       </div>
 

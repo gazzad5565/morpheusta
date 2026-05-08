@@ -481,6 +481,64 @@ function CheckInPage() {
             <Glyph name="target" size={18} color={MC.brandDeep} />
           </div>
         </div>
+
+        {/* Quick "Call the site" pill — when the rep is off-site or
+            running late, this is the fastest way to reach the contact
+            person to explain. Only renders when the site has a phone. */}
+        {shift?.siteContactPhone && (
+          <a
+            href={`tel:${shift.siteContactPhone}`}
+            style={{
+              marginTop: 8,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 12px",
+              borderRadius: 99,
+              background: MC.brand,
+              color: "#fff",
+              fontFamily: MC.font,
+              fontSize: 12.5,
+              fontWeight: 700,
+              textDecoration: "none",
+              boxShadow: `0 4px 10px ${MC.brand}55`,
+            }}
+          >
+            <Glyph name="clock" size={13} color="#fff" strokeWidth={2.4} />
+            Call site
+            {shift.siteContactName ? ` · ${shift.siteContactName}` : ""}
+          </a>
+        )}
+        {shift?.siteNotes && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              background: "#FFF6E2",
+              border: "1px solid #F2D17A",
+              borderRadius: 10,
+              fontFamily: MC.font,
+              fontSize: 12.5,
+              color: "#6d4808",
+              lineHeight: 1.5,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10.5,
+                fontWeight: 700,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                marginBottom: 4,
+                color: "#7d5708",
+              }}
+            >
+              Access notes
+            </div>
+            {shift.siteNotes}
+          </div>
+        )}
       </div>
 
       <div style={{ padding: "6px 20px 10px" }}>

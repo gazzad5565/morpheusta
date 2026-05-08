@@ -44,6 +44,10 @@ interface ShiftRow {
     latitude: number | null;
     longitude: number | null;
     geofence_radius_m: number | null;
+    contact_name: string | null;
+    contact_phone: string | null;
+    contact_email: string | null;
+    notes: string | null;
   } | null;
 }
 
@@ -71,6 +75,14 @@ export interface ShiftSiteFields {
   /** Site-level geofence override; falls back to customer/org default
    *  when null (handled at the consumer). */
   siteGeofenceM: number | null;
+  /** Per-site contact details. Reps tap-to-call / tap-to-mail when
+   *  travelling or having trouble finding the site; access notes are
+   *  the freeform "use back entrance, buzz #1234, park lot B" string
+   *  shown on the active shift screen. */
+  siteContactName: string | null;
+  siteContactPhone: string | null;
+  siteContactEmail: string | null;
+  siteNotes: string | null;
 }
 
 export type ShiftWithMeta = Shift &
@@ -114,6 +126,10 @@ function rowToShift(row: ShiftRow): ShiftWithMeta {
     siteLat: s?.latitude ?? null,
     siteLng: s?.longitude ?? null,
     siteGeofenceM: s?.geofence_radius_m ?? null,
+    siteContactName: s?.contact_name ?? null,
+    siteContactPhone: s?.contact_phone ?? null,
+    siteContactEmail: s?.contact_email ?? null,
+    siteNotes: s?.notes ?? null,
   };
 }
 
@@ -132,7 +148,7 @@ export async function listMyShiftsToday(): Promise<
   const today = todayISO();
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("rep_id", userId)
     .eq("shift_date", today)
     .order("start_time", { ascending: true });
@@ -182,7 +198,7 @@ export async function getMyActiveShift(): Promise<
 
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("rep_id", userId)
     .eq("state", "in-progress")
     .order("check_in_at", { ascending: false })
@@ -205,7 +221,7 @@ export async function listUnassignedShiftsToday(): Promise<
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .is("rep_id", null)
     .eq("shift_date", todayISO())
     .order("start_time", { ascending: true });
@@ -321,7 +337,7 @@ export async function getShiftById(
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m)")
+    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("id", shiftId)
     .maybeSingle();
   if (error || !data) {

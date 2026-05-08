@@ -601,6 +601,78 @@ function OverviewTab({
                     </span>
                   )}
                 </div>
+
+                {/* Contact block — only renders the lines that exist.
+                    Phone + email are tap targets. */}
+                {(headOffice.contact_name ||
+                  headOffice.contact_phone ||
+                  headOffice.contact_email) && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: "8px 10px",
+                      background: AC.bg,
+                      borderRadius: 8,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      fontFamily: AC.font,
+                      fontSize: 12.5,
+                      color: AC.ink2,
+                    }}
+                  >
+                    {headOffice.contact_name && (
+                      <div style={{ fontWeight: 600, color: AC.ink }}>
+                        {headOffice.contact_name}
+                      </div>
+                    )}
+                    {headOffice.contact_phone && (
+                      <a
+                        href={`tel:${headOffice.contact_phone}`}
+                        style={{ color: AC.brandDeep, textDecoration: "none" }}
+                      >
+                        {headOffice.contact_phone}
+                      </a>
+                    )}
+                    {headOffice.contact_email && (
+                      <a
+                        href={`mailto:${headOffice.contact_email}`}
+                        style={{ color: AC.brandDeep, textDecoration: "none" }}
+                      >
+                        {headOffice.contact_email}
+                      </a>
+                    )}
+                  </div>
+                )}
+                {headOffice.notes && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: "8px 10px",
+                      background: AC.warnTint,
+                      borderRadius: 8,
+                      fontFamily: AC.font,
+                      fontSize: 12,
+                      color: "#6d4808",
+                      lineHeight: 1.45,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: 0.4,
+                        textTransform: "uppercase",
+                        marginBottom: 4,
+                        color: "#7d5708",
+                      }}
+                    >
+                      Access notes
+                    </div>
+                    {headOffice.notes}
+                  </div>
+                )}
               </div>
             </>
           ) : (
