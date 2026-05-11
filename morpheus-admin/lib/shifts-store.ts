@@ -54,6 +54,10 @@ export interface ShiftRow {
    *  2026-05-11 attention_resolution migration. NULL until a manager
    *  (or the rep, via withdraw) acts. */
   attention_resolution: string | null;
+  /** Rep-supplied freeform note on this shift. Edited on the mobile
+   *  /active page, read-only on the admin detail. See the
+   *  2026-05-11 shifts_notes migration. */
+  rep_notes: string | null;
   /** Joined site row when the shift has a site_id. The customer's
    *  legacy address fields are still populated for back-compat but
    *  every read path should prefer the site coords / address. */

@@ -17,6 +17,7 @@ import {
   getMyActiveShift,
   getTasksForCustomer,
   setShiftBreakState,
+  saveShiftNotes,
   subscribeShifts,
   type TaskRow,
 } from "@/lib/shifts-store";
@@ -51,6 +52,9 @@ interface ShiftData {
   siteContactPhone: string | null;
   siteContactEmail: string | null;
   siteNotes: string | null;
+  /** Rep's own free-text notes on this shift, edited from /active.
+   *  Persists to shifts.rep_notes; admin sees it read-only. */
+  repNotes: string | null;
 }
 
 export default function ActiveShiftPage() {
@@ -88,6 +92,7 @@ export default function ActiveShiftPage() {
         siteContactPhone: s.siteContactPhone,
         siteContactEmail: s.siteContactEmail,
         siteNotes: s.siteNotes,
+        repNotes: s.repNotes,
       });
       setLoadedShift(true);
       const [rows, alreadyDone] = await Promise.all([
@@ -848,6 +853,18 @@ export default function ActiveShiftPage() {
         )}
       </div>
 
+      {/* Notes — rep-supplied freeform context tied to this shift.
+          Auto-saves on blur via the wrapper. Admin sees it read-only
+          on /shifts/[id]. */}
+      {shiftData?.shiftId && (
+        <>
+          <SectionLabel>Notes</SectionLabel>
+          <div style={{ padding: "0 16px 18px" }}>
+            <ShiftNotesCard shiftId={shiftData.shiftId} initial={shiftData.repNotes ?? null} />
+          </div>
+        </>
+      )}
+
       <AppFooter />
 
       {openSheet && (
@@ -1355,4 +1372,109 @@ function formatElapsed(sec: number | null) {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * ShiftNotesCard — freeform textarea that auto-saves on blur. Keeps
+ * the rep's notes tied to a specific shift so admin can read them on
+ * /shifts/[id] later. Empty/whitespace-only saves clear the note.
+ *
+ * Save UX:
+ *   - Edits are local until blur
+ *   - On blur, if the trimmed value differs from the last-saved
+ *     snapshot, we call saveShiftNotes
+ *   - Shows a "Saved" pip for 2 s after a successful save so the
+ *     rep gets visible confirmation
+ */
+function ShiftNotesCard({
+  shiftId,
+  initial,
+}: {
+  shiftId: string;
+  initial: string | null;
+}) {
+  const [text, setText] = useState<string>(initial ?? "");
+  const [lastSaved, setLastSaved] = useState<string>(initial ?? "");
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (savedAt == null) return;
+    const id = window.setTimeout(() => setSavedAt(null), 2000);
+    return () => window.clearTimeout(id);
+  }, [savedAt]);
+
+  async function persist() {
+    const trimmed = text.trim();
+    if (trimmed === lastSaved.trim()) return;
+    setSaving(true);
+    setError(null);
+    const r = await saveShiftNotes(shiftId, text);
+    setSaving(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't save your note. Try again?");
+      return;
+    }
+    setLastSaved(trimmed);
+    setSavedAt(Date.now());
+  }
+
+  return (
+    <div
+      style={{
+        background: MC.card,
+        borderRadius: MC.radiusCard,
+        border: `1px solid ${MC.line}`,
+        padding: 12,
+      }}
+    >
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          void persist();
+        }}
+        placeholder="Anything the manager should know about this shift? (Auto-saves)"
+        rows={4}
+        style={{
+          width: "100%",
+          padding: "10px 12px",
+          border: `1px solid ${MC.line}`,
+          borderRadius: 10,
+          background: "#fff",
+          fontFamily: MC.font,
+          fontSize: 14,
+          color: MC.ink,
+          lineHeight: 1.45,
+          resize: "vertical",
+          minHeight: 88,
+          outline: "none",
+        }}
+      />
+      <div
+        style={{
+          marginTop: 6,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          fontFamily: MC.font,
+          fontSize: 11.5,
+          color: MC.mute,
+          minHeight: 16,
+        }}
+      >
+        {saving && <span>Saving…</span>}
+        {!saving && savedAt && (
+          <span style={{ color: "#0d6a45", fontWeight: 600 }}>Saved ✓</span>
+        )}
+        {!saving && !savedAt && error && (
+          <span style={{ color: MC.danger, fontWeight: 600 }}>{error}</span>
+        )}
+        {!saving && !savedAt && !error && text.trim().length > 0 && (
+          <span>Auto-saves when you tap outside the box.</span>
+        )}
+      </div>
+    </div>
+  );
 }

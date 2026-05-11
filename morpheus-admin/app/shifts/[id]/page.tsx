@@ -865,6 +865,45 @@ export default function ShiftDetailPage({
 
         {/* Right: custom fields + quick actions */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Rep notes — freeform context the rep added on /active.
+              Read-only here; the rep owns the content. Only renders
+              when there's actually something to show. */}
+          {shift.rep_notes && shift.rep_notes.trim().length > 0 && (
+            <Card padding={16}>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: AC.mute,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                  marginBottom: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <AGlyph name="audit" size={12} color={AC.mute} />
+                Notes from rep
+              </div>
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 13.5,
+                  color: AC.ink,
+                  lineHeight: 1.55,
+                  whiteSpace: "pre-wrap",
+                  padding: "8px 10px",
+                  background: AC.bg,
+                  borderRadius: 8,
+                  border: `1px solid ${AC.lineDim}`,
+                }}
+              >
+                {shift.rep_notes}
+              </div>
+            </Card>
+          )}
           <CustomFieldsCard entity="shift" entityId={shift.id} />
           <Card padding={16}>
             <div

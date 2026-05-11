@@ -27,6 +27,10 @@ interface ShiftRow {
   check_in_at: string | null;
   tasks_done: number;
   tasks_total: number;
+  /** Freeform rep-supplied note for this shift. See the 2026-05-11
+   *  shifts_notes migration. Edited from /active; shown read-only
+   *  on the admin shift detail page. */
+  rep_notes: string | null;
   /** Attention overlay — null when nothing needs a manager to look
    *  at it, otherwise one of 'unable_to_attend' | 'no_show' | …
    *  Resolved when attention_resolved_at is set. See the 2026-05-11
@@ -131,6 +135,8 @@ export type ShiftWithMeta = Shift &
     rawStartTime: string;
     rawEndTime: string;
     shiftDate: string;
+    /** Freeform rep-supplied note tied to this shift. */
+    repNotes: string | null;
   };
 
 function rowToShift(row: ShiftRow): ShiftWithMeta {
@@ -170,7 +176,35 @@ function rowToShift(row: ShiftRow): ShiftWithMeta {
     attentionRaisedAt: row.attention_raised_at ?? null,
     attentionResolvedAt: row.attention_resolved_at ?? null,
     attentionResolution: row.attention_resolution ?? null,
+    repNotes: row.rep_notes ?? null,
   };
+}
+
+/**
+ * Save a rep-supplied note onto a shift. The rep can edit notes
+ * during a shift (and after, until the shift is locked by a
+ * manager-side state machine) — admin sees them read-only on
+ * /shifts/[id]. Empty/whitespace-only strings clear the note.
+ */
+export async function saveShiftNotes(
+  shiftId: string,
+  notes: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) return { ok: false, error: "Not signed in" };
+
+  const trimmed = notes.trim();
+  const { error } = await supabase
+    .from("shifts")
+    .update({ rep_notes: trimmed || null })
+    .eq("id", shiftId)
+    .eq("rep_id", userId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
 
 // "Today" in local tz — see lib/format.ts for the why.
