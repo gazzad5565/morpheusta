@@ -29,13 +29,22 @@ import { MC } from "@/lib/tokens";
 import { Glyph } from "@/components/Glyph";
 
 export type CheckInPhase = "submitting" | "logging" | "done";
+/** Drives the headline copy and which Glyph fills the brand circle.
+ *  "in" / "out" share the same visual machinery (rings, stepper,
+ *  progress bar, elapsed counter) so reps see the same affordance on
+ *  both check-in and check-out flows. "opening" is the lighter
+ *  variant used by tap-feedback overlays on home-page CTAs: same
+ *  brand circle but a generic "Opening…" headline + no stepper. */
+export type CheckMode = "in" | "out" | "opening";
 
 export function CheckingInOverlay({
   customerName,
   phase,
+  mode = "in",
 }: {
   customerName: string;
   phase: CheckInPhase;
+  mode?: CheckMode;
 }) {
   // Map phase → step index so the stepper highlights deterministic
   // milestones. We also bump a low-frequency tick so the elapsed
@@ -48,18 +57,27 @@ export function CheckingInOverlay({
     return () => window.clearInterval(t);
   }, []);
 
-  const headline =
-    phase === "done"
-      ? "You're checked in!"
-      : phase === "logging"
-      ? "Logging the details…"
-      : "Checking you in";
+  const headline = (() => {
+    if (mode === "opening") return "Opening…";
+    if (mode === "out") {
+      if (phase === "done") return "You're checked out!";
+      if (phase === "logging") return "Logging the details…";
+      return "Wrapping up your shift";
+    }
+    if (phase === "done") return "You're checked in!";
+    if (phase === "logging") return "Logging the details…";
+    return "Checking you in";
+  })();
 
   return (
     <div
       role="status"
       aria-live="polite"
-      aria-label={`${headline} at ${customerName}`}
+      aria-label={
+        mode === "opening"
+          ? headline
+          : `${headline}${customerName ? ` at ${customerName}` : ""}`
+      }
       style={{
         position: "fixed",
         inset: 0,
@@ -123,7 +141,20 @@ export function CheckingInOverlay({
           }}
         >
           <Glyph
-            name={phase === "done" ? "check" : "pin"}
+            // Icon swaps with phase + mode:
+            //   - done → tick (universal "complete" signal)
+            //   - check-out in flight → "leave" (door / exit glyph)
+            //   - check-in in flight → "pin" (drop-pin / arrival)
+            //   - opening → "arrow-r" (forward motion)
+            name={
+              phase === "done"
+                ? "check"
+                : mode === "out"
+                ? "leave"
+                : mode === "opening"
+                ? "arrow-r"
+                : "pin"
+            }
             size={42}
             color="#fff"
             strokeWidth={2.6}
@@ -159,7 +190,17 @@ export function CheckingInOverlay({
           lineHeight: 1.45,
         }}
       >
-        {phase === "done" ? (
+        {mode === "opening" ? (
+          <>
+            Loading{customerName ? <> · <b style={{ color: MC.ink }}>{customerName}</b></> : null}
+          </>
+        ) : mode === "out" ? (
+          phase === "done" ? (
+            <>Nicely done — you&apos;re off the clock at <b style={{ color: MC.ink }}>{customerName}</b>.</>
+          ) : (
+            <>Closing out your shift at <b style={{ color: MC.ink }}>{customerName}</b>…</>
+          )
+        ) : phase === "done" ? (
           <>You&apos;re on the clock at <b style={{ color: MC.ink }}>{customerName}</b>.</>
         ) : (
           <>
@@ -195,20 +236,24 @@ export function CheckingInOverlay({
       </div>
 
       {/* Stepper — 3 dots labelled "Saving", "Logging", "Done".
-          The active dot pulses; completed dots tick. */}
-      <div
-        style={{
-          display: "flex",
-          gap: 20,
-          alignItems: "flex-start",
-          justifyContent: "center",
-          fontFamily: MC.font,
-        }}
-      >
-        <Step label="Saving" active={stepIndex === 0} done={stepIndex > 0} />
-        <Step label="Logging" active={stepIndex === 1} done={stepIndex > 1} />
-        <Step label="Ready" active={stepIndex === 2} done={false} />
-      </div>
+          The active dot pulses; completed dots tick. Skipped in
+          "opening" mode because we don't know real phases yet —
+          just the pulsing brand circle is enough during navigation. */}
+      {mode !== "opening" && (
+        <div
+          style={{
+            display: "flex",
+            gap: 20,
+            alignItems: "flex-start",
+            justifyContent: "center",
+            fontFamily: MC.font,
+          }}
+        >
+          <Step label="Saving" active={stepIndex === 0} done={stepIndex > 0} />
+          <Step label="Logging" active={stepIndex === 1} done={stepIndex > 1} />
+          <Step label="Ready" active={stepIndex === 2} done={false} />
+        </div>
+      )}
 
       {/* Tiny elapsed counter so the rep sees forward motion even on
           a slow network where phases stall for a couple seconds. */}

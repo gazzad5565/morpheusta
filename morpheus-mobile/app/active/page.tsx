@@ -12,6 +12,7 @@ import {
 } from "@/components/Chrome";
 import { Glyph, formatTime, type GlyphName } from "@/components/Glyph";
 import { LoadingBar, Spinner } from "@/components/Loading";
+import { CheckingInOverlay } from "@/components/CheckingInOverlay";
 import { startLocationTracking } from "@/lib/location-tracker";
 import {
   getMyActiveShift,
@@ -194,6 +195,12 @@ export default function ActiveShiftPage() {
 
   const [tasksOpen, setTasksOpen] = useState(true);
   const [availOpen, setAvailOpen] = useState(false);
+  // Tap-feedback overlay shown the moment the rep taps "Check out".
+  // Stays mounted until the destination /check-out page mounts and
+  // this page unmounts. The check-out page itself then takes over
+  // with its own 3-phase overlay, so the rep sees one continuous
+  // loading state from "tap" to "Saved ✓".
+  const [opening, setOpening] = useState<{ customerName: string } | null>(null);
   const [breaksOpen, setBreaksOpen] = useState(false);
 
   const [now, setNow] = useState(Date.now());
@@ -688,6 +695,10 @@ export default function ActiveShiftPage() {
                 const qs = completedTaskIds.length
                   ? `?completed=${completedTaskIds.join(",")}`
                   : "";
+                // Show the overlay BEFORE pushing — without this the
+                // rep sees a half-second dead frame between tapping
+                // and the check-out page mounting its own overlay.
+                setOpening({ customerName: shiftData?.name || "your shift" });
                 router.push(`/check-out${qs}`);
               }}
               style={{
@@ -875,6 +886,18 @@ export default function ActiveShiftPage() {
           onStart={startTask}
           onComplete={completeTask}
           onClose={() => setOpenSheet(null)}
+        />
+      )}
+
+      {/* "Opening…" overlay covers the gap between the rep tapping
+          Check out and the /check-out page mounting its own
+          phase-aware overlay. Without this the screen sits silent
+          for a second or so, especially on slow networks. */}
+      {opening && (
+        <CheckingInOverlay
+          mode="opening"
+          customerName={opening.customerName}
+          phase="submitting"
         />
       )}
     </div>

@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useState, useEffect, useMemo } from "react";
 import { MC } from "@/lib/tokens";
 import { type Shift } from "@/lib/mock-data";
 import { AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
+import { CheckingInOverlay, type CheckMode } from "@/components/CheckingInOverlay";
 import { useMenu } from "@/components/MenuShell";
 import { LoadingBar, Skeleton } from "@/components/Loading";
 import { Glyph, formatTime } from "@/components/Glyph";
@@ -97,6 +99,20 @@ function nameFromEmail(email: string | null | undefined): string {
 const TRAVEL_LS_KEY = "morpheus.travelling_since";
 
 export default function DashboardPage() {
+  const router = useRouter();
+  // Tap-feedback overlay shown the moment the rep taps "Check in to
+  // shift" / "Resume shift". Without this, Next's client-side
+  // navigation runs silently — there's a ~half-second gap between
+  // tap and the destination page mounting where the rep sees nothing
+  // change and can't tell whether the tap registered. Now we mount
+  // the same CheckingInOverlay used by /check-in itself, in its
+  // lighter "opening" mode (no stepper, just the pulsing brand
+  // circle + a customer name), and unmount it when the route fully
+  // mounts and unloads this page.
+  const [opening, setOpening] = useState<{
+    mode: CheckMode;
+    customerName: string;
+  } | null>(null);
   // Lifted state — UpNextCard reacts to these.
   // directionsOpen: rep tapped "Directions" to preview the route on the map.
   // travellingSince: rep tapped "Start travelling" — route is now live.
@@ -445,6 +461,15 @@ export default function DashboardPage() {
         }
         onWithdrawUnable={handleWithdrawUnable}
         unableBusyFor={unableBusyFor}
+        onOpenShift={(mode, customerName, href) => {
+          // Show the overlay BEFORE router.push so the rep sees
+          // motion the moment they tap. The destination page mounts
+          // its own page-level overlay (check-in shows the 3-phase
+          // stepper while it talks to Supabase), then this page
+          // unmounts and the overlay disappears with it.
+          setOpening({ mode, customerName });
+          router.push(href);
+        }}
       />
 
       {/* Break or travel — combined affordance. The chooser sheet lets
@@ -527,6 +552,22 @@ export default function DashboardPage() {
           }
         />
       )}
+
+      {/* Tap-feedback overlay shown the moment the rep taps a CTA
+          that navigates to another page. Stays mounted until React
+          unmounts this whole page, which Next.js does once the
+          destination route finishes rendering. The check-in /
+          check-out destinations mount their own page-level overlay
+          (with the 3-phase stepper) the moment they load, so the
+          handoff looks like one continuous loading state from tap
+          to "Saved ✓". */}
+      {opening && (
+        <CheckingInOverlay
+          mode={opening.mode}
+          customerName={opening.customerName}
+          phase="submitting"
+        />
+      )}
     </div>
   );
 }
@@ -550,6 +591,7 @@ function UpNextCard({
   onUnableToAttend,
   onWithdrawUnable,
   unableBusyFor,
+  onOpenShift,
 }: {
   shifts: DbShift[];
   loaded: boolean;
@@ -566,6 +608,11 @@ function UpNextCard({
   /** Real id of the shift currently in a raise/withdraw DB call.
    *  Used to disable the Withdraw button while it's in flight. */
   unableBusyFor?: string | null;
+  /** Tap-feedback navigation. Called when the rep taps "Check in to
+   *  shift" or "Resume shift" — parent shows the brand-tinted
+   *  overlay BEFORE pushing the route so the gap between tap and
+   *  destination-mount isn't a silent dead zone. */
+  onOpenShift: (mode: CheckMode, customerName: string, href: string) => void;
 }) {
   // Prefer the in-progress shift; otherwise the earliest scheduled one.
   const inProgress = shifts.find((s) => s.state === "in-progress");
@@ -1030,13 +1077,27 @@ function UpNextCard({
                   </div>
                 )}
                 {isResume ? (
-                  <Link href="/active" style={{ textDecoration: "none" }}>
-                    <PrimaryButton icon="arrow-r">Resume shift</PrimaryButton>
-                  </Link>
+                  <PrimaryButton
+                    icon="arrow-r"
+                    onClick={() =>
+                      onOpenShift("opening", next.name || "your shift", "/active")
+                    }
+                  >
+                    Resume shift
+                  </PrimaryButton>
                 ) : (
-                  <Link href={`/check-in?shift=${next.realId}`} style={{ textDecoration: "none" }}>
-                    <PrimaryButton icon="log">Check in to shift</PrimaryButton>
-                  </Link>
+                  <PrimaryButton
+                    icon="log"
+                    onClick={() =>
+                      onOpenShift(
+                        "opening",
+                        next.name || "your shift",
+                        `/check-in?shift=${next.realId}`
+                      )
+                    }
+                  >
+                    Check in to shift
+                  </PrimaryButton>
                 )}
               </div>
 

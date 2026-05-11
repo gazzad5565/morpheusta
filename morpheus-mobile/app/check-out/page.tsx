@@ -14,6 +14,7 @@ import {
 } from "@/components/Chrome";
 import { Glyph, type GlyphName } from "@/components/Glyph";
 import { LoadingBar } from "@/components/Loading";
+import { CheckingInOverlay, type CheckInPhase } from "@/components/CheckingInOverlay";
 import { clearRepLocation } from "@/lib/location-tracker";
 import {
   getMyActiveShift,
@@ -249,18 +250,31 @@ function CheckOutPage() {
     compulsoryDone && offsiteResolved && earlyResolved && !positionLoading;
 
   const [submitting, setSubmitting] = useState(false);
+  // Drives the CheckingInOverlay's stepper for check-out. Mirrors the
+  // check-in pattern: "submitting" while the DB write is in flight,
+  // "logging" while exception events + rep-location clear run,
+  // "done" for the final ~550 ms before we route to /summary.
+  // Null = overlay unmounted (rep still on the form).
+  const [checkOutPhase, setCheckOutPhase] = useState<CheckInPhase | null>(null);
 
   const onProceed = async () => {
     if (submitting) return;
     setSubmitting(true);
+    setCheckOutPhase("submitting");
     // 1. Mark the shift complete in the DB.
     if (shift) {
       const result = await checkOutOfShift(shift.realId, completedIds.length);
       if (!result.ok) {
         setSubmitting(false);
+        setCheckOutPhase(null);
         alert(`Couldn't check out: ${result.error}`);
         return;
       }
+      // Move to "logging" before the secondary writes kick off so
+      // the stepper visibly advances. Even when there are no
+      // exceptions the phase still transitions briefly, keeping
+      // the overlay's behaviour consistent across paths.
+      setCheckOutPhase("logging");
       // 2. Log dedicated exception events alongside the standard checkout.
       if (offsiteTriggered) {
         await logEvent({
@@ -303,6 +317,12 @@ function CheckOutPage() {
       ...(earlyReason ? { earlyReason, earlyNote } : {}),
       ...(shift?.name ? { customer: shift.name } : {}),
     });
+    // Land on the "done" phase so the celebratory frame
+    // ("You're checked out!" + green tick) registers for ~550 ms
+    // before we route. router.push is prefetched, so the
+    // navigation itself feels instant once it fires.
+    setCheckOutPhase("done");
+    await new Promise((r) => window.setTimeout(r, 550));
     router.push(`/summary?${params.toString()}`);
   };
 
@@ -688,6 +708,18 @@ function CheckOutPage() {
       </div>
 
       <AppFooter />
+
+      {/* Full-screen check-out animation. Mounted only while the
+          submit is in flight so the rep sees a confident "something
+          is happening" state rather than a frozen Confirm button.
+          Parent owns the phase; this component is purely visual. */}
+      {checkOutPhase && (
+        <CheckingInOverlay
+          customerName={shift?.name || "your shift"}
+          phase={checkOutPhase}
+          mode="out"
+        />
+      )}
     </div>
   );
 }
