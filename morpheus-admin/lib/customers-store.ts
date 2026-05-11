@@ -225,3 +225,28 @@ export async function deleteCustomer(
   notifySaved("customer removed");
   return { ok: true };
 }
+
+/**
+ * Realtime subscription on the customers table — INSERT, UPDATE,
+ * DELETE all trigger the callback. /customers list mounts this so
+ * a new customer added by another manager appears in real time
+ * without a tab refresh. Per-call channel name to avoid sharing
+ * a single channel between subscribers.
+ */
+let _customersChannelCounter = 0;
+export function subscribeCustomers(onChange: () => void): () => void {
+  if (!isSupabaseConfigured() || !supabase) return () => {};
+  _customersChannelCounter += 1;
+  const channelName = `customers_live_${Date.now()}_${_customersChannelCounter}`;
+  const channel = supabase
+    .channel(channelName)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "customers" },
+      () => onChange()
+    )
+    .subscribe();
+  return () => {
+    supabase!.removeChannel(channel);
+  };
+}

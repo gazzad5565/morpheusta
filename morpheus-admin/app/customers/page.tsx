@@ -27,7 +27,7 @@ import {
   type SortState,
 } from "@/components/ui/SortableHeader";
 import { AC } from "@/lib/tokens";
-import { listCustomers } from "@/lib/customers-store";
+import { listCustomers, subscribeCustomers } from "@/lib/customers-store";
 import type { Customer } from "@/lib/types";
 
 type CustomerSortKey = "name" | "code" | "address" | "status";
@@ -107,11 +107,19 @@ export default function CustomersPage() {
 
   useEffect(() => {
     let cancelled = false;
-    listCustomers().then((rows) => {
-      if (!cancelled) setCustomers(rows);
-    });
+    const load = () =>
+      listCustomers().then((rows) => {
+        if (!cancelled) setCustomers(rows);
+      });
+    load();
+    // Refresh on customer CRUD from any tab/manager — INSERT, UPDATE,
+    // soft-delete (active flag flip), hard delete. Previously this
+    // list was mount-only so two managers working in parallel could
+    // see each other's stale view until a tab refresh.
+    const unsub = subscribeCustomers(load);
     return () => {
       cancelled = true;
+      unsub();
     };
   }, []);
 

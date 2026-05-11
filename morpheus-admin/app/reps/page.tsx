@@ -27,7 +27,7 @@ import {
   type SortState,
 } from "@/components/ui/SortableHeader";
 import { AC } from "@/lib/tokens";
-import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import { listProfiles, subscribeProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listShifts } from "@/lib/shifts-store";
 import { initialsFromNameOrEmail, formatDate } from "@/lib/format";
 import type { CSSProperties } from "react";
@@ -56,26 +56,34 @@ export default function RepsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listProfiles(), listShifts()]).then(([profiles, shifts]) => {
-      if (cancelled) return;
-      const shiftsByRep = new Map<string, number>();
-      for (const s of shifts) {
-        if (s.rep_id) {
-          shiftsByRep.set(s.rep_id, (shiftsByRep.get(s.rep_id) || 0) + 1);
+    const load = () =>
+      Promise.all([listProfiles(), listShifts()]).then(([profiles, shifts]) => {
+        if (cancelled) return;
+        const shiftsByRep = new Map<string, number>();
+        for (const s of shifts) {
+          if (s.rep_id) {
+            shiftsByRep.set(s.rep_id, (shiftsByRep.get(s.rep_id) || 0) + 1);
+          }
         }
-      }
-      const enriched: RepWithStats[] = profiles.map((p) => ({
-        ...p,
-        displayName: displayName(p),
-        initials: initialsFromNameOrEmail(p.name, p.email),
-        joinedLabel: formatDate(p.created_at?.slice(0, 10) || ""),
-        joinedTs: p.created_at ? new Date(p.created_at).getTime() : 0,
-        shiftsToday: shiftsByRep.get(p.id) || 0,
-      }));
-      setReps(enriched);
-    });
+        const enriched: RepWithStats[] = profiles.map((p) => ({
+          ...p,
+          displayName: displayName(p),
+          initials: initialsFromNameOrEmail(p.name, p.email),
+          joinedLabel: formatDate(p.created_at?.slice(0, 10) || ""),
+          joinedTs: p.created_at ? new Date(p.created_at).getTime() : 0,
+          shiftsToday: shiftsByRep.get(p.id) || 0,
+        }));
+        setReps(enriched);
+      });
+    load();
+    // Refresh on any profiles change — new user invited, name/role
+    // changed in /settings/managers, avatar uploaded from the mobile
+    // app, account deleted. Previously this list only ran once on
+    // mount so concurrent admin edits showed stale data.
+    const unsub = subscribeProfiles(load);
     return () => {
       cancelled = true;
+      unsub();
     };
   }, []);
 

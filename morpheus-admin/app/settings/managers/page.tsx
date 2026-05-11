@@ -23,13 +23,9 @@ import {
   type Profile,
 } from "@/lib/profiles-store";
 import { createUser, deleteUser, randomPassword } from "@/lib/users-admin";
+import { initialsFromNameOrEmail } from "@/lib/format";
 
-function deriveInitials(p: Profile): string {
-  const src = p.name?.trim() || p.email.split("@")[0] || "?";
-  const parts = src.split(/\s+|[._-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return parts[0]?.slice(0, 2).toUpperCase() || "??";
-}
+const deriveInitials = (p: Profile) => initialsFromNameOrEmail(p.name, p.email);
 
 function formatJoined(iso: string | undefined): string {
   if (!iso) return "—";

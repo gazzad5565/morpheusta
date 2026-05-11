@@ -11,6 +11,7 @@
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { initialsFromNameOrEmail } from "./format";
 
 export interface RepLocation {
   repId: string;
@@ -41,13 +42,7 @@ interface ProfileRow {
   avatar_url: string | null;
 }
 
-function deriveInitials(name: string, email: string): string {
-  const source = (name?.trim() || email.split("@")[0] || "?").trim();
-  const parts = source.split(/\s+|[._-]+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
+// Local deriveInitials removed — now uses shared initialsFromNameOrEmail.
 
 export async function listRepLocations(): Promise<RepLocation[]> {
   if (!isSupabaseConfigured() || !supabase) return [];
@@ -92,7 +87,7 @@ export async function listRepLocations(): Promise<RepLocation[]> {
     return {
       repId: l.rep_id,
       name,
-      initials: deriveInitials(profile.name || "", email),
+      initials: initialsFromNameOrEmail(profile.name, email),
       avatarUrl: profile.avatar_url ?? null,
       latitude: l.latitude,
       longitude: l.longitude,
@@ -108,13 +103,23 @@ export async function listRepLocations(): Promise<RepLocation[]> {
  *
  * Returns an unsubscribe function.
  */
+let _repLocationsChannelCounter = 0;
+
 export function subscribeRepLocations(
   onChange: (rows: RepLocation[]) => void
 ): () => void {
   if (!isSupabaseConfigured() || !supabase) return () => {};
 
+  // Per-call channel name — was previously a single hardcoded
+  // "rep_locations_live" string. Two simultaneous subscribers
+  // (e.g. live-ops map + a debug overlay) would silently share
+  // one channel under supabase-js, and the first unsub would
+  // close it for both. Matches the pattern used by the other
+  // store subscribers (shift_events, requested_shifts, shifts).
+  _repLocationsChannelCounter += 1;
+  const channelName = `rep_locations_live_${Date.now()}_${_repLocationsChannelCounter}`;
   const channel = supabase
-    .channel("rep_locations_live")
+    .channel(channelName)
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "rep_locations" },

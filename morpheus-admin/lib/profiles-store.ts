@@ -80,3 +80,32 @@ export async function setProfileRole(
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+/**
+ * Subscribe to any change on the profiles table — INSERT (new user
+ * was created), UPDATE (name / role / avatar changed), DELETE. Used
+ * by /reps and /settings/managers so the list refreshes in place
+ * without a full page reload.
+ *
+ * The callback is debounced inside the caller (we don't fan out
+ * per-row; the caller refetches the whole list). Returns an
+ * unsubscribe function. Per-call channel name avoids the supabase-js
+ * collision two subscribers would otherwise hit.
+ */
+let _profilesChannelCounter = 0;
+export function subscribeProfiles(onChange: () => void): () => void {
+  if (!isSupabaseConfigured() || !supabase) return () => {};
+  _profilesChannelCounter += 1;
+  const channelName = `profiles_live_${Date.now()}_${_profilesChannelCounter}`;
+  const channel = supabase
+    .channel(channelName)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "profiles" },
+      () => onChange()
+    )
+    .subscribe();
+  return () => {
+    supabase!.removeChannel(channel);
+  };
+}

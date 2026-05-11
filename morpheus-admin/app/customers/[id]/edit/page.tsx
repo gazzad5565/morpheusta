@@ -20,6 +20,7 @@ import { inputStyle } from "@/components/ui/Filters";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
 import { getCustomer, updateCustomer, deleteCustomer } from "@/lib/customers-store";
+import { initialsFromNameOrEmail } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
 const SWATCHES = [
@@ -34,12 +35,8 @@ const SWATCHES = [
 ];
 const REGIONS: Customer["region"][] = ["North", "South", "East", "West"];
 
-function deriveInitials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "";
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (words[0][0] + words[1][0]).toUpperCase();
-}
+// Local deriveInitials removed — wraps shared helper from lib/format.ts.
+const deriveInitials = (name: string) => initialsFromNameOrEmail(name, "");
 
 export default function EditCustomerPage() {
   const router = useRouter();

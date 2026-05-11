@@ -17,14 +17,11 @@ import {
   setCustomersForRep,
 } from "@/lib/assignments-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
+import { initialsFromNameOrEmail, formatTimeRange } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
-function deriveInitials(name: string, email: string): string {
-  const source = name?.trim() || email.split("@")[0];
-  const words = source.split(/[\s._-]+/).filter(Boolean);
-  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-  return source.slice(0, 2).toUpperCase();
-}
+const deriveInitials = (name: string, email: string) =>
+  initialsFromNameOrEmail(name, email);
 
 function formatJoined(iso: string | undefined): string {
   if (!iso) return "—";
@@ -32,17 +29,7 @@ function formatJoined(iso: string | undefined): string {
   return d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
 }
 
-function formatTimeRange(start: string, end: string): string {
-  const fmt = (t: string) => {
-    if (!t) return "";
-    const [hh, mm] = t.split(":");
-    const h = parseInt(hh, 10);
-    const ampm = h >= 12 ? "PM" : "AM";
-    const h12 = ((h + 11) % 12) + 1;
-    return `${h12}:${mm} ${ampm}`;
-  };
-  return `${fmt(start)} – ${fmt(end)}`;
-}
+// Local formatTimeRange removed — use shared helper from lib/format.ts.
 
 export default function RepDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();

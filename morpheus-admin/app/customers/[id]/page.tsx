@@ -24,6 +24,7 @@ import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { LoadingBar, Spinner } from "@/components/ui/LoadingBar";
 import { SitesTab } from "@/components/customers/SitesTab";
 import { CustomerSwatch } from "@/components/ui/Avatars";
+import { initialsFromNameOrEmail, formatTimeRange } from "@/lib/format";
 import {
   listSitesForCustomer,
   type CustomerSite,
@@ -69,24 +70,11 @@ const TABS: { key: TabKey; label: string; glyph: GlyphName }[] = [
   { key: "custom", label: "Custom fields", glyph: "settings" },
 ];
 
-function formatTimeRange(start: string, end: string): string {
-  const fmt = (t: string) => {
-    if (!t) return "";
-    const [hh, mm] = t.split(":");
-    const h = parseInt(hh, 10);
-    const ampm = h >= 12 ? "PM" : "AM";
-    const h12 = ((h + 11) % 12) + 1;
-    return `${h12}:${mm} ${ampm}`;
-  };
-  return `${fmt(start)} – ${fmt(end)}`;
-}
+// Local formatTimeRange removed — use shared helper from lib/format.ts.
 
-function deriveInitials(p: Profile): string {
-  const src = p.name?.trim() || p.email.split("@")[0] || "?";
-  const parts = src.split(/\s+|[._-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return parts[0]?.slice(0, 2).toUpperCase() || "??";
-}
+// Local deriveInitials removed — wraps the shared helper from
+// lib/format.ts which has the same word-split + uppercase logic.
+const deriveInitials = (p: Profile) => initialsFromNameOrEmail(p.name, p.email);
 
 export default function CustomerDetailPage() {
   const router = useRouter();

@@ -290,12 +290,22 @@ export async function getCheckoutTimesForShifts(
   const out = new Map<string, string>();
   if (!isSupabaseConfigured() || !supabase) return out;
   if (shiftIds.length === 0) return out;
+  // Defensive cap: a manager opening Live Ops on a busy day might
+  // ask for checkout times across hundreds of shifts. The old query
+  // had no `.limit()` and PostgREST defaults to 1000 rows; if any
+  // shift accumulated many checkout events (bulk re-checkouts during
+  // a bug, debug runs, etc) those would crowd out other shifts'
+  // latest events. Asking for `shiftIds.length * 4` gives plenty of
+  // headroom (each shift typically has at most 1-2 checkout events)
+  // while keeping the response bounded.
+  const cap = Math.max(50, shiftIds.length * 4);
   const { data, error } = await supabase
     .from("shift_events")
     .select("shift_id, created_at, event_type")
     .in("shift_id", shiftIds)
     .in("event_type", CHECKOUT_EVENT_TYPES as unknown as string[])
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(cap);
   if (error) {
     // eslint-disable-next-line no-console
     console.warn("[events] checkout times:", error.message);

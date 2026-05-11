@@ -22,6 +22,7 @@
  *     (>8 options triggers it)
  */
 import { Combobox } from "@/components/ui/Combobox";
+import { timeToMin } from "@/lib/format";
 
 interface Props {
   value: string;
@@ -36,10 +37,7 @@ interface Props {
   disabled?: boolean;
 }
 
-function timeToMin(s: string): number {
-  const [h, m] = s.split(":");
-  return parseInt(h, 10) * 60 + parseInt(m, 10);
-}
+// timeToMin moved to lib/format.ts.
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }

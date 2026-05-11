@@ -40,7 +40,7 @@ import {
 } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listCustomers } from "@/lib/customers-store";
-import { localISO as isoDate, formatTime, initialsFromNameOrEmail } from "@/lib/format";
+import { localISO as isoDate, formatTime, timeToMin, minToTime } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
 // ─── Date helpers (week starts Monday) ──────────────────────────────────
@@ -55,9 +55,6 @@ function addDays(d: Date, n: number): Date {
   const out = new Date(d);
   out.setDate(out.getDate() + n);
   return out;
-}
-function deriveInitials(p: Profile): string {
-  return initialsFromNameOrEmail(p.name, p.email);
 }
 function stateRank(s: ShiftRow): number {
   if (s.state === "in-progress") return 0;
@@ -88,16 +85,7 @@ const DAY_TOTAL_MIN = (HOUR_END - HOUR_START) * 60;
 const DAY_TOTAL_PX = DAY_TOTAL_MIN * PX_PER_MIN;
 const TIME_GUTTER_W = 60;
 
-function timeToMin(t: string | null | undefined): number {
-  if (!t) return 0;
-  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
-  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
-}
-function minToTime(m: number): string {
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-}
+// timeToMin / minToTime moved to lib/format.ts.
 /** Top offset in px for a given absolute minute-of-day. */
 function minToTop(m: number): number {
   return Math.max(0, (m - HOUR_START * 60) * PX_PER_MIN);

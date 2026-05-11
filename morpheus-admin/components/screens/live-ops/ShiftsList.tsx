@@ -27,6 +27,7 @@ import { RepAvatar } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { listShifts, subscribeShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import { initialsFromNameOrEmail } from "@/lib/format";
 import { countTasksForCustomers } from "@/lib/tasks-store";
 import {
   listPendingRequests,
@@ -44,12 +45,7 @@ const STATE_MAP: Record<string, { label: string; bg: string; ink: string; dot: s
   complete: { label: "Complete", bg: AC.okTint, ink: "#0F5A38", dot: AC.ok },
 };
 
-function deriveInitials(p: Profile): string {
-  const source = p.name?.trim() || p.email.split("@")[0];
-  const words = source.split(/[\s._-]+/).filter(Boolean);
-  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
-  return source.slice(0, 2).toUpperCase();
-}
+const deriveInitials = (p: Profile) => initialsFromNameOrEmail(p.name, p.email);
 
 function formatTimeLabel(t: string): string {
   if (!t) return "";

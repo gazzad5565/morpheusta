@@ -8,13 +8,9 @@ import { Glyph, MorpheusMark, type GlyphName } from "./Glyph";
 import { useMenu } from "./MenuShell";
 import { signOut } from "@/lib/auth";
 import { getMyProfile, type Profile } from "@/lib/profiles-store";
+import { initialsFromNameOrEmail } from "@/lib/format";
 
-function deriveInitials(name: string | null, email: string): string {
-  const src = (name?.trim() || email.split("@")[0] || "?").trim();
-  const parts = src.split(/[\s._-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return (parts[0]?.slice(0, 2) || "??").toUpperCase();
-}
+// Local deriveInitials removed — now uses shared initialsFromNameOrEmail.
 
 interface Item {
   id: string;
@@ -161,7 +157,7 @@ export function SideMenu() {
                 letterSpacing: 0.5,
               }}
             >
-              {profile ? deriveInitials(profile.name, profile.email) : "··"}
+              {profile ? initialsFromNameOrEmail(profile.name, profile.email) : "··"}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               {/* flex:1 + minWidth:0 is what makes the ellipsis below

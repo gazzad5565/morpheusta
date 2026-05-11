@@ -6,6 +6,7 @@ import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { CustomerSwatch } from "@/components/ui/Avatars";
+import { initialsFromNameOrEmail } from "@/lib/format";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
 import { Combobox } from "@/components/ui/Combobox";
@@ -27,12 +28,11 @@ const SWATCHES = [
 
 const REGIONS: Customer["region"][] = ["North", "South", "East", "West"];
 
-function deriveInitials(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return "";
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (words[0][0] + words[1][0]).toUpperCase();
-}
+// Local deriveInitials removed — use initialsFromNameOrEmail from
+// lib/format.ts which handles the same word-split + uppercase logic
+// and adds an email fallback. For customer-name input we pass empty
+// email; output is identical for non-empty input.
+const deriveInitials = (name: string) => initialsFromNameOrEmail(name, "");
 
 export default function NewCustomerPage() {
   const router = useRouter();

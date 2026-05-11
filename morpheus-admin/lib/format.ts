@@ -56,6 +56,25 @@ export function formatTimeRange(start: string, end: string): string {
   return `${formatTime(start)} – ${formatTime(end)}`;
 }
 
+/**
+ * "HH:MM" → minutes-since-midnight. Used by the calendar grid +
+ * TimeCombobox + any other code that needs to do arithmetic on a
+ * time-of-day string. Returns 0 for empty/invalid input rather than
+ * NaN so callers can safely Math.max/min with it.
+ */
+export function timeToMin(t: string | null | undefined): number {
+  if (!t) return 0;
+  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
+/** Inverse of timeToMin: minutes-since-midnight → zero-padded "HH:MM". */
+export function minToTime(m: number): string {
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 /** "Jan 12, 2026" or "Friday, January 12, 2026" if `long: true`. */
 export function formatDate(iso: string, opts?: { long?: boolean }): string {
   if (!iso) return "—";

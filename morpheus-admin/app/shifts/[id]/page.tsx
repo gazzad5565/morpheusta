@@ -34,6 +34,7 @@ import {
   listRepConflictsForSlot,
   type ShiftRow,
 } from "@/lib/shifts-store";
+import { formatTimeRange } from "@/lib/format";
 import { listTasksForCustomer, type TaskRow } from "@/lib/tasks-store";
 import {
   getProfileById,
@@ -79,17 +80,7 @@ function relativeAgo(iso: string | null | undefined): string {
   return `${d}d ago`;
 }
 
-function formatTimeRange(start: string, end: string): string {
-  const fmt = (t: string) => {
-    if (!t) return "";
-    const [hh, mm] = t.split(":");
-    const h = parseInt(hh, 10);
-    const ampm = h >= 12 ? "PM" : "AM";
-    const h12 = ((h + 11) % 12) + 1;
-    return `${h12}:${mm} ${ampm}`;
-  };
-  return `${fmt(start)} – ${fmt(end)}`;
-}
+// Local formatTimeRange removed — use shared helper from lib/format.ts.
 
 function formatDate(iso: string): string {
   if (!iso) return "—";
