@@ -139,6 +139,13 @@ export function LiveFeedPanel() {
   // server-side, but the range filter is purely client-side now —
   // good enough until the log gets big enough to warrant pagination.
   const [range, setRange] = useState<RangeKey>("today");
+  // Auto-flip back to All activity when Needs Action drops to empty.
+  // Managers reported being left on a blank Needs Action tab after
+  // the last item was resolved — the All-activity feed is the
+  // primary thing they want to see, so we route them there.
+  // Effect runs ONLY when needsActionCount changes so we don't fight
+  // a manager who has deliberately switched back to a 0-count tab.
+  // (Implemented further down where needsActionCount is in scope.)
 
   // Pending requests (Needs action)
   const [requests, setRequests] = useState<PendingRequest[]>([]);
@@ -378,6 +385,17 @@ export function LiveFeedPanel() {
   // shifts. The pill counts both so a single number tells the manager
   // exactly how many things still want them.
   const needsActionCount = requests.length + attentionShifts.length;
+
+  // Auto-flip Needs Action → All when nothing's pending. Tied to
+  // needsActionCount so it only fires when the queue drains; a
+  // manager sitting on the tab with 0 items WILL flip away, but
+  // that's expected — when the queue's empty, the all-activity feed
+  // is the more useful default.
+  useEffect(() => {
+    if (activeTab === "needs-action" && needsActionCount === 0) {
+      setActiveTab("all");
+    }
+  }, [activeTab, needsActionCount]);
   const tabs: {
     key: TabKey;
     label: string;
@@ -420,29 +438,63 @@ export function LiveFeedPanel() {
           >
             Live feed
           </div>
-          <span
-            style={{
-              fontFamily: AC.font,
-              fontSize: 10,
-              fontWeight: 700,
-              color: AC.ok,
-              letterSpacing: 0.4,
-              textTransform: "uppercase",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-            }}
-          >
+          {/* Date range picker — moved up from above the activity
+              list (it was duplicating the panel-header vertical
+              space and shipped with a static-looking "50 events"
+              count). Visible only on the All activity tab since
+              Needs Action isn't time-filtered. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {activeTab === "all" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 10,
+                    color: AC.mute,
+                    fontWeight: 700,
+                    letterSpacing: 0.4,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Show
+                </span>
+                <Combobox
+                  value={range}
+                  onChange={(v) => setRange((v ?? "today") as RangeKey)}
+                  clearable={false}
+                  triggerIcon={null}
+                  searchable={false}
+                  options={(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => ({
+                    value: k,
+                    label: RANGE_LABEL[k],
+                  }))}
+                />
+              </div>
+            )}
             <span
               style={{
-                width: 6,
-                height: 6,
-                borderRadius: 99,
-                background: AC.ok,
+                fontFamily: AC.font,
+                fontSize: 10,
+                fontWeight: 700,
+                color: AC.ok,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
               }}
-            />
-            Live
-          </span>
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 99,
+                  background: AC.ok,
+                }}
+              />
+              Live
+            </span>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
           {tabs.map((t) => {
@@ -524,7 +576,6 @@ export function LiveFeedPanel() {
           events={events}
           loaded={eventsLoaded}
           range={range}
-          onRangeChange={setRange}
         />
       )}
     </Card>
@@ -882,12 +933,10 @@ function AllActivityList({
   events,
   loaded,
   range,
-  onRangeChange,
 }: {
   events: ShiftEvent[];
   loaded: boolean;
   range: RangeKey;
-  onRangeChange: (r: RangeKey) => void;
 }) {
   // Apply the date filter client-side. The events array is already
   // capped to 50 server-side; once the log gets bigger this branches
@@ -898,68 +947,21 @@ function AllActivityList({
       ? events
       : events.filter((e) => new Date(e.created_at).getTime() >= startMs);
 
-  const RangePicker = (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "8px 12px",
-        borderBottom: `1px solid ${AC.lineDim}`,
-        background: "#fff",
-      }}
-    >
-      <span
-        style={{
-          fontFamily: AC.font,
-          fontSize: 10.5,
-          color: AC.mute,
-          fontWeight: 700,
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
-        }}
-      >
-        Show
-      </span>
-      <Combobox
-        value={range}
-        onChange={(v) => onRangeChange((v ?? "today") as RangeKey)}
-        clearable={false}
-        triggerIcon={null}
-        searchable={false}
-        options={(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => ({
-          value: k,
-          label: RANGE_LABEL[k],
-        }))}
-      />
-      <div style={{ flex: 1 }} />
-      <span
-        style={{
-          fontFamily: AC.font,
-          fontSize: 11,
-          color: AC.mute,
-          fontWeight: 600,
-        }}
-      >
-        {filtered.length} {filtered.length === 1 ? "event" : "events"}
-      </span>
-    </div>
-  );
-
+  // The "Show today" picker that used to live here moved up to the
+  // panel header (see LiveFeedPanel render). The "50 events" count
+  // that lived next to it was misleading because it was almost
+  // always pinned at the server-side display cap of 50 — managers
+  // were reading it as a static label. Removed.
   if (!loaded) {
     return (
-      <>
-        {RangePicker}
-        <div style={{ padding: 24, fontFamily: AC.font, fontSize: 12, color: AC.mute, textAlign: "center" }}>
-          Loading…
-        </div>
-      </>
+      <div style={{ padding: 24, fontFamily: AC.font, fontSize: 12, color: AC.mute, textAlign: "center" }}>
+        Loading…
+      </div>
     );
   }
   if (filtered.length === 0) {
     return (
       <>
-        {RangePicker}
         <div
           style={{
             padding: 28,
@@ -988,7 +990,6 @@ function AllActivityList({
   }
   return (
     <>
-      {RangePicker}
       <div style={{ padding: "10px 12px", maxHeight: 480, overflowY: "auto" }}>
         {filtered.map((e, i) => {
         const tone = eventTone(e.event_type);

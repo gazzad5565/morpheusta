@@ -289,6 +289,23 @@ export default function ShiftsListPage() {
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
+      {/* Sticky header band — AppHeader (back / menu / title) stays
+          pinned at the top while the rep scrolls down a long shift
+          list. Managers asked for this so the back-to-dashboard
+          affordance is always reachable without scrolling all the
+          way up. The date + Request pill is part of the same
+          sticky band; the search box and section labels below
+          scroll normally. zIndex 30 keeps it above shift cards on
+          scroll but below the menu overlay (zIndex 40). */}
+      <div
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 30,
+          background: MC.bg,
+          boxShadow: "0 1px 0 rgba(10,15,30,.04)",
+        }}
+      >
       <AppHeader title="Today's Shifts" onBack={() => router.push("/")} withMenu />
 
       {/* Date row — gives the rep an explicit "this is what today
@@ -437,6 +454,7 @@ export default function ShiftsListPage() {
           <Glyph name="plus" size={13} color={MC.brand} strokeWidth={2.6} />
           Request
         </button>
+      </div>
       </div>
 
       {/* Search box — filters across every section by name, code, or

@@ -87,16 +87,19 @@ function computeKpis(shifts: ShiftRow[], totalReps: number): KpiData {
 
   const late = todayShifts.filter((s) => s.state === "late").length;
 
-  // Avg completion = mean of tasks_done / tasks_total per shift (skip 0-task shifts)
-  const withTasks = todayShifts.filter((s) => s.tasks_total > 0);
+  // Avg completion = % of TODAY's shifts that have reached the
+  // 'complete' state. Was previously the mean of
+  // tasks_done / tasks_total per shift — but task counts are
+  // optional metadata (some customers have zero tasks defined; some
+  // reps complete a shift without ticking the optional ones) and
+  // shouldn't drive whether the shift "counted". A completed shift
+  // is a completed shift regardless of task ticks. Managers
+  // explicitly flagged: "shift completion does not need to be
+  // dependent upon a task done."
   const avgCompletion =
-    withTasks.length === 0
+    todayShifts.length === 0
       ? 0
-      : Math.round(
-          (withTasks.reduce((sum, s) => sum + s.tasks_done / s.tasks_total, 0) /
-            withTasks.length) *
-            100
-        );
+      : Math.round((completed / todayShifts.length) * 100);
 
   return {
     repsActive: activeRepIds.size,
@@ -184,15 +187,14 @@ function computeSparks(allShifts: ShiftRow[]): KpiSparks {
 
     exceptions.push(dayShifts.filter((s) => s.state === "late").length);
 
-    const withTasks = dayShifts.filter((s) => s.tasks_total > 0);
+    // Sparkline mirrors the headline KPI definition: % of the
+    // day's shifts that reached state='complete'. NOT a function
+    // of task counts.
+    const dayComplete = dayShifts.filter((s) => s.state === "complete").length;
     avgCompletion.push(
-      withTasks.length === 0
+      dayShifts.length === 0
         ? 0
-        : Math.round(
-            (withTasks.reduce((sum, s) => sum + s.tasks_done / s.tasks_total, 0) /
-              withTasks.length) *
-              100
-          )
+        : Math.round((dayComplete / dayShifts.length) * 100)
     );
   }
 
