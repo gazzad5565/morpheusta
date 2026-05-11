@@ -851,7 +851,17 @@ function ShiftRow({
   unableBusy?: boolean;
 }) {
   const isComplete = state === "complete";
-  const isInProgress = state === "in-progress";
+  // "Live" means the rep is AT the customer — either actively working
+  // ('in-progress') or paused mid-shift ('on-break'). Both render the
+  // Resume CTA and hide "Can't make this shift?" (you can't say you
+  // can't make it to a shift you're already attending). Earlier this
+  // was a strict `=== "in-progress"` match, which meant a rep mid-break
+  // saw "Check in" on /shifts even though the home page correctly
+  // showed "Resume shift" — two screens out of sync for the same row.
+  // 'travelling' is intentionally NOT bundled here: that state means
+  // "en route, has not arrived yet" → Check in is the right CTA, and
+  // can't-make-it is still a valid escape hatch.
+  const isInProgress = state === "in-progress" || state === "on-break";
   // Only show a "lifecycle" badge for COMPLETE shifts — they have no
   // countdown so the badge is the only state signal. For in-progress
   // we deliberately don't render one: the green "Ends in 1h 25m"

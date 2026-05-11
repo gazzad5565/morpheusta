@@ -749,8 +749,17 @@ function UpNextCard({
   // "Resume" means the rep already has a live shift on-the-go — any
   // non-scheduled live state qualifies. Without this, a rep mid-break
   // saw "Check in to shift" again on the up-next card.
+  // "Resume" copy only makes sense when the rep is already AT the
+  // customer — either actively working ('in-progress') or paused
+  // mid-shift ('on-break'). 'travelling' means the rep started a
+  // travel timer but hasn't arrived yet, so the right CTA there is
+  // still "Check in to shift", not "Resume" — you can't resume
+  // something you never started. (Initial broadening of this set
+  // included 'travelling'; that caused /shifts and home to disagree
+  // for the same row when a rep was mid-break — home said Resume,
+  // /shifts said Check in.)
   const isResume =
-    !!next && (next.state === "in-progress" || next.state === "on-break" || next.state === "travelling");
+    !!next && (next.state === "in-progress" || next.state === "on-break");
   void inProgressCount; // currently unused; kept for future polish
   const [now, setNow] = useState(Date.now());
 
