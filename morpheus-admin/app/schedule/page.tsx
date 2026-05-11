@@ -1105,6 +1105,7 @@ function DayColumnContents({
             key={s.id}
             shift={s}
             repLabel={s.rep_id ? repNameMap[s.rep_id] || "Rep" : "Unassigned"}
+            singleRepFiltered={singleRepFiltered}
             dimmed={drag?.shift.id === s.id}
             lane={meta.lane}
             lanes={meta.lanes}
@@ -2057,6 +2058,7 @@ function DayDetailPanel({
 function DraggableShiftCard({
   shift,
   repLabel,
+  singleRepFiltered,
   dimmed,
   lane,
   lanes,
@@ -2065,6 +2067,11 @@ function DraggableShiftCard({
 }: {
   shift: ShiftRow;
   repLabel: string;
+  /** Caller's filter context. When true the calendar is locked to a
+   *  single rep and the rep label is redundant — we drop the row.
+   *  When false every card carries the rep so a manager scanning
+   *  the all-reps view can tell who owns what. */
+  singleRepFiltered: boolean;
   dimmed: boolean;
   /** This card's column index within its overlap cluster (0..lanes-1). */
   lane: number;
@@ -2076,24 +2083,33 @@ function DraggableShiftCard({
   const startMin = timeToMin(shift.start_time);
   const endMin = timeToMin(shift.end_time);
   const top = minToTop(startMin);
-  const height = Math.max(
-    SLOT_PX - 2,
-    (endMin - startMin) * PX_PER_MIN - 2
-  );
-  // Density tiers — short shifts (30-90 min) can't fit 3 rows of
-  // text + a state pill cleanly. Each tier hides one more row so
-  // text stops bleeding out of the card.
+  // Visual layout — the OLD code shrank short cards to their literal
+  // duration height and then conditionally dropped rows that didn't
+  // fit. The side-effect was a 30-min card and a 1-hour card looked
+  // visually different (one row vs two rows). Managers complained:
+  // "four shifts in my calendar but two look one way and two the
+  // other, they need to look identical."
   //
-  //   ≥ 60px   → full layout: rep · customer · time + state pill
-  //   44–59px  → drop the rep row; show customer · time + state
-  //   < 44px   → drop the time row too; just customer + corner dot
+  // Fix: always render the same content shape and enforce a minimum
+  // card height so the rows fit cleanly. Layout we always render:
   //
-  // 60px is roughly an 80-min shift; 44px is just over an hour.
-  // Anything tighter than that is visually a sliver and trying to
-  // cram three rows into it produces the half-clipped text the
-  // manager was seeing on filtered 1-hour shifts.
-  const showRepRow = height >= 60;
-  const showTimeRow = height >= 44;
+  //   • rep label   — only when the calendar isn't already filtered
+  //                   to a single rep (otherwise it's redundant)
+  //   • customer name
+  //   • time row + state pill
+  //
+  // Min card height = MIN_TWO_ROW (46) in single-rep mode, or
+  // MIN_THREE_ROW (60) when the rep row is also rendered. Short
+  // shifts still STARTLINE at their real start_time; they just
+  // visually extend slightly beyond their end_time to give the
+  // content room. With single-rep filtering there's no overlap to
+  // collide with, and the lane allocator keeps multi-rep stacks
+  // tidy.
+  const showRepRow = !singleRepFiltered;
+  const showTimeRow = true;
+  const MIN_HEIGHT = showRepRow ? 60 : 46;
+  const realHeight = (endMin - startMin) * PX_PER_MIN - 2;
+  const height = Math.max(SLOT_PX - 2, realHeight, MIN_HEIGHT);
   // Side-by-side layout for overlapping shifts. Each lane gets an even
   // share of the column width with a 2px gap on either side so cards
   // never visually merge.
