@@ -346,14 +346,16 @@ export default function DashboardPage() {
       {/* Welcome strip — thin, glassy, branded. Owns the menu button
           inline (top-right) so the home page no longer needs the black
           AppHeader band that used to sit above it. Saves vertical space
-          and keeps the dashboard feeling like a single hero card. */}
+          and keeps the dashboard feeling like a single hero card.
+          Last-sync indicator is intentionally NOT here — managers
+          fed back it cluttered the hero. It moved to the side menu
+          footer for anyone who wants to confirm a heartbeat. */}
       <WelcomeStrip
         firstName={firstName}
         greeting={greeting}
         todayHeader={todayHeader}
         orgName={orgName}
         orgLogoUrl={orgLogoUrl}
-        lastSync={nowLabel}
       />
 
       {/* Shifts-today summary — real data */}
@@ -1203,17 +1205,12 @@ function WelcomeStrip({
   todayHeader,
   orgName,
   orgLogoUrl,
-  lastSync,
 }: {
   firstName: string;
   greeting: string;
   todayHeader: string;
   orgName: string;
   orgLogoUrl: string;
-  /** When passed, shows a tiny "Last sync · …" line at the bottom-right
-   *  of the strip — used to take that role on the old black AppHeader
-   *  that the dashboard no longer renders. */
-  lastSync?: string;
 }) {
   const { setOpen } = useMenu();
   return (
@@ -1276,11 +1273,9 @@ function WelcomeStrip({
           )}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Top small-caps line carries org · date · last-sync all
-              on one row. lastSync used to live in its own row below
-              the card and was the main source of wasted vertical
-              space; folding it here keeps every piece of metadata
-              the rep cares about visible without growing the card. */}
+          {/* Top small-caps line carries org · date. Last-sync used to
+              hang here too but managers wanted the welcome hero clean —
+              the heartbeat indicator moved to the side menu footer. */}
           <div
             style={{
               fontFamily: MC.font,
@@ -1295,14 +1290,6 @@ function WelcomeStrip({
             }}
           >
             {orgName || "Morpheus"} · {todayHeader}
-            {lastSync ? (
-              <>
-                {" · "}
-                <span style={{ color: "rgba(255,255,255,.55)" }}>
-                  Sync {lastSync}
-                </span>
-              </>
-            ) : null}
           </div>
           <div
             style={{

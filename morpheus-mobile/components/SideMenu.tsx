@@ -270,20 +270,42 @@ export function SideMenu() {
           })}
         </div>
 
-        {/* Footer */}
+        {/* Footer — Last-sync heartbeat indicator was moved here off
+            the home page welcome card so the hero stays clean.
+            Captures the time the menu was opened (the app is alive
+            now → that's all the rep needs to confirm). */}
         <div
           style={{
             padding: "14px 16px 20px",
             fontFamily: MC.font,
-            fontSize: 11,
-            color: MC.hint,
             textAlign: "center",
             borderTop: `1px solid ${MC.line}`,
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
           }}
         >
-          Powered by Morpheus
+          <div
+            style={{
+              fontSize: 10.5,
+              color: MC.hint,
+              letterSpacing: 0.4,
+            }}
+          >
+            Last sync · {formatSyncTime(new Date())}
+          </div>
+          <div style={{ fontSize: 11, color: MC.hint }}>Powered by Morpheus</div>
         </div>
       </div>
     </div>
   );
+}
+
+/** "HH:MM AM/PM" — short heartbeat label for the side-menu footer. */
+function formatSyncTime(d: Date): string {
+  return d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
 }
