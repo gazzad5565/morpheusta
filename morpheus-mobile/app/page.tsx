@@ -581,6 +581,17 @@ function UpNextCard({
     return () => clearInterval(t);
   }, [travellingSince]);
 
+  // Auto-end travelling when the rep checks in. The Stop button is
+  // hidden once `isResume` is true (the rep is on the shift, there's
+  // nothing to travel TO), so without this the travel timer would
+  // run forever in localStorage. setTravellingSince(null) also fires
+  // the `shift.travel_ended` event so the audit log stays correct.
+  useEffect(() => {
+    if (isResume && travellingSince !== null) {
+      setTravellingSince(null);
+    }
+  }, [isResume, travellingSince, setTravellingSince]);
+
   const elapsed = travellingSince ? Math.floor((now - travellingSince) / 1000) : 0;
   const m = Math.floor(elapsed / 60);
   const s = elapsed % 60;
@@ -970,47 +981,54 @@ function UpNextCard({
                   gap: 8,
                 }}
               >
-                {/* Two-button row: Directions toggles inline preview, Start/Stop travelling */}
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    onClick={() => setDirectionsOpen(!directionsOpen)}
-                    style={{
-                      ...secondaryBtnStyle,
-                      flex: 1,
-                      background: directionsOpen ? MC.brandTint : MC.card,
-                      borderColor: directionsOpen ? MC.brand : `${MC.brand}33`,
-                    }}
-                    aria-pressed={directionsOpen}
-                  >
-                    <Glyph
-                      name="target"
-                      size={16}
-                      color={directionsOpen ? MC.brandInk : MC.brandDeep}
-                      strokeWidth={2.2}
-                    />
-                    Directions
-                  </button>
-                  {travellingSince ? (
+                {/* Two-button row: Directions + Start/Stop travelling.
+                    Hidden once the shift is in-progress — the rep is
+                    already on-site so there's nothing to travel TO and
+                    nothing to get directions FOR. Used to render even
+                    during the active shift, which made the card look
+                    busy and offered an action that did nothing useful. */}
+                {!isResume && (
+                  <div style={{ display: "flex", gap: 8 }}>
                     <button
                       type="button"
-                      onClick={() => setTravellingSince(null)}
-                      style={{ ...secondaryBtnStyle, flex: 1.4 }}
+                      onClick={() => setDirectionsOpen(!directionsOpen)}
+                      style={{
+                        ...secondaryBtnStyle,
+                        flex: 1,
+                        background: directionsOpen ? MC.brandTint : MC.card,
+                        borderColor: directionsOpen ? MC.brand : `${MC.brand}33`,
+                      }}
+                      aria-pressed={directionsOpen}
                     >
-                      <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
-                      Stop · {formatTime(travellingSince)}
+                      <Glyph
+                        name="target"
+                        size={16}
+                        color={directionsOpen ? MC.brandInk : MC.brandDeep}
+                        strokeWidth={2.2}
+                      />
+                      Directions
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setTravellingSince(Date.now())}
-                      style={{ ...secondaryBtnStyle, flex: 1.4 }}
-                    >
-                      <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
-                      Start travelling
-                    </button>
-                  )}
-                </div>
+                    {travellingSince ? (
+                      <button
+                        type="button"
+                        onClick={() => setTravellingSince(null)}
+                        style={{ ...secondaryBtnStyle, flex: 1.4 }}
+                      >
+                        <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
+                        Stop · {formatTime(travellingSince)}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setTravellingSince(Date.now())}
+                        style={{ ...secondaryBtnStyle, flex: 1.4 }}
+                      >
+                        <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
+                        Start travelling
+                      </button>
+                    )}
+                  </div>
+                )}
                 {isResume ? (
                   <Link href="/active" style={{ textDecoration: "none" }}>
                     <PrimaryButton icon="arrow-r">Resume shift</PrimaryButton>
