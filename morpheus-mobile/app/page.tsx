@@ -36,6 +36,7 @@ const DashboardMap = dynamic(
   () => import("@/components/DashboardMap").then((m) => m.DashboardMap),
   { ssr: false }
 );
+import type { DirectionsPreview } from "@/components/DashboardMap";
 
 type DbShift = Shift & {
   realId: string;
@@ -148,6 +149,14 @@ export default function DashboardPage() {
     mode: CheckMode;
     customerName: string;
   } | null>(null);
+  // Directions preview — when set, the dashboard map draws a dashed
+  // line between the rep's GPS and this destination + shows a
+  // floating "Open in Maps" button. Set from the up-next card's
+  // Directions button; cleared when the rep taps the close ✕ on
+  // the map overlay or when the up-next shift changes.
+  const [directionsPreview, setDirectionsPreview] = useState<
+    DirectionsPreview | null
+  >(null);
   // Lifted state — UpNextCard reacts to these.
   // (directionsOpen / setDirectionsOpen removed — Directions now
   // opens the OS map app directly via buildDirectionsUrl, no in-app
@@ -484,7 +493,11 @@ export default function DashboardPage() {
           (no shifts-loaded gate) so the home screen doesn't reflow
           every time the app cold-starts — pins just layer in as the
           shifts data arrives. */}
-      <DashboardMap shifts={shifts} />
+      <DashboardMap
+        shifts={shifts}
+        preview={directionsPreview}
+        onClosePreview={() => setDirectionsPreview(null)}
+      />
 
       {/* Up Next — primary CTA */}
       <UpNextCard
@@ -493,6 +506,15 @@ export default function DashboardPage() {
         travellingSince={travellingSince}
         setTravellingSince={setTravellingSince}
         inProgressCount={inProgressCount}
+        onPreviewDirections={(p) => {
+          setDirectionsPreview(p);
+          // Bring the map into the rep's viewport — directions
+          // preview was easy to miss when the page had been scrolled
+          // past the map. Smooth scroll keeps the action obvious.
+          if (typeof window !== "undefined") {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }
+        }}
         onUnableToAttend={(s) =>
           setUnableSheetFor({ realId: s.realId, name: s.name })
         }
@@ -627,12 +649,19 @@ function UpNextCard({
   onWithdrawUnable,
   unableBusyFor,
   onOpenShift,
+  onPreviewDirections,
 }: {
   shifts: DbShift[];
   loaded: boolean;
   travellingSince: number | null;
   setTravellingSince: (v: number | null) => void;
   inProgressCount: number;
+  /** Tap on Directions → parent draws a dashed route line on the
+   *  dashboard map between the rep's GPS and the destination, plus
+   *  a floating "Open in Maps" button that hands off to the OS map
+   *  app for turn-by-turn. Replaces the previous behaviour of
+   *  immediately opening Google Maps in a new tab. */
+  onPreviewDirections: (p: DirectionsPreview) => void;
   /** Open the unable-to-attend sheet for the up-next shift.
    *  Defined only when the next shift is scheduled and clean. */
   onUnableToAttend?: (shift: DbShift) => void;
@@ -1119,7 +1148,25 @@ function UpNextCard({
                           onClick={() => {
                             if (!enabled) return;
                             const url = buildDirectionsUrl(next);
-                            if (url) {
+                            if (!url) return;
+                            // Coords required for the in-app preview
+                            // polyline; if we only have an address
+                            // string (no lat/lng yet) we fall back
+                            // to opening Maps directly because we
+                            // can't draw the line. Most customers
+                            // have coords via the geocoder once an
+                            // address is saved.
+                            const hasCoords =
+                              typeof next.siteLat === "number" &&
+                              typeof next.siteLng === "number";
+                            if (hasCoords) {
+                              onPreviewDirections({
+                                lat: next.siteLat as number,
+                                lng: next.siteLng as number,
+                                label: next.name,
+                                openUrl: url,
+                              });
+                            } else {
                               window.open(url, "_blank", "noopener,noreferrer");
                             }
                           }}
@@ -1131,7 +1178,7 @@ function UpNextCard({
                           }}
                           title={
                             enabled
-                              ? "Opens directions in your phone's map app"
+                              ? "Preview the route on the map above"
                               : "No address on this site yet"
                           }
                         >

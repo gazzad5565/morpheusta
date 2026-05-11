@@ -202,9 +202,20 @@ export function ShiftsList() {
     if (active === "Unassigned")
       return shiftRows.filter((r) => r.kind === "shift" && !r.shift.rep_id);
     if (active === "Needs action") {
-      return shiftRows.filter(
-        (r) => r.kind === "shift" && isNeedsAction(r.shift)
-      );
+      // Needs action = anything that requires the manager to make a
+      // call right now: a rep flagged "I can't make this shift"
+      // (attention='unable_to_attend'), OR a rep submitted a new
+      // shift request waiting for approval/decline. Live Feed's
+      // Needs Action pill counts both; this filter mirrors that so
+      // the two surfaces stay consistent — managers were seeing the
+      // Live Feed counter climb while this list stayed empty after
+      // a rep requested a store.
+      return [
+        ...reqRows,
+        ...shiftRows.filter(
+          (r) => r.kind === "shift" && isNeedsAction(r.shift)
+        ),
+      ];
     }
     const key = active.toLowerCase().replace(" ", "-");
     return shiftRows.filter(
@@ -232,7 +243,9 @@ export function ShiftsList() {
     ).length;
     const onBreak = rows.filter((s) => effectiveState(s) === "on-break").length;
     const unassigned = rows.filter((s) => !s.rep_id).length;
-    const needsAction = rows.filter(isNeedsAction).length;
+    // Needs Action count = pending requests + attention-flagged
+    // shifts. Same definition Live Feed's pill uses.
+    const needsAction = rows.filter(isNeedsAction).length + dedupedRequests.length;
     return {
       All: totalShifts + dedupedRequests.length,
       "Needs action": needsAction,

@@ -41,8 +41,21 @@ interface PlacedShift {
   longitude: number;
 }
 
+export interface DirectionsPreview {
+  /** Destination latitude. */
+  lat: number;
+  /** Destination longitude. */
+  lng: number;
+  /** Customer / site label shown on the floating overlay. */
+  label: string;
+  /** Full deep-link URL to launch turn-by-turn in the OS map app. */
+  openUrl: string;
+}
+
 export function DashboardMap({
   shifts,
+  preview,
+  onClosePreview,
 }: {
   // Mirrors the DbShift shape the dashboard already has — id is customer id.
   // siteLat/siteLng are preferred when present (post-sites rollout).
@@ -56,6 +69,14 @@ export function DashboardMap({
     siteLng?: number | null;
     siteName?: string | null;
   }>;
+  /** When set, the map draws a dashed line between the rep's GPS and
+   *  this destination + shows a floating "Open in Maps" button. Null
+   *  hides the overlay entirely. Replaces the previous "tap Directions
+   *  to open Google Maps in a new tab" flow with an in-app preview;
+   *  the rep can then choose to launch full turn-by-turn. */
+  preview?: DirectionsPreview | null;
+  /** Called by the floating Close button on the map preview. */
+  onClosePreview?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -64,6 +85,14 @@ export function DashboardMap({
   const [placed, setPlaced] = useState<PlacedShift[]>([]);
   const [missing, setMissing] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  // The rep's last-known GPS position, lifted to state so the
+  // directions-preview effect below can draw a polyline between
+  // here and the destination without reaching into the marker ref.
+  // Updated whenever navigator.geolocation fires.
+  const [userPosition, setUserPosition] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
   // The rep's own avatar (base64 data URL) — fetched once on mount.
   // Drives the look of the user-location marker: avatar photo if one's
   // uploaded, otherwise a small face glyph on the brand colour. We do
@@ -241,6 +270,12 @@ export function DashboardMap({
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         if (cancelled || !mapRef.current) return;
+        // Lift to state so the directions-preview effect below can
+        // draw a polyline between here and the destination.
+        setUserPosition({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
         if (userMarkerRef.current) userMarkerRef.current.remove();
         const el = document.createElement("div");
         // User-location marker = circular avatar pill so it visually
@@ -276,6 +311,93 @@ export function DashboardMap({
     };
   }, [loaded, myAvatarUrl]);
 
+  // Directions preview — draws a dashed line between the rep's GPS
+  // and the destination shift's coords. Replaces the previous "tap
+  // Directions to leave the app for Google Maps" flow with an in-app
+  // overview; the rep gets a high-altitude sense of where the store
+  // is, and the floating "Open in Maps" button below the map then
+  // hands off to the OS map app for turn-by-turn when they want it.
+  //
+  // Source/layer is created on first preview, then just updated via
+  // setData on subsequent previews. Removing the layer + source on
+  // cleanup keeps the map clean once the rep closes the preview.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loaded) return;
+    const SRC = "morpheus-directions-route";
+    const LYR = "morpheus-directions-route-line";
+
+    const removeRoute = () => {
+      try {
+        if (map.getLayer(LYR)) map.removeLayer(LYR);
+      } catch {
+        /* layer not present */
+      }
+      try {
+        if (map.getSource(SRC)) map.removeSource(SRC);
+      } catch {
+        /* source not present */
+      }
+    };
+
+    if (!preview || !userPosition) {
+      removeRoute();
+      return;
+    }
+
+    const route: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [userPosition.lng, userPosition.lat],
+              [preview.lng, preview.lat],
+            ],
+          },
+        },
+      ],
+    };
+    const existing = map.getSource(SRC) as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    if (existing) {
+      existing.setData(route);
+    } else {
+      map.addSource(SRC, { type: "geojson", data: route });
+      map.addLayer({
+        id: LYR,
+        type: "line",
+        source: SRC,
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": MC.brandDeep,
+          "line-width": 3,
+          "line-dasharray": [2, 2],
+          "line-opacity": 0.85,
+        },
+      });
+    }
+    // Re-fit so both endpoints are comfortably visible. Skipped
+    // when the destination and the rep are extremely close to avoid
+    // a jarring zoom-in on tiny distances.
+    const dx = preview.lng - userPosition.lng;
+    const dy = preview.lat - userPosition.lat;
+    if (Math.hypot(dx, dy) > 0.0005) {
+      const bounds = new maplibregl.LngLatBounds()
+        .extend([userPosition.lng, userPosition.lat])
+        .extend([preview.lng, preview.lat]);
+      map.fitBounds(bounds, { padding: 80, maxZoom: 13, duration: 500 });
+    }
+
+    return () => {
+      removeRoute();
+    };
+  }, [preview, userPosition, loaded]);
+
   // The map container ALWAYS renders. When there are no shifts (or
   // no placeable shifts yet), the map still shows — defaulted to
   // Cape Town with just the rep's location dot. As shifts load, pins
@@ -292,10 +414,117 @@ export function DashboardMap({
           boxShadow: "0 1px 2px rgba(10,15,30,.04)",
         }}
       >
-        <div
-          ref={containerRef}
-          style={{ height: 180, width: "100%", background: "#F1F4F7" }}
-        />
+        <div style={{ position: "relative" }}>
+          <div
+            ref={containerRef}
+            style={{ height: 180, width: "100%", background: "#F1F4F7" }}
+          />
+          {/* Directions-preview overlay — visible only when the home
+              page's Directions button is active. Shows the destination
+              label + a primary "Open in Maps" CTA that hands off to
+              the OS map app for turn-by-turn, plus a close affordance
+              to dismiss the preview without leaving the home screen.
+              Anchored bottom of the map so the route polyline above is
+              never hidden by it. */}
+          {preview && (
+            <div
+              style={{
+                position: "absolute",
+                left: 12,
+                right: 12,
+                bottom: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "8px 10px 8px 12px",
+                background: "rgba(255,255,255,.96)",
+                borderRadius: 12,
+                boxShadow: "0 6px 18px rgba(10,15,30,.18)",
+                border: `1px solid ${MC.line}`,
+                backdropFilter: "blur(6px)",
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    color: MC.brandDeep,
+                    letterSpacing: 0.6,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Route to
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: MC.ink,
+                    letterSpacing: -0.1,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    marginTop: 1,
+                  }}
+                  title={preview.label}
+                >
+                  {preview.label}
+                </div>
+              </div>
+              <a
+                href={preview.openUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  background: MC.brand,
+                  color: "#fff",
+                  textDecoration: "none",
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  letterSpacing: -0.1,
+                  boxShadow: `0 4px 10px ${MC.brand}55`,
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Open in Maps
+                <span style={{ fontSize: 14, lineHeight: 1 }}>↗</span>
+              </a>
+              {onClosePreview && (
+                <button
+                  type="button"
+                  onClick={onClosePreview}
+                  aria-label="Close route preview"
+                  title="Close route preview"
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    background: "transparent",
+                    border: `1px solid ${MC.line}`,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    padding: 0,
+                  }}
+                >
+                  <span style={{ fontSize: 14, color: MC.mute, lineHeight: 1 }}>✕</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         {missing > 0 && (
           <div
             style={{
