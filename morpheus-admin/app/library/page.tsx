@@ -23,11 +23,15 @@ import {
   deleteLibraryFile,
   getLibraryDownloadUrl,
   formatFileSize,
-  LIBRARY_CATEGORIES,
   DEFAULT_CATEGORY,
   type LibraryFile,
 } from "@/lib/library-store";
+import {
+  getLibraryCategories,
+  setLibraryCategories,
+} from "@/lib/settings-store";
 import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
+import { Combobox } from "@/components/ui/Combobox";
 import type { Customer } from "@/lib/types";
 
 function fileGlyph(mime: string | null): GlyphName {
@@ -46,6 +50,13 @@ export default function LibraryPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Categories are now persisted in app_settings (see settings-store)
+  // so a manager can rename / add / delete them via the
+  // ManageCategoriesSheet mounted below. We mirror them into local
+  // state on mount + every time the sheet saves so dropdowns + the
+  // category filter rail update without a full page reload.
+  const [categories, setCategories] = useState<string[]>([]);
+  const [manageCatsOpen, setManageCatsOpen] = useState(false);
 
   // Upload panel state
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -70,6 +81,7 @@ export default function LibraryPage() {
   useEffect(() => {
     reload();
     listCustomers().then(setCustomers);
+    getLibraryCategories().then(setCategories);
   }, []);
 
   const onUploadClick = () => {
@@ -157,30 +169,41 @@ export default function LibraryPage() {
     );
   }, [byCategory, search]);
 
-  // Dynamic category list — union of the seed list and any free-text
-  // categories that already appear on uploaded files. Lets a manager
-  // create a new category just by typing it in the upload form
-  // without needing a migration. Sorted, de-duped.
+  // Dynamic category list — union of the manager-managed list (from
+  // settings) plus any free-text categories that already appear on
+  // uploaded files. Files whose category has since been removed
+  // still appear sensibly under their old name; deleting a category
+  // is a no-op for existing files. Sorted, de-duped.
   const allCategories = useMemo(() => {
-    const set = new Set<string>(LIBRARY_CATEGORIES as readonly string[]);
+    const set = new Set<string>(categories);
     for (const f of files) {
       if (f.category) set.add(f.category);
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [files]);
+  }, [files, categories]);
 
   return (
     <AdminShell
       breadcrumbs={["Home", "Library"]}
       actions={
-        <Btn
-          kind={uploadOpen ? "secondary" : "primary"}
-          size="sm"
-          icon={uploadOpen ? "x" : "plus"}
-          onClick={onUploadClick}
-        >
-          {uploadOpen ? "Cancel upload" : "Upload file"}
-        </Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn
+            size="sm"
+            icon="settings"
+            onClick={() => setManageCatsOpen(true)}
+            title="Add, rename, or remove library categories"
+          >
+            Categories
+          </Btn>
+          <Btn
+            kind={uploadOpen ? "secondary" : "primary"}
+            size="sm"
+            icon={uploadOpen ? "x" : "plus"}
+            onClick={onUploadClick}
+          >
+            {uploadOpen ? "Cancel upload" : "Upload file"}
+          </Btn>
+        </div>
       }
     >
       <div
@@ -615,7 +638,247 @@ export default function LibraryPage() {
           </Card>
         </div>
       </div>
+
+      {manageCatsOpen && (
+        <ManageCategoriesSheet
+          current={categories}
+          onClose={() => setManageCatsOpen(false)}
+          onSaved={(next) => {
+            setCategories(next);
+            setManageCatsOpen(false);
+          }}
+        />
+      )}
     </AdminShell>
+  );
+}
+
+/**
+ * ManageCategoriesSheet — full CRUD for library categories. Centred
+ * modal. Add via the bottom input + Add button; rename inline; remove
+ * via the X next to each row. Save commits the whole new list to
+ * app_settings via setLibraryCategories.
+ *
+ * Files in a removed category are NOT moved or hidden — they continue
+ * to display under their old category name and the allCategories
+ * computation on the page falls back to including them (see comment
+ * on `allCategories`). This is intentional: a manager who removes a
+ * stale category shouldn't lose track of the files that were tagged
+ * with it.
+ */
+function ManageCategoriesSheet({
+  current,
+  onClose,
+  onSaved,
+}: {
+  current: string[];
+  onClose: () => void;
+  onSaved: (next: string[]) => void;
+}) {
+  const [list, setList] = useState<string[]>(() => [...current]);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const addOne = () => {
+    setError(null);
+    const name = newName.trim();
+    if (!name) return;
+    if (list.some((c) => c.toLowerCase() === name.toLowerCase())) {
+      setError(`"${name}" is already in the list.`);
+      return;
+    }
+    setList([...list, name]);
+    setNewName("");
+  };
+  const renameAt = (i: number, name: string) => {
+    const next = [...list];
+    next[i] = name;
+    setList(next);
+  };
+  const removeAt = (i: number) => {
+    setList(list.filter((_, j) => j !== i));
+  };
+  const save = async () => {
+    setError(null);
+    setBusy(true);
+    const r = await setLibraryCategories(list);
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't save.");
+      return;
+    }
+    onSaved(list);
+  };
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(10,15,30,.32)",
+          zIndex: 200,
+        }}
+      />
+      <div
+        role="dialog"
+        aria-label="Manage library categories"
+        style={{
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 460,
+          maxWidth: "calc(100vw - 32px)",
+          maxHeight: "calc(100vh - 80px)",
+          overflowY: "auto",
+          background: "#fff",
+          border: `1px solid ${AC.line}`,
+          borderRadius: 14,
+          boxShadow: "0 24px 60px rgba(10,15,30,.24)",
+          zIndex: 201,
+          padding: 22,
+          fontFamily: AC.font,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: AC.ink, letterSpacing: -0.2 }}>
+              Library categories
+            </div>
+            <div style={{ fontSize: 12, color: AC.mute, marginTop: 2 }}>
+              Add, rename, or remove the categories shown in the upload form. Files
+              already tagged with a removed category stay visible under their old name.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              border: "none",
+              background: "transparent",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <AGlyph name="x" size={14} color={AC.mute} />
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+          {list.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: AC.mute }}>
+              No categories yet — add at least one below.
+            </div>
+          ) : (
+            list.map((c, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "6px 8px",
+                  background: AC.bg,
+                  borderRadius: 8,
+                }}
+              >
+                <input
+                  value={c}
+                  onChange={(e) => renameAt(i, e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: "5px 8px",
+                    borderRadius: 6,
+                    border: `1px solid ${AC.line}`,
+                    background: "#fff",
+                    fontFamily: AC.font,
+                    fontSize: 13,
+                    color: AC.ink,
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeAt(i)}
+                  title={`Remove "${c}"`}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 6,
+                    border: `1px solid ${AC.line}`,
+                    background: "#fff",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <AGlyph name="trash" size={13} color={AC.danger} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addOne();
+              }
+            }}
+            placeholder="New category name"
+            style={{
+              flex: 1,
+              padding: "8px 11px",
+              borderRadius: 8,
+              border: `1px solid ${AC.line}`,
+              fontFamily: AC.font,
+              fontSize: 13,
+            }}
+          />
+          <Btn size="sm" onClick={addOne} icon="plus" disabled={!newName.trim()}>
+            Add
+          </Btn>
+        </div>
+
+        {error && (
+          <div
+            style={{
+              padding: "8px 10px",
+              background: AC.dangerTint,
+              color: "#9c1a3c",
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 500,
+              marginBottom: 10,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Btn onClick={onClose} disabled={busy}>
+            Cancel
+          </Btn>
+          <Btn kind="primary" icon="check" onClick={save} disabled={busy}>
+            {busy ? "Saving…" : "Save categories"}
+          </Btn>
+        </div>
+      </div>
+    </>
   );
 }
 

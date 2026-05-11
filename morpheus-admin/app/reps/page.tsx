@@ -391,7 +391,10 @@ function GridView({ reps }: { reps: RepWithStats[] }) {
 
 // ─── Table view ─────────────────────────────────────────────────────────
 
-const TABLE_COLS = "36px 2fr 110px 140px 130px 36px";
+// Dropped the trailing 36 px "..." column — it was decorative, the
+// button did nothing (just preventDefault). Row click already
+// navigates to /reps/[id] which is the real edit affordance.
+const TABLE_COLS = "36px 2fr 110px 140px 130px";
 
 function TableView({
   reps,
@@ -481,22 +484,6 @@ function TableView({
           <div>
             <ShiftsTodayPill count={r.shiftsToday} />
           </div>
-          <button
-            type="button"
-            onClick={(e) => e.preventDefault()}
-            style={{
-              width: 26,
-              height: 26,
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <AGlyph name="more" size={16} color={AC.mute} />
-          </button>
         </Link>
       ))}
     </Card>

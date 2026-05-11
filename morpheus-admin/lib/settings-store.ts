@@ -238,6 +238,68 @@ export async function getShiftRequestAutoApprove(): Promise<boolean> {
   return Boolean(v);
 }
 
+// ─── Library categories ────────────────────────────────────────────────
+//
+// Was a hardcoded const array in lib/library-store.ts; now persisted
+// in app_settings so a manager can rename, add, or remove categories
+// from the admin UI without a code change. The default list is the
+// same six values the hardcoded array used (kept as a fallback so a
+// brand-new install reads sensibly before the first save).
+
+export const DEFAULT_LIBRARY_CATEGORIES: readonly string[] = [
+  "Documents",
+  "Photos",
+  "Training",
+  "Forms",
+  "Reference",
+  "Other",
+] as const;
+
+export async function getLibraryCategories(): Promise<string[]> {
+  const v = await readSetting<string[]>(
+    "library_categories",
+    DEFAULT_LIBRARY_CATEGORIES as unknown as string[]
+  );
+  // Be tolerant of someone hand-editing the row to a non-array;
+  // gracefully fall back to defaults rather than blowing up the
+  // library page.
+  if (!Array.isArray(v) || v.length === 0) {
+    return [...DEFAULT_LIBRARY_CATEGORIES];
+  }
+  // Strip duplicates + trim whitespace; preserves order.
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of v) {
+    if (typeof raw !== "string") continue;
+    const name = raw.trim();
+    if (!name) continue;
+    if (seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push(name);
+  }
+  return out.length > 0 ? out : [...DEFAULT_LIBRARY_CATEGORIES];
+}
+
+export async function setLibraryCategories(
+  list: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  // Same sanitisation as the reader — defensive write so a malformed
+  // input can't corrupt the row.
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const raw of list) {
+    const name = (raw || "").trim();
+    if (!name) continue;
+    if (seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    clean.push(name);
+  }
+  if (clean.length === 0) {
+    return { ok: false, error: "Need at least one category." };
+  }
+  return writeSetting("library_categories", clean, "library categories");
+}
+
 export async function setShiftRequestAutoApprove(
   on: boolean
 ): Promise<{ ok: boolean; error?: string }> {

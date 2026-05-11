@@ -47,7 +47,7 @@ import {
   formatTime,
 } from "@/lib/format";
 
-type Period = "7" | "30" | "90";
+type Period = "today" | "7" | "30" | "90" | "custom";
 type SortKey =
   | "date"
   | "rep"
@@ -81,6 +81,11 @@ interface TimesheetRow {
 
 export default function TimesheetReportPage() {
   const [period, setPeriod] = useState<Period>("30");
+  // Custom range state — only consulted when period === "custom".
+  // Defaults to "today minus 30 days" through today so the date inputs
+  // arrive pre-filled when the manager first switches to Custom.
+  const [customStart, setCustomStart] = useState<string>(() => isoDaysAgo(29));
+  const [customEnd, setCustomEnd] = useState<string>(() => localISO(new Date()));
   const [shifts, setShifts] = useState<ShiftRow[] | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [checkoutTimes, setCheckoutTimes] = useState<Map<string, string>>(
@@ -93,14 +98,36 @@ export default function TimesheetReportPage() {
     dir: "desc",
   });
 
-  const days = parseInt(period, 10);
+  // Resolve the active date range from period + (optional) custom.
+  // Pulled out so the data loader, the heading copy, and the CSV
+  // export all read the same start/end. Today preset = single day.
+  const range = useMemo(() => {
+    if (period === "today") {
+      const t = localISO(new Date());
+      return { start: t, end: t, label: "today" };
+    }
+    if (period === "custom") {
+      // Guard against inverted picks — if the user sets end < start
+      // we treat them as the same day rather than fetching nothing.
+      const s = customStart || localISO(new Date());
+      const e = customEnd || s;
+      const [start, end] = s <= e ? [s, e] : [e, s];
+      return { start, end, label: start === end ? start : `${start} → ${end}` };
+    }
+    const days = parseInt(period, 10);
+    return {
+      start: isoDaysAgo(days - 1),
+      end: localISO(new Date()),
+      label: `last ${days} days`,
+    };
+  }, [period, customStart, customEnd]);
 
   useEffect(() => {
     let cancelled = false;
-    const start = isoDaysAgo(days - 1);
-    const end = localISO(new Date());
-    Promise.all([listShiftsInRange(start, end), listProfiles()]).then(
-      async ([rows, ps]) => {
+    Promise.all([
+      listShiftsInRange(range.start, range.end),
+      listProfiles(),
+    ]).then(async ([rows, ps]) => {
         if (cancelled) return;
         setShifts(rows);
         setProfiles(ps);
@@ -113,7 +140,7 @@ export default function TimesheetReportPage() {
     return () => {
       cancelled = true;
     };
-  }, [days]);
+  }, [range.start, range.end]);
 
   const profileById = useMemo(
     () => new Map(profiles.map((p) => [p.id, p])),
@@ -228,7 +255,12 @@ export default function TimesheetReportPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `timesheet-last-${days}d-${localISO(new Date())}.csv`;
+    // CSV filename reflects the actual date span so a manager
+    // exporting a custom range gets a self-describing file.
+    a.download =
+      range.start === range.end
+        ? `timesheet-${range.start}.csv`
+        : `timesheet-${range.start}_to_${range.end}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -280,19 +312,56 @@ export default function TimesheetReportPage() {
                 ? "Loading shifts…"
                 : `${filtered.length} shift${
                     filtered.length === 1 ? "" : "s"
-                  } · last ${days} days · hours computed from real check-in / check-out timestamps`}
+                  } · ${range.label} · hours computed from real check-in / check-out timestamps`}
             </div>
           </div>
           <SegTabs
-            tabs={["Last 7d", "Last 30d", "Last 90d"]}
-            active={`Last ${period}d`}
-            onChange={(v) => setPeriod(v.replace(/[^0-9]/g, "") as Period)}
+            // Period presets — Today + the existing rolling windows +
+            // Custom. Custom keeps the segment selected and reveals
+            // start/end date inputs in the toolbar below so managers
+            // can pull any arbitrary span (payroll cycle, month-to-
+            // date, etc).
+            tabs={["Today", "Last 7d", "Last 30d", "Last 90d", "Custom"]}
+            active={
+              period === "today"
+                ? "Today"
+                : period === "custom"
+                ? "Custom"
+                : `Last ${period}d`
+            }
+            onChange={(v) => {
+              if (v === "Today") setPeriod("today");
+              else if (v === "Custom") setPeriod("custom");
+              else setPeriod(v.replace(/[^0-9]/g, "") as Period);
+            }}
           />
         </div>
 
         {/* Toolbar */}
         <Card padding={12}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {/* Custom-range date pickers — only shown when Custom is
+                selected in the period segment above. Native date
+                inputs are fine here: this is desktop-only admin, the
+                browser pickers are well-behaved, and dropping them
+                in front of a Combobox-style chrome would over-engineer
+                a one-off control. */}
+            {period === "custom" && (
+              <>
+                <DateInput
+                  label="From"
+                  value={customStart}
+                  onChange={setCustomStart}
+                  max={customEnd || undefined}
+                />
+                <DateInput
+                  label="To"
+                  value={customEnd}
+                  onChange={setCustomEnd}
+                  min={customStart || undefined}
+                />
+              </>
+            )}
             <Combobox
               value={repFilter}
               onChange={(v) => setRepFilter(v ?? "all")}
@@ -755,4 +824,60 @@ function buildCsv(rows: TimesheetRow[]): string {
     );
   }
   return lines.join("\n");
+}
+
+/**
+ * Date input wrapped in a label+caption pair so it visually aligns
+ * with the Combobox triggers in the toolbar. min/max round-trip
+ * native browser validation — managers can't pick an end before the
+ * start (or vice versa).
+ */
+function DateInput({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  min?: string;
+  max?: string;
+}) {
+  return (
+    <label
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontFamily: AC.font,
+        fontSize: 12,
+        color: AC.mute,
+        fontWeight: 600,
+        letterSpacing: 0.3,
+        textTransform: "uppercase",
+      }}
+    >
+      <span>{label}</span>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        min={min}
+        max={max}
+        style={{
+          padding: "5px 9px",
+          borderRadius: 8,
+          border: `1px solid ${AC.line}`,
+          background: "#fff",
+          fontFamily: AC.fontMono,
+          fontSize: 12.5,
+          color: AC.ink,
+          letterSpacing: 0,
+          textTransform: "none",
+        }}
+      />
+    </label>
+  );
 }

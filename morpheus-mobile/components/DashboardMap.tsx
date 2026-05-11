@@ -123,7 +123,16 @@ export function DashboardMap({
             longitude: c!.longitude as number,
           });
         } else {
-          skipped += 1;
+          // Only count OUTSTANDING (non-complete) shifts in the
+          // "N shifts not on the map" footer. A rep who has finished
+          // every shift today doesn't need to see "1 shift not on
+          // the map" for the address-less completed one — the message
+          // is actionable info, not a static count. Managers asked
+          // for this — the footer should reflect what's actually
+          // outstanding right now.
+          if (s.state !== "complete") {
+            skipped += 1;
+          }
         }
       }
       setPlaced(next);

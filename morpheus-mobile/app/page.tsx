@@ -809,18 +809,11 @@ function UpNextCard({
             ) : (
               <StatusChip tone="brand" icon="sparkle">Up next</StatusChip>
             )}
-            <div
-              style={{
-                fontFamily: MC.font,
-                fontSize: 11.5,
-                fontWeight: 600,
-                color: MC.hint,
-                letterSpacing: 0.6,
-                textTransform: "uppercase",
-              }}
-            >
-              #{next.code}
-            </div>
+            {/* Customer-code pill removed — it's an internal "#19"
+                style identifier that meant nothing to the rep and
+                managers fed back that it cluttered the top-right of
+                the hero card. The customer is identified by name +
+                initials below; that's enough. */}
           </div>
 
           {/* Customer */}

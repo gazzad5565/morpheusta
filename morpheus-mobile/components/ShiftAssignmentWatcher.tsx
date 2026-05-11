@@ -29,6 +29,14 @@ import { MC } from "@/lib/tokens";
 import { Glyph } from "@/components/Glyph";
 
 const SEEN_LS_KEY = "morpheus.seen_shift_ids.v1";
+// Sentinel that flips to "1" on the very first mount per device.
+// Distinguishes "brand-new rep, don't toast every existing shift"
+// from "returning rep, banner anything that appeared since last
+// visit". Without this flag the original seed silently absorbed
+// every newly-assigned shift on cold start — the bug managers
+// reported as "admin assigned me a shift, I opened the app, shift
+// was there but no notification".
+const SEEN_INIT_LS_KEY = "morpheus.seen_shift_ids.initialized.v1";
 const SEEN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14d
 const BANNER_AUTO_DISMISS_MS = 9000;
 
@@ -94,20 +102,71 @@ export function ShiftAssignmentWatcher() {
       myUserIdRef.current = userData.user?.id ?? null;
       if (!myUserIdRef.current) return;
 
-      // Seed seen-set with everything currently on the rep's plate
-      // so a cold start doesn't toast every existing shift. Only
-      // banners shifts that appear AFTER this snapshot.
       const myShifts = await listMyShiftsToday();
       if (cancelled) return;
       const now = Date.now();
+      const userId = myUserIdRef.current;
+
+      // First-ever launch detection — the sentinel flag tells us
+      // whether THIS device has ever run the watcher before.
+      //
+      //   • First ever: silently seed every current shift into the
+      //     seen-set with no banner. A brand-new rep opening the app
+      //     for the first time shouldn't get banners for every shift
+      //     they already have.
+      //
+      //   • Returning: every shift currently assigned to me that is
+      //     NOT already in the seen-set is "new since last visit" —
+      //     banner each one. This is the case admin testing flagged:
+      //     shift was assigned while the rep was offline, app opens,
+      //     shift is in the list, but no notification fired because
+      //     the old seed-blindly logic marked it seen with zero
+      //     ceremony.
+      const isFirstEver =
+        typeof window !== "undefined" &&
+        window.localStorage.getItem(SEEN_INIT_LS_KEY) !== "1";
+
       let dirty = false;
+      const newSinceLastVisit: typeof myShifts = [];
       for (const s of myShifts) {
         if (!seenRef.current[s.realId]) {
+          // Mark seen now (whether we banner or not — once we know
+          // about it, future events for the same id are ignored).
           seenRef.current[s.realId] = now;
           dirty = true;
+          if (!isFirstEver) newSinceLastVisit.push(s);
         }
       }
       if (dirty) writeSeen(seenRef.current);
+      if (isFirstEver && typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(SEEN_INIT_LS_KEY, "1");
+        } catch {
+          /* quota / disabled */
+        }
+      }
+
+      // Banner the newcomers found by the diff above. We deliberately
+      // only banner shifts where rep_id matches the current user —
+      // belt-and-braces against listMyShiftsToday ever returning a
+      // shift not assigned to me.
+      if (newSinceLastVisit.length > 0) {
+        const banners: AssignmentBanner[] = [];
+        for (const s of newSinceLastVisit) {
+          if (s.repId !== userId) continue;
+          banners.push({
+            id: s.realId,
+            customerName: s.name,
+            shiftTime: formatShiftTime(s.rawStartTime, s.rawEndTime),
+            // Treat any while-offline assignment as a fresh "new shift" —
+            // we can't tell from this snapshot whether it was INSERT or
+            // UPDATE-reassign, and the rep doesn't care about the
+            // distinction.
+            isReassignment: false,
+          });
+        }
+        if (banners.length > 0) setBanners((prev) => [...prev, ...banners]);
+      }
     };
     void seedAndSubscribe();
 

@@ -360,7 +360,10 @@ function shiftRowGrid(opts?: { header?: boolean }): CSSProperties {
   const header = opts?.header;
   return {
     display: "grid",
-    gridTemplateColumns: "4px 1.4fr 1.6fr 130px 130px 110px 110px 36px",
+    // Trailing 36 px ⋯ column dropped — was a dead button (preventDefault
+    // only). The row link itself navigates to /shifts/[id], which is the
+    // actual edit affordance.
+    gridTemplateColumns: "4px 1.4fr 1.6fr 130px 130px 110px 110px",
     gap: 14,
     alignItems: "center",
     padding: header ? "8px 16px" : "12px 16px",
@@ -580,27 +583,6 @@ function ShiftRowView({
         {checkIn || "—"}
       </div>
 
-      <button
-        type="button"
-        onClick={(e) => {
-          // Don't navigate to /shifts/[id] when the menu trigger is tapped.
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        style={{
-          width: 26,
-          height: 26,
-          borderRadius: 6,
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <AGlyph name="more" size={16} color={AC.mute} />
-      </button>
     </a>
   );
 }
@@ -779,25 +761,6 @@ function RequestRowView({ request: r }: { request: PendingRequest }) {
       <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute }}>—</div>
       <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute }}>—</div>
 
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        style={{
-          width: 26,
-          height: 26,
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <AGlyph name="more" size={16} color={AC.mute} />
-      </button>
     </Link>
   );
 }
