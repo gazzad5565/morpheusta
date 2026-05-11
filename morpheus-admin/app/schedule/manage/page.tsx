@@ -564,7 +564,11 @@ export default function ManageShiftsPage() {
 // is sized to fit [View] [Edit future] [⋮] on a single line without
 // wrapping — old design crammed in two extra destructive buttons that
 // fell to a second row and made the page look broken.
-const SERIES_GRID = "1.4fr 1.2fr 1.4fr 90px 90px 200px";
+// Now includes a Cadence column so the manager can see at a glance
+// which series is "Weekdays" / "Mon · Wed · Fri" / "One-off" — the
+// most-requested missing context on this page. Action column trimmed
+// to keep [View] [Edit future] [⋮] on one line.
+const SERIES_GRID = "1.4fr 1fr 1.1fr 1.1fr 80px 78px 200px";
 
 function SeriesHeader() {
   return (
@@ -586,6 +590,7 @@ function SeriesHeader() {
     >
       <div>Customers</div>
       <div>Reps</div>
+      <div>Cadence</div>
       <div>Date range</div>
       <div>Time</div>
       <div>Shifts</div>
@@ -665,6 +670,42 @@ function SeriesRow({
         </span>
       </div>
       <div style={{ color: AC.ink2 }}>{repLabel}</div>
+      {/* Cadence pill — drawn from series.cadenceLabel. The visual
+          weight reads as "this is a recurring set" at a glance:
+          one-offs get a calm grey pill, recurring patterns get the
+          brand tint. Hover reveals the full weekday list for tight
+          mixed patterns like "Mon · Wed · Fri". */}
+      <div>
+        <span
+          title={
+            series.weekdays.length > 0
+              ? `Occurs on: ${series.cadenceLabel}`
+              : undefined
+          }
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "2px 8px",
+            borderRadius: 99,
+            background:
+              series.cadenceLabel === "One-off" ? AC.bg : AC.brandSoft,
+            color:
+              series.cadenceLabel === "One-off"
+                ? AC.mute
+                : AC.brandInk,
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: 0,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: "100%",
+          }}
+        >
+          {series.cadenceLabel}
+        </span>
+      </div>
       <div style={{ color: AC.ink2 }}>
         {series.firstDate}
         {series.firstDate !== series.lastDate && ` → ${series.lastDate}`}
@@ -685,8 +726,30 @@ function SeriesRow({
           two bare red buttons (with a confusingly-labelled "All")
           competing for attention on every row. */}
       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+        {/* View jumps to the calendar pre-filtered to the series:
+              - date → calendar opens on the week containing the
+                first upcoming (or earliest) shift
+              - customer → applied when the series is single-customer
+              - rep → applied when the series is single-rep (named
+                or "__unassigned__")
+            Multi-customer / multi-rep series leave the filter on
+            "All" since locking down to one wouldn't match all
+            their shifts. */}
         <Link
-          href={`/schedule?seriesStart=${series.firstDate}`}
+          href={`/schedule?${new URLSearchParams({
+            date: series.firstDate,
+            ...(series.customerIds.length === 1
+              ? { customer: series.customerIds[0] }
+              : {}),
+            ...(series.repIds.length === 1
+              ? {
+                  rep:
+                    series.repIds[0] === null
+                      ? "__unassigned__"
+                      : series.repIds[0],
+                }
+              : {}),
+          }).toString()}`}
           style={{ textDecoration: "none" }}
         >
           <Btn size="sm" icon="eye" title="Open this series on the calendar">

@@ -23,7 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
@@ -356,15 +356,40 @@ function defaultStartTimeFor(iso: string, dayShifts: ShiftRow[]): string {
 }
 
 export default function SchedulePage() {
-  const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
+  // URL params — used by /schedule/manage's "View" button to deep-link
+  // into the calendar pre-filtered to a specific series.
+  //
+  //   ?date=2026-05-12       → jump the week to the one containing this date
+  //   ?customer=<uuid>       → preselect the customer filter
+  //   ?rep=<uuid> / unassigned → preselect the rep filter
+  //
+  // Reading once at mount only — managers manipulating filters after
+  // arrival shouldn't fight a stale param. We could push state back to
+  // the URL on every change for shareability, but YAGNI for now.
+  const searchParams = useSearchParams();
+  const initialDateParam = searchParams.get("date");
+  const initialCustomerParam = searchParams.get("customer");
+  const initialRepParam = searchParams.get("rep");
+
+  const [weekStart, setWeekStart] = useState<Date>(() => {
+    if (initialDateParam) {
+      const d = new Date(`${initialDateParam}T12:00:00`);
+      if (!Number.isNaN(d.getTime())) return startOfWeekMonday(d);
+    }
+    return startOfWeekMonday(new Date());
+  });
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
-  const [customerFilter, setCustomerFilter] = useState<string>("All");
+  const [customerFilter, setCustomerFilter] = useState<string>(
+    initialCustomerParam || "All"
+  );
   // Rep filter — "All" / __unassigned__ / specific rep id. Mirrors the
   // customer filter so a manager can quickly narrow the calendar to
   // "show me Hayid's whole week" without switching to the Reps view.
-  const [repFilter, setRepFilter] = useState<string>("All");
+  const [repFilter, setRepFilter] = useState<string>(
+    initialRepParam || "All"
+  );
   const [loading, setLoading] = useState(true);
 
   const days = useMemo(

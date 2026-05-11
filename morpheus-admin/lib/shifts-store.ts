@@ -478,6 +478,54 @@ export interface ShiftSeriesSummary {
   /** Set of yyyy-mm-dd → count, used to render the recurrence pattern. */
   upcomingCount: number;
   pastCount: number;
+  /** Distinct weekday indices used by this series (0=Sun, 6=Sat),
+   *  derived from the actual shift_date list. Drives the cadence
+   *  pill on /schedule/manage so the manager can tell at a glance
+   *  which series is "Mon, Wed, Fri" vs "Daily" vs a one-off. */
+  weekdays: number[];
+  /** Human-readable label for the cadence column. "One-off",
+   *  "Daily", "Mon · Wed · Fri", etc. Computed in the store so
+   *  every render site uses the same vocabulary. */
+  cadenceLabel: string;
+}
+
+/**
+ * Translate a set of weekday indices + total shift count into the
+ * cadence label rendered on /schedule/manage.
+ *
+ *   - 1 shift total          → "One-off"
+ *   - all 7 weekdays         → "Daily"
+ *   - Mon–Fri only           → "Weekdays"
+ *   - Sat+Sun only           → "Weekends"
+ *   - 1 weekday              → "Weekly · {Mondays}"
+ *   - 2–4 weekdays           → "Mon · Wed · Fri" (short labels joined)
+ *   - otherwise (5/6 mix)    → full short list
+ */
+function describeCadence(weekdays: number[], totalCount: number): string {
+  if (totalCount <= 1) return "One-off";
+  const set = new Set(weekdays);
+  const all7 = set.size === 7;
+  if (all7) return "Daily";
+  const onlyMonFri =
+    set.size === 5 && [1, 2, 3, 4, 5].every((d) => set.has(d));
+  if (onlyMonFri) return "Weekdays";
+  const onlyWeekend =
+    set.size === 2 && set.has(0) && set.has(6);
+  if (onlyWeekend) return "Weekends";
+  const SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const LONG = [
+    "Sundays",
+    "Mondays",
+    "Tuesdays",
+    "Wednesdays",
+    "Thursdays",
+    "Fridays",
+    "Saturdays",
+  ];
+  if (weekdays.length === 1) {
+    return `Weekly · ${LONG[weekdays[0]]}`;
+  }
+  return weekdays.map((d) => SHORT[d]).join(" · ");
 }
 
 /**
@@ -524,6 +572,16 @@ export async function listShiftSeries(): Promise<ShiftSeriesSummary[]> {
     const repIds = Array.from(new Set(rows.map((r) => r.rep_id)));
     const upcomingCount = rows.filter((r) => r.shift_date >= today).length;
     const pastCount = rows.length - upcomingCount;
+    // Derive cadence from the actual shift_date set. We use noon
+    // local time when constructing the Date so a date string like
+    // "2026-05-12" never lands in yesterday in UTC-aware browsers.
+    const weekdaySet = new Set<number>();
+    for (const r of rows) {
+      const d = new Date(`${r.shift_date}T12:00:00`);
+      weekdaySet.add(d.getDay());
+    }
+    const weekdays = Array.from(weekdaySet).sort();
+    const cadenceLabel = describeCadence(weekdays, rows.length);
     out.push({
       series_id,
       shiftCount: rows.length,
@@ -535,6 +593,8 @@ export async function listShiftSeries(): Promise<ShiftSeriesSummary[]> {
       repIds,
       upcomingCount,
       pastCount,
+      weekdays,
+      cadenceLabel,
     });
   }
   // Newest series first (by lastDate desc).
@@ -593,6 +653,19 @@ export async function updateShiftSeries(
   if (error) {
     notifySaveError(error.message, "shift series");
     return { ok: false, error: error.message };
+  }
+  // Catch silent zero-row updates — most often "every shift in this
+  // series is already past or in a state other than 'scheduled'",
+  // sometimes an RLS block. The old behaviour was to swallow this
+  // as success, which made Edit-future feel broken when nothing
+  // changed under the hood. Surfacing the count = 0 case gives the
+  // manager a clear "nothing was updated, here's why" message.
+  if ((count ?? 0) === 0) {
+    return {
+      ok: false,
+      error:
+        "Nothing was updated — every shift in this series is past, running, or complete. Edit-future only changes shifts still in 'scheduled' state.",
+    };
   }
 
   await logEvent({
