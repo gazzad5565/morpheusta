@@ -4,6 +4,7 @@ import "./globals.css";
 import { MenuShell } from "@/components/MenuShell";
 import { AuthGate } from "@/components/AuthGate";
 import { RequestResolutionWatcher } from "@/components/RequestResolutionWatcher";
+import { ShiftAssignmentWatcher } from "@/components/ShiftAssignmentWatcher";
 import { PendingRequestPill } from "@/components/PendingRequestPill";
 
 const inter = Inter({
@@ -55,6 +56,11 @@ export default function RootLayout({
                 nothing while idle. Mounted at layout level so banners
                 show on whatever page the rep is on. */}
             <RequestResolutionWatcher />
+            {/* Banners when admin assigns a new shift to this rep, or
+                reassigns an existing shift to them (e.g. via the
+                cancellation flow's "Reassign" button). Same shape /
+                placement as RequestResolutionWatcher. */}
+            <ShiftAssignmentWatcher />
             {/* Tiny floating "N pending — awaiting approval" reminder
                 that follows the rep across every page until the admin
                 approves or declines. Together with the watcher above
