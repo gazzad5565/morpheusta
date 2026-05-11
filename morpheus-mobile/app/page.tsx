@@ -15,10 +15,17 @@ import {
   listMyShiftsToday,
   setShiftTravellingState,
   subscribeShifts,
+  raiseUnableToAttend,
+  withdrawUnableToAttend,
+  type UnableReason,
 } from "@/lib/shifts-store";
 import { getMyProfile } from "@/lib/profiles-store";
 import { listLibraryFiles } from "@/lib/library-store";
 import { getOrganisationName, getOrganisationLogoUrl } from "@/lib/settings-store";
+import {
+  UnableToAttendSheet,
+  unableReasonLabel,
+} from "@/components/UnableToAttendSheet";
 
 // MapLibre needs `window`; defer to client-only.
 const DashboardMap = dynamic(
@@ -39,6 +46,12 @@ type DbShift = Shift & {
   siteLat?: number | null;
   siteLng?: number | null;
   siteGeofenceM?: number | null;
+  /** Attention overlay — the up-next card flips into an "Awaiting
+   *  manager" state when these are set + unresolved. Mirrors the
+   *  /shifts row behaviour so the rep learns the pattern once. */
+  attention?: string | null;
+  attentionReason?: string | null;
+  attentionResolvedAt?: string | null;
 };
 
 function formatTodayHeader(): string {
@@ -166,6 +179,54 @@ export default function DashboardPage() {
   const [shiftsLoaded, setShiftsLoaded] = useState(false);
   // Real library file count, used for the Library shortcut subtitle.
   const [libraryCount, setLibraryCount] = useState<number | null>(null);
+
+  // "I can't make this shift" sheet state — applies to the up-next
+  // shift only on the dashboard. Mirrors the /shifts page pattern so
+  // the rep learns it once. `unableSheetFor` holds the row currently
+  // showing the slide-up sheet; `unableBusyFor` blocks the action
+  // while the DB write is in flight.
+  const [unableSheetFor, setUnableSheetFor] = useState<
+    | { realId: string; name: string }
+    | null
+  >(null);
+  const [unableBusyFor, setUnableBusyFor] = useState<string | null>(null);
+
+  // Promise<void> contract from the sheet — throwing rolls back the
+  // sheet's "busy" state and surfaces the error. ok=true → we close.
+  const handleRaiseUnable = async (
+    realId: string,
+    reason: UnableReason,
+    note: string
+  ) => {
+    setUnableBusyFor(realId);
+    const r = await raiseUnableToAttend(realId, reason, note);
+    setUnableBusyFor(null);
+    if (!r.ok) {
+      throw new Error(r.error || "Couldn't notify your manager");
+    }
+    setUnableSheetFor(null);
+    // Refetch so the up-next card flips to "Awaiting manager" without
+    // waiting for Realtime to round-trip on slow networks.
+    void listMyShiftsToday().then((rows) => setShifts(rows));
+  };
+
+  const handleWithdrawUnable = async (realId: string) => {
+    if (
+      !confirm(
+        "Withdraw the unable-to-attend flag? You'll be back on the schedule."
+      )
+    ) {
+      return;
+    }
+    setUnableBusyFor(realId);
+    const r = await withdrawUnableToAttend(realId);
+    setUnableBusyFor(null);
+    if (!r.ok) {
+      alert(r.error || "Couldn't withdraw — your manager may already have actioned it.");
+      return;
+    }
+    void listMyShiftsToday().then((rows) => setShifts(rows));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -354,6 +415,11 @@ export default function DashboardPage() {
         travellingSince={travellingSince}
         setTravellingSince={setTravellingSince}
         inProgressCount={inProgressCount}
+        onUnableToAttend={(s) =>
+          setUnableSheetFor({ realId: s.realId, name: s.name })
+        }
+        onWithdrawUnable={handleWithdrawUnable}
+        unableBusyFor={unableBusyFor}
       />
 
       {/* Break or travel — combined affordance. The chooser sheet lets
@@ -418,6 +484,24 @@ export default function DashboardPage() {
       </Link>
 
       <AppFooter />
+
+      {/* Confirm-and-pick-reason sheet for the up-next card's "I can't
+          make this shift" link. Mounted at the dashboard root so it
+          slides over the whole page. Same component the /shifts list
+          uses — single source of truth for the reason picker. */}
+      {unableSheetFor && (
+        <UnableToAttendSheet
+          shiftName={unableSheetFor.name}
+          onClose={() =>
+            unableBusyFor === unableSheetFor.realId
+              ? undefined
+              : setUnableSheetFor(null)
+          }
+          onSubmit={(reason, note) =>
+            handleRaiseUnable(unableSheetFor.realId, reason, note)
+          }
+        />
+      )}
     </div>
   );
 }
@@ -438,6 +522,9 @@ function UpNextCard({
   travellingSince,
   setTravellingSince,
   inProgressCount,
+  onUnableToAttend,
+  onWithdrawUnable,
+  unableBusyFor,
 }: {
   shifts: DbShift[];
   loaded: boolean;
@@ -446,6 +533,14 @@ function UpNextCard({
   travellingSince: number | null;
   setTravellingSince: (v: number | null) => void;
   inProgressCount: number;
+  /** Open the unable-to-attend sheet for the up-next shift.
+   *  Defined only when the next shift is scheduled and clean. */
+  onUnableToAttend?: (shift: DbShift) => void;
+  /** Withdraw a previously-raised attention flag on the next shift. */
+  onWithdrawUnable?: (shiftRealId: string) => void;
+  /** Real id of the shift currently in a raise/withdraw DB call.
+   *  Used to disable the Withdraw button while it's in flight. */
+  unableBusyFor?: string | null;
 }) {
   // Prefer the in-progress shift; otherwise the earliest scheduled one.
   const inProgress = shifts.find((s) => s.state === "in-progress");
@@ -690,88 +785,190 @@ function UpNextCard({
             </div>
           </div>
 
-          {/* Actions */}
-          <div
-            style={{
-              marginTop: 14,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
-            {/* Two-button row: Directions toggles inline preview, Start/Stop travelling */}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setDirectionsOpen(!directionsOpen)}
-                style={{
-                  ...secondaryBtnStyle,
-                  flex: 1,
-                  background: directionsOpen ? MC.brandTint : MC.card,
-                  borderColor: directionsOpen ? MC.brand : `${MC.brand}33`,
-                }}
-                aria-pressed={directionsOpen}
-              >
-                <Glyph
-                  name="target"
-                  size={16}
-                  color={directionsOpen ? MC.brandInk : MC.brandDeep}
-                  strokeWidth={2.2}
-                />
-                Directions
-              </button>
-              {travellingSince ? (
+          {/* Attention raised → swap out the entire action block for
+              an inline "Awaiting manager" banner + Withdraw button.
+              We hide Directions / Travel / Check-in entirely so a rep
+              who just told us they can't make it can't also tap
+              Check-in by mistake. Same look as the /shifts row, so
+              the rep recognises the state instantly. */}
+          {next.attention === "unable_to_attend" && !next.attentionResolvedAt ? (
+            <div
+              style={{
+                marginTop: 14,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: MC.warnTint,
+                border: `1px solid ${MC.warn}55`,
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <Glyph name="warn" size={20} color={MC.warn} strokeWidth={2.2} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: "#6d4808",
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  Awaiting manager
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 12,
+                    color: "#7d5708",
+                    marginTop: 2,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Reason: {unableReasonLabel(next.attentionReason)} · Your
+                  manager will reassign or release this shift.
+                </div>
+              </div>
+              {onWithdrawUnable && (
                 <button
                   type="button"
-                  onClick={() => setTravellingSince(null)}
-                  style={{ ...secondaryBtnStyle, flex: 1.4 }}
+                  onClick={() => onWithdrawUnable(next.realId)}
+                  disabled={unableBusyFor === next.realId}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: `1px solid ${MC.warn}66`,
+                    background: "#fff",
+                    color: "#6d4808",
+                    fontFamily: MC.font,
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    cursor:
+                      unableBusyFor === next.realId ? "not-allowed" : "pointer",
+                    opacity: unableBusyFor === next.realId ? 0.6 : 1,
+                  }}
                 >
-                  <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
-                  Stop · {formatTime(travellingSince)}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setTravellingSince(Date.now())}
-                  style={{ ...secondaryBtnStyle, flex: 1.4 }}
-                >
-                  <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
-                  Start travelling
+                  {unableBusyFor === next.realId ? "…" : "Withdraw"}
                 </button>
               )}
             </div>
-            {isResume ? (
-              <Link href="/active" style={{ textDecoration: "none" }}>
-                <PrimaryButton icon="arrow-r">Resume shift</PrimaryButton>
-              </Link>
-            ) : (
-              <Link href={`/check-in?shift=${next.realId}`} style={{ textDecoration: "none" }}>
-                <PrimaryButton icon="log">Check in to shift</PrimaryButton>
-              </Link>
-            )}
-          </div>
+          ) : (
+            <>
+              {/* Actions */}
+              <div
+                style={{
+                  marginTop: 14,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                {/* Two-button row: Directions toggles inline preview, Start/Stop travelling */}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setDirectionsOpen(!directionsOpen)}
+                    style={{
+                      ...secondaryBtnStyle,
+                      flex: 1,
+                      background: directionsOpen ? MC.brandTint : MC.card,
+                      borderColor: directionsOpen ? MC.brand : `${MC.brand}33`,
+                    }}
+                    aria-pressed={directionsOpen}
+                  >
+                    <Glyph
+                      name="target"
+                      size={16}
+                      color={directionsOpen ? MC.brandInk : MC.brandDeep}
+                      strokeWidth={2.2}
+                    />
+                    Directions
+                  </button>
+                  {travellingSince ? (
+                    <button
+                      type="button"
+                      onClick={() => setTravellingSince(null)}
+                      style={{ ...secondaryBtnStyle, flex: 1.4 }}
+                    >
+                      <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
+                      Stop · {formatTime(travellingSince)}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setTravellingSince(Date.now())}
+                      style={{ ...secondaryBtnStyle, flex: 1.4 }}
+                    >
+                      <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
+                      Start travelling
+                    </button>
+                  )}
+                </div>
+                {isResume ? (
+                  <Link href="/active" style={{ textDecoration: "none" }}>
+                    <PrimaryButton icon="arrow-r">Resume shift</PrimaryButton>
+                  </Link>
+                ) : (
+                  <Link href={`/check-in?shift=${next.realId}`} style={{ textDecoration: "none" }}>
+                    <PrimaryButton icon="log">Check in to shift</PrimaryButton>
+                  </Link>
+                )}
+              </div>
 
-          {/* Lateness/info banner — only shown for not-yet-checked-in shifts. */}
-          {!isResume && (
-          <div
-            style={{
-              marginTop: 12,
-              padding: "9px 12px",
-              background: MC.warnTint,
-              borderRadius: 10,
-              display: "flex",
-              gap: 8,
-              alignItems: "flex-start",
-              fontFamily: MC.font,
-              fontSize: 12,
-              color: "#6d4808",
-            }}
-          >
-            <Glyph name="info" size={14} color="#b27606" />
-            <span>
-              You&apos;ll record any off-site or late reason at check-in.
-            </span>
-          </div>
+              {/* Lateness/info banner — only shown for not-yet-checked-in shifts. */}
+              {!isResume && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: "9px 12px",
+                    background: MC.warnTint,
+                    borderRadius: 10,
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "flex-start",
+                    fontFamily: MC.font,
+                    fontSize: 12,
+                    color: "#6d4808",
+                  }}
+                >
+                  <Glyph name="info" size={14} color="#b27606" />
+                  <span>
+                    You&apos;ll record any off-site or late reason at check-in.
+                  </span>
+                </div>
+              )}
+
+              {/* "I can't make this shift" — friction-by-design red
+                  text-link, only on scheduled shifts where attention
+                  isn't already raised. Same affordance as the
+                  /shifts row so the rep learns it once. */}
+              {!isResume && onUnableToAttend && (
+                <button
+                  type="button"
+                  onClick={() => onUnableToAttend(next)}
+                  style={{
+                    marginTop: 8,
+                    width: "100%",
+                    background: "transparent",
+                    border: "none",
+                    color: MC.danger,
+                    fontFamily: MC.font,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    letterSpacing: -0.1,
+                    padding: "6px 0 2px",
+                    cursor: "pointer",
+                    textAlign: "center",
+                    textDecoration: "underline",
+                    textUnderlineOffset: 3,
+                    opacity: 0.85,
+                  }}
+                >
+                  I can&apos;t make this shift
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
