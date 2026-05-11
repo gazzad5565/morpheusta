@@ -421,39 +421,70 @@ export default function ShiftsListPage() {
             </div>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            // Show the same brand-tinted "Opening…" overlay we use on
-            // check-in / check-out so the rep sees motion the moment
-            // they tap. Previously this was a bare <Link> — Next's
-            // client-side navigation runs silently and there's a
-            // half-second gap where the screen looks frozen.
-            setOpeningRequest(true);
-            router.push("/add-shift");
-          }}
-          aria-label="Request a customer"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "7px 12px 7px 9px",
-            borderRadius: 999,
-            background: MC.brandTint,
-            border: `1px solid ${MC.brand}33`,
-            color: MC.brandDeep,
-            textDecoration: "none",
-            fontFamily: MC.font,
-            fontSize: 12.5,
-            fontWeight: 700,
-            letterSpacing: -0.1,
-            flexShrink: 0,
-            cursor: "pointer",
-          }}
-        >
-          <Glyph name="plus" size={13} color={MC.brand} strokeWidth={2.6} />
-          Request
-        </button>
+        {/* Action pills (right-aligned in the header row).
+            "Plan my day" only surfaces when the rep has 2+ assigned
+            shifts today — anything less and Up Next on the dashboard
+            already handles the one-tap navigation case. Same okTint
+            colourway as the home-page pill so the affordance reads as
+            the same feature from either entry point. */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+          {mine.length >= 2 && (
+            <Link
+              href="/route"
+              aria-label="Plan my day"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                padding: "7px 11px 7px 9px",
+                borderRadius: 999,
+                background: MC.okTint,
+                border: `1px solid ${MC.ok}33`,
+                color: "#0d6a45",
+                textDecoration: "none",
+                fontFamily: MC.font,
+                fontSize: 12.5,
+                fontWeight: 700,
+                letterSpacing: -0.1,
+              }}
+            >
+              <Glyph name="target" size={13} color={MC.ok} strokeWidth={2.4} />
+              Plan day
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              // Show the same brand-tinted "Opening…" overlay we use on
+              // check-in / check-out so the rep sees motion the moment
+              // they tap. Previously this was a bare <Link> — Next's
+              // client-side navigation runs silently and there's a
+              // half-second gap where the screen looks frozen.
+              setOpeningRequest(true);
+              router.push("/add-shift");
+            }}
+            aria-label="Request a customer"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "7px 12px 7px 9px",
+              borderRadius: 999,
+              background: MC.brandTint,
+              border: `1px solid ${MC.brand}33`,
+              color: MC.brandDeep,
+              textDecoration: "none",
+              fontFamily: MC.font,
+              fontSize: 12.5,
+              fontWeight: 700,
+              letterSpacing: -0.1,
+              cursor: "pointer",
+            }}
+          >
+            <Glyph name="plus" size={13} color={MC.brand} strokeWidth={2.6} />
+            Request
+          </button>
+        </div>
       </div>
       </div>
 

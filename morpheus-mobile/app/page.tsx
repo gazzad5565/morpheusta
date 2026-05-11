@@ -499,69 +499,6 @@ export default function DashboardPage() {
         onClosePreview={() => setDirectionsPreview(null)}
       />
 
-      {/* Plan my day — entry point into /route. Only render when the
-          rep actually has multiple stops; a single shift doesn't need
-          a "route" since Up Next already handles the one-tap travel /
-          directions path. Hides while shifts are still loading so we
-          don't flash the card in and out. */}
-      {shiftsLoaded && shifts.length >= 2 && (
-        <Link
-          href="/route"
-          style={{ padding: "0 16px 4px", textDecoration: "none", display: "block" }}
-        >
-          <div
-            style={{
-              background: MC.card,
-              borderRadius: MC.radiusCard,
-              border: `1px solid ${MC.line}`,
-              padding: 14,
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              boxShadow: "0 1px 0 rgba(10,15,30,.02)",
-            }}
-          >
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 10,
-                background: MC.okTint,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Glyph name="target" size={20} color={MC.ok} strokeWidth={2.2} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontFamily: MC.font,
-                  fontSize: 15,
-                  fontWeight: 700,
-                  color: MC.ink,
-                  letterSpacing: -0.2,
-                }}
-              >
-                Plan my day
-              </div>
-              <div
-                style={{
-                  fontFamily: MC.font,
-                  fontSize: 12,
-                  color: MC.mute,
-                  marginTop: 2,
-                }}
-              >
-                {shifts.length} stops · live traffic ETAs + Leave-by reminders
-              </div>
-            </div>
-            <Glyph name="chev-r" size={18} color={MC.hint} />
-          </div>
-        </Link>
-      )}
-
       {/* Up Next — primary CTA */}
       <UpNextCard
         shifts={shifts}
@@ -593,6 +530,46 @@ export default function DashboardPage() {
           router.push(href);
         }}
       />
+
+      {/* Slim "Plan my day" link directly under the Up Next card —
+          only when the rep has 2+ stops, otherwise the one shift is
+          already covered by Up Next's own Directions / Resume CTAs.
+          Used to be a chunky full-width card up between the map and
+          Up Next; that disrupted the visual flow the user liked, so
+          we collapsed it into a small right-aligned pill that sits
+          near Up Next without competing with it. */}
+      {shiftsLoaded && shifts.length >= 2 && (
+        <div
+          style={{
+            padding: "8px 16px 0",
+            display: "flex",
+            justifyContent: "flex-end",
+          }}
+        >
+          <Link
+            href="/route"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 11px 6px 9px",
+              borderRadius: 999,
+              background: MC.okTint,
+              border: `1px solid ${MC.ok}33`,
+              color: "#0d6a45",
+              textDecoration: "none",
+              fontFamily: MC.font,
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: -0.1,
+            }}
+          >
+            <Glyph name="target" size={12} color={MC.ok} strokeWidth={2.4} />
+            Plan my day · {shifts.length} stops
+            <Glyph name="chev-r" size={12} color="#0d6a45" />
+          </Link>
+        </div>
+      )}
 
       {/* Break or travel — combined affordance. The chooser sheet lets
           the rep pick break length OR start a travel timer without
