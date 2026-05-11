@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { AppHeader, CustomerTile, ReasonChip, PrimaryButton } from "@/components/Chrome";
 import { LoadingBar } from "@/components/Loading";
+import { CheckingInOverlay, type CheckInPhase } from "@/components/CheckingInOverlay";
 import { Glyph, type GlyphName } from "@/components/Glyph";
 import { getShiftById, checkInToShift, type ShiftWithMeta } from "@/lib/shifts-store";
 import { getCustomerById } from "@/lib/customers-store";
@@ -296,6 +297,10 @@ function CheckInPage() {
   const [earlyReason, setEarlyReasonRaw] = useState<string | null>(null);
   const [earlyNote, setEarlyNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // Drives the CheckingInOverlay's stepper. Stays null while the rep
+  // is filling out the form; goes through "submitting" → "logging" →
+  // "done" during onProceed. The overlay unmounts once we route.
+  const [checkInPhase, setCheckInPhase] = useState<CheckInPhase | null>(null);
 
   const offsiteTriggered = offsiteInfo?.triggered === true;
   const lateTriggered = lateInfo?.triggered === true;
@@ -340,13 +345,20 @@ function CheckInPage() {
   const onProceed = async () => {
     if (!canProceed || !shift) return;
     setSubmitting(true);
+    setCheckInPhase("submitting");
     // 1. Mark shift in-progress (writes the standard shift.checked_in event).
     const result = await checkInToShift(shift.realId);
     if (!result.ok) {
       setSubmitting(false);
+      setCheckInPhase(null);
       alert(`Couldn't check in: ${result.error}`);
       return;
     }
+    // Move to "logging" phase before we kick off the exception events
+    // so the stepper visibly advances. If there are no exceptions the
+    // phase still transitions — it's brief but explicit, and keeps the
+    // overlay's behaviour consistent across paths.
+    setCheckInPhase("logging");
     // 2. Log dedicated exception events alongside the standard check-in.
     if (offsiteTriggered) {
       await logEvent({
@@ -423,6 +435,14 @@ function CheckInPage() {
       ...(lateReason ? { lateReason, lateNote } : {}),
       ...(earlyReason ? { earlyReason, earlyNote } : {}),
     });
+    // Land on the "done" phase so the overlay flashes its complete
+    // state (green tick + "You're checked in!") for ~550ms before we
+    // route. Without the dwell the rep barely sees the celebratory
+    // frame — it's the whole point of the overlay. The router.push is
+    // still preloaded by Next so the actual navigation feels instant
+    // once it fires.
+    setCheckInPhase("done");
+    await new Promise((r) => window.setTimeout(r, 550));
     router.push(`/check-in/success?${sp.toString()}`);
   };
 
@@ -952,6 +972,17 @@ function CheckInPage() {
             : "Tap to record your check-in."}
         </div>
       </div>
+
+      {/* Full-screen check-in animation. Mounted only while we're in
+          flight so the rep sees a confident "something's happening"
+          state instead of a frozen page. Parent owns the phase; this
+          component is purely visual. */}
+      {checkInPhase && (
+        <CheckingInOverlay
+          customerName={shift?.name || "your shift"}
+          phase={checkInPhase}
+        />
+      )}
     </div>
   );
 }

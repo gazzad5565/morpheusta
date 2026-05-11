@@ -105,6 +105,36 @@ input, textarea, select {
   to { stroke-dashoffset: -16; }
 }
 
+/* Skeleton shimmer — the Skeleton primitive references this name.
+   Without it the placeholder is just a static stripe; with it the
+   gradient slides across so loading lists feel alive. */
+@keyframes mc-skel {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Check-in success ring — slow pulsing halo behind the brand circle
+   during the "Checking you in…" overlay. Two staggered rings give the
+   effect of confidence radiating from the centre. */
+@keyframes mc-ring-pulse {
+  0%   { transform: scale(.7); opacity: .55; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+/* Step-bar fill used by the check-in overlay's progress strip. Eases
+   from 0 to 100% over the assumed-network duration so the rep sees
+   forward motion regardless of how fast the actual write finished. */
+@keyframes mc-fill {
+  0%   { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+
+/* Subtle rise-and-glow for the headline text under the brand circle. */
+@keyframes mc-rise {
+  0%   { transform: translateY(8px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
 /* Side-menu overlay: fixed full-screen on mobile, constrained to phone column on desktop */
 .mc-menu-overlay {
   position: fixed;

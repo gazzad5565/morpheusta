@@ -435,7 +435,7 @@ export default function ShiftsListPage() {
 
       <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 10 }}>
         {!loaded ? (
-          <SkeletonRow />
+          <SkeletonStack count={3} />
         ) : mineFiltered.length === 0 ? (
           <EmptyState
             text={
@@ -478,7 +478,9 @@ export default function ShiftsListPage() {
       </SectionLabel>
 
       <div style={{ padding: "0 16px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
-        {!loaded ? null : unassignedFiltered.length === 0 ? (
+        {!loaded ? (
+          <SkeletonStack count={2} />
+        ) : unassignedFiltered.length === 0 ? (
           <EmptyState
             text={
               search
@@ -547,17 +549,59 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
-function SkeletonRow() {
+function SkeletonStack({ count }: { count: number }) {
+  // A vertical stack of shimmering placeholder rows that match the
+  // real ShiftRow's silhouette (customer tile + 2 stub lines). Better
+  // than a featureless grey block — the rep's eye latches onto the
+  // skeleton and skim-reads "ah, content is coming" rather than
+  // wondering whether the page is broken.
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <SkeletonRow key={i} delay={i * 100} />
+      ))}
+    </>
+  );
+}
+
+function SkeletonRow({ delay = 0 }: { delay?: number }) {
+  // CSS lint: spread the shimmer FIRST and let any per-row override
+  // (corner radius on the customer-tile, for example) win. The other
+  // way around triggers TS2783 "specified more than once".
+  const shimmer = {
+    background: `linear-gradient(90deg, ${MC.bg} 0%, ${MC.line} 50%, ${MC.bg} 100%)`,
+    backgroundSize: "200% 100%",
+    animation: "mc-skel 1.4s ease-in-out infinite",
+    animationDelay: `${delay}ms`,
+    borderRadius: 6,
+  };
   return (
     <div
       style={{
-        height: 80,
         background: MC.card,
         border: `1px solid ${MC.line}`,
         borderRadius: MC.radiusCard,
-        opacity: 0.5,
+        padding: 14,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
       }}
-    />
+    >
+      <div
+        style={{
+          ...shimmer,
+          width: 46,
+          height: 46,
+          borderRadius: 12,
+          flexShrink: 0,
+        }}
+      />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ ...shimmer, height: 14, width: "65%" }} />
+        <div style={{ ...shimmer, height: 11, width: "40%" }} />
+      </div>
+      <div style={{ ...shimmer, width: 24, height: 24, borderRadius: 6 }} />
+    </div>
   );
 }
 
