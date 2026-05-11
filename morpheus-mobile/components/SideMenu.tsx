@@ -21,12 +21,18 @@ interface Item {
 }
 
 const ITEMS: Item[] = [
-  { id: "shifts",    label: "Today",          icon: "clock", color: MC.brand,  href: "/" },
-  { id: "addshift",  label: "Request shift",  icon: "pin",   color: MC.brand,  href: "/add-shift" },
-  { id: "library",   label: "Library",        icon: "book",  color: "#5b3da5", href: "/library" },
-  { id: "support",   label: "Support",        icon: "mic",   color: "#9c4a2c", href: "/support" },
-  { id: "profile",   label: "Profile",        icon: "leave", color: MC.mute,   href: "/profile" },
-  { id: "logout",    label: "Log out",        icon: "leave", color: MC.danger, href: "/login" },
+  { id: "today",     label: "Today",   icon: "clock", color: MC.brand,  href: "/" },
+  // Second slot is Shifts (was Request shift). The /shifts page
+  // already carries a "Request" pill in its header, so a dedicated
+  // menu item for the request flow was redundant — and "view all my
+  // shifts" is a far more frequent destination than "request a new
+  // customer". Reps reach /add-shift either via that pill or via the
+  // home page's Add affordance.
+  { id: "shifts",    label: "Shifts",  icon: "log",   color: MC.brand,  href: "/shifts" },
+  { id: "library",   label: "Library", icon: "book",  color: "#5b3da5", href: "/library" },
+  { id: "support",   label: "Support", icon: "mic",   color: "#9c4a2c", href: "/support" },
+  { id: "profile",   label: "Profile", icon: "leave", color: MC.mute,   href: "/profile" },
+  { id: "logout",    label: "Log out", icon: "leave", color: MC.danger, href: "/login" },
 ];
 // "Plan my day" intentionally NOT in the side menu — it's surfaced
 // where it's actually useful (home Up Next pill + /shifts header
@@ -35,10 +41,15 @@ const ITEMS: Item[] = [
 // for ~60% of the rep's days, and the user explicitly asked to keep
 // the menu tight.
 
-const SHIFTS_PATHS = ["/", "/shifts", "/check-in", "/active", "/check-out", "/summary"];
+// "Today" covers the dashboard plus every page the rep flows through
+// during an active shift (check-in, active, check-out, summary) — they
+// all roll up to the dashboard conceptually. /shifts is its own
+// destination (the list view), so it stays out of this set and gets
+// highlighted independently via a startsWith match on its own item.
+const TODAY_PATHS = ["/", "/check-in", "/active", "/check-out", "/summary", "/add-shift"];
 
-function isShiftsCurrent(pathname: string): boolean {
-  return SHIFTS_PATHS.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p)));
+function isTodayCurrent(pathname: string): boolean {
+  return TODAY_PATHS.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p)));
 }
 
 export function SideMenu() {
@@ -214,8 +225,12 @@ export function SideMenu() {
           }}
         >
           {ITEMS.map((it) => {
+            // "Today" highlights for the dashboard + every shift-execution
+            // page (check-in, active, etc); every other item is a direct
+            // path match. /shifts has its own row now, so it lights up
+            // only when the rep is actually on the list view.
             const isCurrent =
-              it.id === "shifts" ? isShiftsCurrent(pathname) : pathname.startsWith(it.href);
+              it.id === "today" ? isTodayCurrent(pathname) : pathname.startsWith(it.href);
             return (
               <Link
                 key={it.id}
