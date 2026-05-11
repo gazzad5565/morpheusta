@@ -30,6 +30,34 @@ const DEFAULT_ZOOM = 9;
 // Reps whose last ping is older than this are considered stale and dimmed.
 const STALE_AFTER_MS = 5 * 60 * 1000;
 
+// Inline SVGs for marker glyphs. Keeping them as plain strings means we
+// don't have to mount React inside MapLibre's DOM-controlled marker
+// elements — innerHTML is enough and avoids reconciler churn on every
+// realtime tick. Stroke and viewBox match the icon set so the visual
+// is consistent with the rest of the app.
+const HOUSE_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V11z"/></svg>`;
+const FACE_SVG = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>`;
+
+/**
+ * Paint a rep marker element: photo when avatar_url is present, else
+ * the generic face glyph on the rep's colour. Used both at first
+ * create and on subsequent updates so a rep who just uploaded /
+ * removed an avatar gets the new look without a full re-mount.
+ */
+function applyRepMarker(
+  el: HTMLElement,
+  r: { avatarUrl: string | null },
+  repColor: string
+): void {
+  if (r.avatarUrl) {
+    el.style.background = "#fff";
+    el.innerHTML = `<img src="${r.avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />`;
+  } else {
+    el.style.background = repColor;
+    el.innerHTML = FACE_SVG;
+  }
+}
+
 export function MapPanelClient() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -151,15 +179,20 @@ export function MapPanelClient() {
 
     placeable.forEach((c) => {
       const el = document.createElement("div");
+      // Customer marker = small house glyph (SVG) on the customer's
+      // colour. Reads as "a building / shop / site" at a glance vs.
+      // the rep markers, which are circular face/avatar pills. Same
+      // colour-coding as before so the manager can still tell the
+      // brands apart on a busy map.
       el.style.cssText = `
-        width: 24px; height: 24px; border-radius: 5px;
+        width: 26px; height: 26px; border-radius: 6px;
         background: ${c.color}; color: #fff;
-        font-family: ${AC.font}; font-size: 10px; font-weight: 700;
         display: flex; align-items: center; justify-content: center;
         box-shadow: 0 1px 3px rgba(0,0,0,0.25);
         border: 2px solid #fff;
       `;
-      el.textContent = c.initials;
+      el.title = `${c.name} — customer site`;
+      el.innerHTML = HOUSE_SVG;
 
       const popup = new maplibregl.Popup({ offset: 16, closeButton: false }).setHTML(
         `<div style="font-family:${AC.font};font-size:12px;line-height:1.4;">
@@ -201,25 +234,32 @@ export function MapPanelClient() {
         existing.setLngLat([r.longitude, r.latitude]);
         const el = existing.getElement();
         el.style.opacity = isStale ? "0.45" : "1";
-        el.style.background = repColor;
+        // Re-apply the marker visual in case the rep just uploaded /
+        // removed an avatar between renders. Keeping this in one
+        // place beats branching here vs. on first-create.
+        applyRepMarker(el, r, repColor);
         // Refresh the popup HTML so the customer/state stays current
         // even when the existing rep marker just moved.
         const popup = existing.getPopup();
         if (popup) popup.setHTML(buildRepPopupHTML(r, customersRef.current, shiftsRef.current));
       } else {
         const el = document.createElement("div");
+        // Rep marker = circular pill, photo if uploaded else generic
+        // face glyph. The shape (circle) deliberately contrasts with
+        // the rounded-square house markers above so the manager can
+        // tell at a glance which dots are sites and which are people.
         el.style.cssText = `
-          width: 30px; height: 30px; border-radius: 99px;
+          width: 32px; height: 32px; border-radius: 99px;
           background: ${repColor}; color: #fff;
-          font-family: ${AC.font}; font-size: 11px; font-weight: 700;
           display: flex; align-items: center; justify-content: center;
           box-shadow: 0 0 0 2px #fff, 0 1px 6px rgba(0,0,0,0.30);
           opacity: ${isStale ? "0.45" : "1"};
           transition: opacity 200ms ease;
           cursor: pointer;
-          letter-spacing: .2px;
+          overflow: hidden;
         `;
-        el.textContent = r.initials;
+        el.title = `${r.name} — field rep`;
+        applyRepMarker(el, r, repColor);
 
         const popup = new maplibregl.Popup({ offset: 18, closeButton: false }).setHTML(
           buildRepPopupHTML(r, customersRef.current, shiftsRef.current)
@@ -411,14 +451,23 @@ function buildRepPopupHTML(
     : null;
   const state = shift ? STATE_LABEL[shift.state] || STATE_LABEL.scheduled : null;
 
+  // Avatar pill matches the rep marker visual — photo if uploaded,
+  // else generic face glyph on the rep's colour.
+  const avatarPill = r.avatarUrl
+    ? `<div style="
+         width:26px;height:26px;border-radius:99px;
+         background:#fff;border:1px solid ${AC.line};
+         overflow:hidden;display:flex;align-items:center;justify-content:center;
+       "><img src="${r.avatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" /></div>`
+    : `<div style="
+         width:26px;height:26px;border-radius:99px;
+         background:${colorForRep(r.repId)};color:#fff;
+         display:flex;align-items:center;justify-content:center;
+       ">${FACE_SVG}</div>`;
+
   const headerRow = `
     <div style="display:flex;align-items:center;gap:8px;">
-      <div style="
-        width:24px;height:24px;border-radius:99px;
-        background:${colorForRep(r.repId)};color:#fff;
-        font-family:${AC.font};font-size:10px;font-weight:700;
-        display:flex;align-items:center;justify-content:center;letter-spacing:.2px;
-      ">${escapeHtml(r.initials)}</div>
+      ${avatarPill}
       <div style="font-weight:700;color:${AC.ink};font-size:13px;letter-spacing:-.1px;">${escapeHtml(r.name)}</div>
     </div>
     <div style="color:${AC.mute};font-size:11px;margin-top:4px;">

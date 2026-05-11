@@ -70,17 +70,20 @@ export function CustomersMap({ customers }: { customers: Customer[] }) {
 
     placeable.forEach((c) => {
       const el = document.createElement("div");
+      // House glyph on the customer's brand colour — same visual
+      // grammar as the live-ops map so the page reads consistently:
+      // rounded-square + house = customer site.
       el.style.cssText = `
         width: 28px; height: 28px; border-radius: 6px;
         background: ${c.color}; color: #fff;
-        font-family: ${AC.font}; font-size: 11px; font-weight: 700;
         display: flex; align-items: center; justify-content: center;
         box-shadow: 0 1px 4px rgba(0,0,0,0.3);
         border: 2px solid #fff;
         cursor: pointer;
         opacity: ${c.active === false ? 0.55 : 1};
       `;
-      el.textContent = c.initials;
+      el.title = `${c.name} — customer site`;
+      el.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V11z"/></svg>`;
       el.addEventListener("click", () => {
         router.push(`/customers/${c.id}`);
       });

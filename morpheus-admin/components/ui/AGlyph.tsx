@@ -12,7 +12,8 @@ export type GlyphName =
   | "filter" | "sort" | "more" | "eye"
   | "arrow-r" | "arrow-u" | "arrow-d"
   | "warn" | "info" | "dot" | "logout" | "edit" | "trash"
-  | "upload" | "download" | "phone" | "mail" | "building";
+  | "upload" | "download" | "phone" | "mail" | "building"
+  | "face";
 
 interface Props {
   name: GlyphName | string;
@@ -77,6 +78,7 @@ export function AGlyph({ name, size = 18, color = "currentColor", strokeWidth = 
     case "phone":    return <svg {...common}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.4 2.1L7.9 9.8a16 16 0 0 0 6 6l1.4-1.4a2 2 0 0 1 2.1-.4c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2z"/></svg>;
     case "mail":     return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 7 9-7"/></svg>;
     case "building": return <svg {...common}><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 7h.01M9 11h.01M9 15h.01M14 7h.01M14 11h.01M14 15h.01M9 21v-4h6v4"/></svg>;
+    case "face":     return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>;
     default:         return <svg {...common}><circle cx="12" cy="12" r="9"/></svg>;
   }
 }

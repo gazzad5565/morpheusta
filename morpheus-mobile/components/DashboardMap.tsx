@@ -23,6 +23,7 @@ import maplibregl, { Map as MLMap, Marker as MLMarker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { MC } from "@/lib/tokens";
 import { listAllCustomers } from "@/lib/customers-store";
+import { getMyProfile } from "@/lib/profiles-store";
 import type { Customer } from "@/lib/mock-data";
 
 const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
@@ -63,6 +64,21 @@ export function DashboardMap({
   const [placed, setPlaced] = useState<PlacedShift[]>([]);
   const [missing, setMissing] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  // The rep's own avatar (base64 data URL) — fetched once on mount.
+  // Drives the look of the user-location marker: avatar photo if one's
+  // uploaded, otherwise a small face glyph on the brand colour. We do
+  // NOT re-fetch on every geolocation tick — the avatar rarely changes.
+  const [myAvatarUrl, setMyAvatarUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getMyProfile().then((p) => {
+      if (cancelled) return;
+      setMyAvatarUrl(p?.avatar_url ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Resolve each shift's customer to lat/lng. Skip ones without coords.
   useEffect(() => {
@@ -166,17 +182,21 @@ export function DashboardMap({
       const isComplete = s.state === "complete";
       const isInProgress = s.state === "in-progress";
       const el = document.createElement("div");
+      // Customer site marker = small house glyph on the customer's
+      // brand colour. Reads instantly as "a place" vs the user-location
+      // dot. Matches the admin map symbology so a rep who's also a
+      // manager sees the same visual vocabulary across both apps.
       el.style.cssText = `
         width: 28px; height: 28px; border-radius: 6px;
         background: ${s.color}; color: #fff;
-        font-family: ${MC.font}; font-size: 11px; font-weight: 700;
         display: flex; align-items: center; justify-content: center;
         box-shadow: 0 1px 4px rgba(0,0,0,0.3);
         border: 2px solid #fff;
         opacity: ${isComplete ? 0.55 : 1};
         ${isInProgress ? `outline: 3px solid ${s.color}55;` : ""}
       `;
-      el.textContent = s.initials;
+      el.title = `${s.name} — customer site`;
+      el.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V11z"/></svg>`;
       const popup = new maplibregl.Popup({ offset: 18, closeButton: false }).setHTML(
         `<div style="font-family:${MC.font};font-size:12px;line-height:1.4;">
            <div style="font-weight:700;color:${MC.ink};">${escapeHtml(s.name)}</div>
@@ -214,11 +234,25 @@ export function DashboardMap({
         if (cancelled || !mapRef.current) return;
         if (userMarkerRef.current) userMarkerRef.current.remove();
         const el = document.createElement("div");
+        // User-location marker = circular avatar pill so it visually
+        // contrasts with the rounded-square house customer markers.
+        // Photo if uploaded, generic face glyph as the fallback. The
+        // glowing brand-tint halo around it carries forward — that's
+        // the "you are here" signal regardless of which inner visual
+        // renders.
         el.style.cssText = `
-          width: 22px; height: 22px; border-radius: 99px;
+          width: 30px; height: 30px; border-radius: 99px;
           background: ${MC.brand}; border: 3px solid #fff;
           box-shadow: 0 0 0 4px ${MC.brand}33, 0 1px 4px rgba(0,0,0,0.25);
+          overflow: hidden;
+          display: flex; align-items: center; justify-content: center;
         `;
+        el.title = "You are here";
+        if (myAvatarUrl) {
+          el.innerHTML = `<img src="${myAvatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />`;
+        } else {
+          el.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>`;
+        }
         userMarkerRef.current = new maplibregl.Marker({ element: el })
           .setLngLat([pos.coords.longitude, pos.coords.latitude])
           .addTo(mapRef.current);
@@ -231,7 +265,7 @@ export function DashboardMap({
     return () => {
       cancelled = true;
     };
-  }, [loaded]);
+  }, [loaded, myAvatarUrl]);
 
   // The map container ALWAYS renders. When there are no shifts (or
   // no placeable shifts yet), the map still shows — defaulted to

@@ -10,6 +10,11 @@ export interface Profile {
   email: string;
   name: string | null;
   role: string;
+  /** Base64 data URL of the rep's profile photo. Uploaded from the
+   *  mobile app's /profile page, compressed to a small avatar. Shown
+   *  on rep lists, rep detail, and as the rep marker on the
+   *  live-ops map. Null = generic face glyph fallback. */
+  avatar_url: string | null;
   created_at?: string;
 }
 
@@ -18,7 +23,7 @@ export async function listProfiles(opts?: { role?: string }): Promise<Profile[]>
   if (!isSupabaseConfigured() || !supabase) return [];
   let q = supabase
     .from("profiles")
-    .select("id, email, name, role, created_at")
+    .select("id, email, name, role, avatar_url, created_at")
     .order("name", { ascending: true, nullsFirst: false });
   if (opts?.role) q = q.eq("role", opts.role);
   const { data, error } = await q;
@@ -46,7 +51,7 @@ export async function getProfileById(id: string): Promise<Profile | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, name, role, created_at")
+    .select("id, email, name, role, avatar_url, created_at")
     .eq("id", id)
     .maybeSingle();
   if (error) {

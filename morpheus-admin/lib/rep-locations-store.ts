@@ -16,6 +16,10 @@ export interface RepLocation {
   repId: string;
   name: string;
   initials: string;
+  /** Base64 avatar data URL from profiles.avatar_url. Null when the
+   *  rep hasn't uploaded a photo yet — map marker falls back to a
+   *  generic face glyph in that case. */
+  avatarUrl: string | null;
   latitude: number;
   longitude: number;
   accuracyM: number | null;
@@ -34,6 +38,7 @@ interface ProfileRow {
   id: string;
   name: string | null;
   email: string;
+  avatar_url: string | null;
 }
 
 function deriveInitials(name: string, email: string): string {
@@ -62,7 +67,7 @@ export async function listRepLocations(): Promise<RepLocation[]> {
   const repIds = (locs as LocationRow[]).map((l) => l.rep_id);
   const { data: profiles, error: profErr } = await supabase
     .from("profiles")
-    .select("id, name, email")
+    .select("id, name, email, avatar_url")
     .in("id", repIds);
   if (profErr) {
     // eslint-disable-next-line no-console
@@ -70,20 +75,25 @@ export async function listRepLocations(): Promise<RepLocation[]> {
     // Carry on — we'll fall back to "Unknown" labels rather than dropping the dots.
   }
 
-  const profileMap = new Map<string, { name: string | null; email: string }>();
+  const profileMap = new Map<
+    string,
+    { name: string | null; email: string; avatar_url: string | null }
+  >();
   for (const p of (profiles as ProfileRow[] | null) || []) {
-    profileMap.set(p.id, { name: p.name, email: p.email });
+    profileMap.set(p.id, { name: p.name, email: p.email, avatar_url: p.avatar_url });
   }
 
   // 3. Merge.
   return (locs as LocationRow[]).map((l) => {
-    const profile = profileMap.get(l.rep_id) || { name: null, email: "" };
+    const profile =
+      profileMap.get(l.rep_id) || { name: null, email: "", avatar_url: null };
     const email = profile.email || "";
     const name = profile.name?.trim() || email.split("@")[0] || "Unknown";
     return {
       repId: l.rep_id,
       name,
       initials: deriveInitials(profile.name || "", email),
+      avatarUrl: profile.avatar_url ?? null,
       latitude: l.latitude,
       longitude: l.longitude,
       accuracyM: l.accuracy_m,

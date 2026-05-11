@@ -161,24 +161,46 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Card padding={20}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
-              <div
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 99,
-                  background: AC.brand,
-                  color: "#fff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontFamily: AC.font,
-                  fontSize: 20,
-                  fontWeight: 700,
-                  letterSpacing: 0.5,
-                }}
-              >
-                {initials}
-              </div>
+              {profile.avatar_url ? (
+                <div
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: 99,
+                    overflow: "hidden",
+                    background: "#fff",
+                    boxShadow: `0 0 0 1px ${AC.line}`,
+                    flexShrink: 0,
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={profile.avatar_url}
+                    alt=""
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  />
+                </div>
+              ) : (
+                <div
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: 99,
+                    background: AC.brand,
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontFamily: AC.font,
+                    fontSize: 20,
+                    fontWeight: 700,
+                    letterSpacing: 0.5,
+                    flexShrink: 0,
+                  }}
+                >
+                  {initials}
+                </div>
+              )}
               <div style={{ minWidth: 0 }}>
                 <div
                   style={{

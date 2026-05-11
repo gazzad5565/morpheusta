@@ -58,22 +58,47 @@ export function colorForRep(seed: string | undefined | null): string {
 }
 
 /**
- * Rep avatar — colored disc with white initials. Color is derived from
- * `seed` (rep id, name, or initials — anything stable per rep), so the
- * same rep always shows up in the same color across the admin app
- * without us having to store a color column on `profiles`.
+ * Rep avatar — uploaded photo if the rep has one, else a coloured disc
+ * with white initials. Colour derives from `seed` (rep id / name /
+ * initials — anything stable per rep) so the same rep always shows up
+ * in the same colour without us having to store a colour column on
+ * `profiles`. The photo path uses an <img> sized to fill the disc so
+ * it can scale from list-rows (32px) up to profile-card (64px) without
+ * style changes per call site.
  */
 export function RepAvatar({
   rep,
   size = 32,
   seed,
 }: {
-  rep: Pick<Rep, "initials">;
+  rep: Pick<Rep, "initials"> & { avatarUrl?: string | null };
   size?: number;
   /** Stable identifier for color hashing. Defaults to initials. */
   seed?: string;
 }) {
   const bg = colorForRep(seed ?? rep.initials);
+  if (rep.avatarUrl) {
+    return (
+      <div
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 99,
+          background: "#fff",
+          flexShrink: 0,
+          overflow: "hidden",
+          boxShadow: `0 0 0 1px ${AC.line}`,
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={rep.avatarUrl}
+          alt=""
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+      </div>
+    );
+  }
   return (
     <div
       style={{
