@@ -1,7 +1,7 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`86dc436`** (May 11, 2026). Big session — 18 commits across two main themes:
+> Latest commit: **`6deb0d3`** (May 11, 2026 — late afternoon). Long session — **35 commits** through the day. Morning batch covered two major features (cancellation/unable-to-attend + the polish/identity/exception passes — see "Today's session" below). Afternoon was a manager-testing pass through everything that shipped, fixing friction as it surfaced (greeting truncation, calendar card consistency, loading overlays end-to-end, drop-down audit, form button consistency, /schedule/manage cleanup, side-menu polish, mobile profile self-edit, dead "Reset upcoming schedule" section removed, Live Feed counter now shows real total). All commits on origin/main; both apps auto-deployed via Vercel.
 > 1. **Cancellation / "Can't make this shift" feature** (8 commits) — rep can flag an assigned shift they can't make from anywhere, manager sees it in Live Ops "Needs action", four resolutions (Reassign / Reopen as unassigned / Keep · rep stays on / Cancel · do not refill), banners + pills + audit trail end-to-end. Two new attention overlay columns on shifts.
 > 2. **Polish, identity, and exception-toggle pass** (10 commits) — rep notes per shift, banner watcher for shift assignments, "awesome" check-in overlay + shimmering skeletons, /schedule/manage row actions cleanup, mobile chrome cleanup (address on cards, menu icon inline, map attribution collapsed), house glyph for customer markers + face/photo for rep markers everywhere, rep profile photo upload (mobile → admin → maps), and org-wide + per-customer exception toggles for location and timing check-in cards.
 > Five migrations to run in Supabase before all of this is fully live — see "Migrations to run for May 11" below. Working tree clean.
@@ -107,7 +107,7 @@ If you switch computers (or hand this project to a developer), this section is t
 
 ### Where things stand right now (handover for the next chat)
 
-**Last commit:** `86dc436` — "Exception toggles — org-wide + per-customer overrides" (May 11, 2026; cancellation feature + polish/identity/exception-toggle pass shipped end-to-end across 18 commits)
+**Last commit:** `6deb0d3` — "Admin forms: consistent buttons + labels across every entity" (May 11, 2026 — late afternoon; 35 commits through the day across two phases: morning feature work + afternoon manager-testing pass / friction fixes)
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
@@ -402,6 +402,102 @@ Five new files in `db/migrations/` — run in order in the Supabase SQL editor b
 All five are idempotent and wrapped in `BEGIN; … COMMIT;` so failures roll back cleanly. The org-wide pair for the exception toggles is written into `app_settings` lazily on first admin UI save — no migration needed for them.
 
 Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`). Smoke-tested key routes return 200 on a local prod-mode boot.
+
+#### Late-session push (May 11 afternoon — `8283df0`..`6deb0d3`)
+
+Seventeen more commits between the morning batch and end-of-day,
+driven by the manager testing the morning's drops and flagging
+friction. Roughly grouped:
+
+Mobile chrome + flows
+  • `8283df0` Hide Directions / Start travelling on the up-next card
+    once the shift is in-progress (and auto-end travelling on
+    check-in so the timer doesn't run forever in localStorage).
+  • `380cbd4` Side-menu name no longer ellipsis-clips ("Garydurbach"
+    issue) — the wrapping flex container was missing `flex: 1`. Same
+    commit drops the redundant "IN PROGRESS" pill that was stacking
+    next to "ENDS 1H 25M" on shifts rows.
+  • `901e624` Shift notes: debounced auto-save (don't rely on
+    onBlur, which doesn't fire reliably on iOS PWA back-buttons) +
+    read-back verification via `.select().single()` so saving says
+    "Saved ✓" only when a row actually updated. Friendlier error
+    when the migration hasn't run.
+  • `d300fa3` Loading overlay covers every check-in / check-out
+    tap end-to-end. `CheckingInOverlay` now supports three modes
+    (in / out / opening) — Check-out gets the full 3-phase
+    stepper, all the "Open from CTA" jumps get the lighter Opening
+    variant so there's no silent gap between tap and destination.
+  • `cfdeca8` Greeting wraps for long names; up-next card dropped
+    the wordy yellow info banner; /shifts "Request" nav has the
+    Opening overlay.
+  • `4f1cbf2` Welcome card folded "Last sync" into the small-caps
+    top line + tightened padding.
+  • `fc43f16` Then dropped Last-sync off the welcome card entirely
+    and moved it to the side-menu footer — managers wanted the
+    hero clean. Heartbeat indicator is still one tap away.
+  • `c7c4d89` Mobile /profile gained an Account-settings sheet —
+    full name + email + password edit from the app. New helpers
+    `updateMyEmail` (Supabase Auth confirmation flow) +
+    `updateMyPassword` (instant via active session). Three dead
+    menu rows (Notifications / Sync status / About) removed.
+
+Calendar (admin)
+  • `55da568` Per-rep view never collapses to a count chip + full
+    status pills (Cancelled, Scheduled, Done, etc) on every card.
+  • `fb29b6e` Density tiers for short cards (initial fix —
+    superseded by the next one).
+  • `40aeb2f` Single-rep view never builds an overflow "+N MORE"
+    cluster — `assignLanes` got a `{ singleRep }` shortcut so a
+    long cancelled shift can't drag the rest of the day into a
+    popover.
+  • `ac35ef0` All cards now render the same content shape
+    regardless of duration. Min card height = 46 px in single-rep
+    mode, 60 px in multi-rep mode, so a 30-min card and a 1-hour
+    card both show customer + time + state pill identically.
+  • `a57d6cf` /schedule/manage gained a Cadence column derived
+    from each series's actual shift_date set ("Weekly · Mondays",
+    "Weekdays", "Daily", etc). The View button now passes
+    customer + rep + date params; /schedule reads them at mount.
+    `updateShiftSeries` surfaces zero-row updates as a clear error
+    instead of fake success.
+  • `8283df0`-era density work plus `55da568`'s status pills now
+    use one consistent `STATE_DOT` table covering every state
+    (scheduled / in-progress / travelling / on-break / late /
+    complete / cancelled).
+
+Admin housekeeping pass
+  • `27e7b90` "Awesome" loading states (initial check-in overlay +
+    shimmering /shifts skeletons; superseded structurally by the
+    overlay generalization).
+  • `8b18df0` /schedule/manage row actions rebuilt — `[View]`
+    `[Edit future]` `[⋮]` overflow with full-sentence cancel
+    actions, replacing the cramped 4-button layout with a bare
+    "All" red button.
+  • `2e81c54` **Dropdown audit** — every native `<select>` and
+    `<input type="time">` in the admin replaced by the shared
+    `Combobox` / new `TimeCombobox`. Icons, search-as-you-type,
+    multi-select where applicable. One consistent dropdown chrome
+    across every entity form.
+  • `fb921e4` Closing-batch — break-or-travel sheet handle now
+    actually closes the sheet (iOS pattern); rep map markers
+    shrunk from 32 px to 28 px to match house markers; Today's
+    Shifts gained a red "Needs action" tab surfacing
+    `attention='unable_to_attend'`; /customers defaults to Table
+    view + persists across nav via localStorage.
+  • `0e16dac` /schedule/manage: redundant "Reset upcoming
+    schedule" section removed (the per-series Cancel + standalone
+    Delete-all already cover it). Live Feed "All activity" pill
+    now reads a real `countRecentEvents()` total instead of being
+    capped at 50 by the display limit.
+  • `6deb0d3` Form button audit — every entity create/edit page
+    follows the same layout. "Add customer"/"Add site" renamed to
+    "Create customer"/"Create site"; customer edit gained a
+    Delete button (was the only entity edit without one);
+    consistent `[Delete <entity>] ··· [Cancel] [Save changes]`
+    split on every edit page.
+
+Working tree clean. All commits on origin/main; both apps
+auto-deployed via Vercel.
 
 ### Today's session — what shipped (May 8, 2026)
 
