@@ -24,6 +24,7 @@ import {
 } from "@/lib/shifts-store";
 import { AppHeader, AppFooter, CustomerTile, SectionLabel } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
+import { CheckingInOverlay } from "@/components/CheckingInOverlay";
 import {
   UnableToAttendSheet,
   unableReasonLabel,
@@ -139,14 +140,28 @@ export default function ShiftsListPage() {
   // gap between tap and that page rendering can be a couple of
   // seconds — without this the button feels dead.
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
+  // Tap-feedback for navigating to /add-shift via the Request pill.
+  // Same brand-tinted overlay we use on check-in / check-out so the
+  // rep sees motion the moment they tap rather than a silent half-
+  // second gap while Next routes.
+  const [openingRequest, setOpeningRequest] = useState(false);
   const onCheckIn = (shiftId: string) => {
     setNavigatingTo(shiftId);
+    // Tap-feedback overlay for the check-in jump too. Mirrors the
+    // Resume / Check-in CTAs on the home page.
+    setOpeningCheckInFor(
+      mine.find((s) => s.realId === shiftId)?.name || "your shift"
+    );
     router.push(`/check-in?shift=${shiftId}`);
   };
   const onResumeShift = (shiftId: string) => {
     setNavigatingTo(shiftId);
+    setOpeningCheckInFor(
+      mine.find((s) => s.realId === shiftId)?.name || "your shift"
+    );
     router.push("/active");
   };
+  const [openingCheckInFor, setOpeningCheckInFor] = useState<string | null>(null);
 
   const onClaim = async (shiftRealId: string) => {
     setClaiming(shiftRealId);
@@ -303,8 +318,17 @@ export default function ShiftsListPage() {
             {dateLabel}
           </div>
         </div>
-        <Link
-          href="/add-shift"
+        <button
+          type="button"
+          onClick={() => {
+            // Show the same brand-tinted "Opening…" overlay we use on
+            // check-in / check-out so the rep sees motion the moment
+            // they tap. Previously this was a bare <Link> — Next's
+            // client-side navigation runs silently and there's a
+            // half-second gap where the screen looks frozen.
+            setOpeningRequest(true);
+            router.push("/add-shift");
+          }}
           aria-label="Request a customer"
           style={{
             display: "inline-flex",
@@ -321,11 +345,12 @@ export default function ShiftsListPage() {
             fontWeight: 700,
             letterSpacing: -0.1,
             flexShrink: 0,
+            cursor: "pointer",
           }}
         >
           <Glyph name="plus" size={13} color={MC.brand} strokeWidth={2.6} />
           Request
-        </Link>
+        </button>
       </div>
 
       {/* Search box — filters across every section by name, code, or
@@ -524,6 +549,26 @@ export default function ShiftsListPage() {
           onSubmit={(reason, note) =>
             handleRaiseUnable(unableSheetFor.realId, reason, note)
           }
+        />
+      )}
+
+      {/* Tap-feedback overlays for the three nav-jump CTAs on this
+          page (Request, Check in, Resume). The overlay stays mounted
+          until Next finishes routing and the destination page mounts
+          its own — looks like one continuous loading state from tap
+          to destination. */}
+      {openingRequest && (
+        <CheckingInOverlay
+          mode="opening"
+          customerName=""
+          phase="submitting"
+        />
+      )}
+      {openingCheckInFor && (
+        <CheckingInOverlay
+          mode="opening"
+          customerName={openingCheckInFor}
+          phase="submitting"
         />
       )}
     </div>

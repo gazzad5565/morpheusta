@@ -1101,28 +1101,13 @@ function UpNextCard({
                 )}
               </div>
 
-              {/* Lateness/info banner — only shown for not-yet-checked-in shifts. */}
-              {!isResume && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    padding: "9px 12px",
-                    background: MC.warnTint,
-                    borderRadius: 10,
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "flex-start",
-                    fontFamily: MC.font,
-                    fontSize: 12,
-                    color: "#6d4808",
-                  }}
-                >
-                  <Glyph name="info" size={14} color="#b27606" />
-                  <span>
-                    You&apos;ll record any off-site or late reason at check-in.
-                  </span>
-                </div>
-              )}
+              {/* The yellow "you'll record any off-site or late reason
+                  at check-in" banner used to sit here. Removed in
+                  favour of a calmer card — managers fed back that the
+                  shift card was too text-heavy. The check-in flow
+                  itself surfaces an off-site / late / early card
+                  inline with reasons when those exceptions actually
+                  fire, so the up-front warning was redundant. */}
 
               {/* "Can't make this shift?" — friction-by-design.
                   Small muted text-link with a warn glyph, deliberately
@@ -1306,9 +1291,15 @@ function WelcomeStrip({
               color: "#fff",
               letterSpacing: -0.4,
               marginTop: 2,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
+              // Allow the greeting to wrap to a second line for long
+              // names. The old whiteSpace:nowrap + ellipsis was
+              // truncating people like "Garydurbach" into
+              // "Good afternoon, Garydur…" which felt rude — losing
+              // your own name to ellipsis on your own dashboard.
+              // overflow-wrap on long unbroken strings lets us still
+              // break the inevitable 30-char handles if they appear.
+              lineHeight: 1.2,
+              overflowWrap: "anywhere",
             }}
           >
             {greeting}
