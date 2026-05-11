@@ -127,6 +127,30 @@ export async function listRecentEvents(limit = 50): Promise<ShiftEvent[]> {
 }
 
 /**
+ * Just the total count of events — used by the Live Feed pill so
+ * "All activity" shows the true number (e.g. 312) rather than the
+ * display cap (50) on busy days. Cheap query: PostgREST head=true
+ * sends a HEAD request that returns just the row count.
+ */
+export async function countRecentEvents(opts?: {
+  /** ISO date string — only count events at or after this timestamp. */
+  since?: string;
+}): Promise<number> {
+  if (!isSupabaseConfigured() || !supabase) return 0;
+  let q = supabase
+    .from("shift_events")
+    .select("id", { count: "exact", head: true });
+  if (opts?.since) q = q.gte("created_at", opts.since);
+  const { count, error } = await q;
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[events] count:", error.message);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+/**
  * Subscribe to inserts on shift_events. Each call gets a unique
  * channel name to avoid the supabase-js collision with concurrent
  * subscribers.

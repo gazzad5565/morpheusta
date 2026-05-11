@@ -34,7 +34,6 @@ import {
   updateShiftSeries,
   listStandaloneShifts,
   bulkDeleteShifts,
-  deleteAllUpcomingShifts,
   subscribeShifts,
   type ShiftSeriesSummary,
   type OneOffShiftRow,
@@ -57,7 +56,6 @@ export default function ManageShiftsPage() {
   const [search, setSearch] = useState("");
   // Series being edited via the Edit-future modal. Null = closed.
   const [editTarget, setEditTarget] = useState<ShiftSeriesSummary | null>(null);
-  const [resetting, setResetting] = useState(false);
 
   const refresh = async () => {
     const [s, st, cs, ps] = await Promise.all([
@@ -171,24 +169,6 @@ export default function ManageShiftsPage() {
     const r = await bulkDeleteShifts(standalone.map((s) => s.id));
     setBusyId(null);
     if (!r.ok) alert(`Couldn't delete: ${r.error}`);
-  };
-
-  const onResetSchedule = async () => {
-    // Two-step confirm to dodge an accidental nuke. The button copy
-    // already says "Reset upcoming schedule" so the manager knows
-    // the scope, but a typed confirm makes it deliberate.
-    const typed = window.prompt(
-      `This will delete EVERY shift dated today or later — every state, no exceptions (scheduled, in-progress, complete, late, cancelled). Past shifts are kept for history.\n\nThis cannot be undone.\n\nType RESET to confirm.`
-    );
-    if (typed !== "RESET") return;
-    setResetting(true);
-    const r = await deleteAllUpcomingShifts();
-    setResetting(false);
-    if (!r.ok) {
-      alert(`Couldn't reset: ${r.error}`);
-      return;
-    }
-    alert(`Schedule reset. ${r.deleted ?? 0} shifts deleted.`);
   };
 
   return (
@@ -499,49 +479,13 @@ export default function ManageShiftsPage() {
           )}
         </Card>
 
-        {/* Nuclear "reset everything" affordance. Kept distinct from
-            the per-series / per-row deletes and gated by a typed
-            "RESET" prompt because there's no undo. */}
-        <Card padding={20}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 240 }}>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: AC.ink,
-                  letterSpacing: -0.1,
-                }}
-              >
-                Reset upcoming schedule
-              </div>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 12,
-                  color: AC.mute,
-                  marginTop: 4,
-                  lineHeight: 1.5,
-                }}
-              >
-                Deletes every still-scheduled shift from today forward — series
-                and standalone, all reps, all customers. Running and complete
-                shifts stay put for the audit trail. There&apos;s no undo.
-              </div>
-            </div>
-            <Btn kind="danger" onClick={onResetSchedule} disabled={resetting}>
-              {resetting ? "Resetting…" : "Reset upcoming schedule"}
-            </Btn>
-          </div>
-        </Card>
+        {/* "Reset upcoming schedule" used to live here — a nuclear
+            wipe of every still-scheduled shift from today forward.
+            Removed because it duplicates what the per-series ⋮ menu
+            (Cancel entire series) + the Standalone shifts "Delete all
+            N" already do, together. Managers preferred the deliberate
+            per-row path and the nuclear button felt risky on a page
+            they already use frequently. */}
       </div>
 
       {editTarget && (

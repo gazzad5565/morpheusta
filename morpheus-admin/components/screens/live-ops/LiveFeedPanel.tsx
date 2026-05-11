@@ -32,6 +32,7 @@ import {
 } from "@/lib/requests-store";
 import {
   listRecentEvents,
+  countRecentEvents,
   subscribeEvents,
   EVENT_LABEL,
   eventTone,
@@ -147,6 +148,12 @@ export function LiveFeedPanel() {
   // Activity (All activity)
   const [events, setEvents] = useState<ShiftEvent[]>([]);
   const [eventsLoaded, setEventsLoaded] = useState(false);
+  // Real total event count — what the "All activity" pill displays.
+  // events.length was capped at 50 by listRecentEvents (display cap)
+  // and managers were reading that as the actual number of events
+  // for the day. The pill now shows the true count from a separate
+  // HEAD query.
+  const [eventsTotal, setEventsTotal] = useState<number>(0);
 
   // Unable-to-attend shifts (also in Needs action). Loaded separately
   // from requests because the underlying tables are different and
@@ -221,19 +228,25 @@ export function LiveFeedPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    listRecentEvents(50).then((rows) => {
-      if (cancelled) return;
-      setEvents(rows);
-      setEventsLoaded(true);
-    });
+    Promise.all([listRecentEvents(50), countRecentEvents()]).then(
+      ([rows, total]) => {
+        if (cancelled) return;
+        setEvents(rows);
+        setEventsTotal(total);
+        setEventsLoaded(true);
+      }
+    );
     // Realtime: prepend new events as they arrive. Dedup by id so a
     // race between the initial fetch and the realtime delivery can't
-    // cause a duplicate row.
+    // cause a duplicate row. The display list still caps at 50 to
+    // keep DOM cheap; the total counter bumps independently so the
+    // pill stays accurate.
     const unsub = subscribeEvents((newEvent) => {
       setEvents((prev) => {
         if (prev.some((e) => e.id === newEvent.id)) return prev;
         return [newEvent, ...prev].slice(0, 50);
       });
+      setEventsTotal((n) => n + 1);
     });
     return () => {
       cancelled = true;
@@ -375,7 +388,7 @@ export function LiveFeedPanel() {
     {
       key: "all",
       label: "All activity",
-      count: events.length,
+      count: eventsTotal,
     },
     {
       key: "needs-action",
