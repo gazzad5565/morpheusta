@@ -52,6 +52,59 @@ export async function updateMyName(name: string): Promise<{ ok: boolean; error?:
 }
 
 /**
+ * Change my own email address.
+ *
+ * Goes through Supabase Auth (not the profiles row directly) because
+ * email is the auth identity. Supabase sends a confirmation link to
+ * the NEW address; the change isn't applied until the rep clicks it,
+ * so we return ok:true + a flag to the caller can show
+ * "Confirm via the email we just sent" copy.
+ *
+ * The profiles.email column is kept in sync via the same auth.users
+ * trigger that seeds new profiles — once the rep confirms, the next
+ * page load reads the updated value.
+ */
+export async function updateMyEmail(
+  newEmail: string
+): Promise<{ ok: boolean; error?: string; confirmationRequired?: boolean }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Supabase not configured" };
+  }
+  const trimmed = newEmail.trim();
+  if (!trimmed) return { ok: false, error: "Email is required." };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    return { ok: false, error: "That doesn't look like a valid email address." };
+  }
+  const { data: userData } = await supabase.auth.getUser();
+  if (userData.user?.email === trimmed) {
+    return { ok: false, error: "That's already your email." };
+  }
+  const { error } = await supabase.auth.updateUser({ email: trimmed });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, confirmationRequired: true };
+}
+
+/**
+ * Change my own password. Supabase doesn't require the old password
+ * for an already-authenticated session — possession of the session
+ * IS the proof of identity. Minimum 6 chars to match Supabase's own
+ * default policy.
+ */
+export async function updateMyPassword(
+  newPassword: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Supabase not configured" };
+  }
+  if (newPassword.length < 6) {
+    return { ok: false, error: "Password must be at least 6 characters." };
+  }
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/**
  * Compress an image file to a small avatar-sized JPEG data URL.
  *
  *   - Resizes the longest side to `maxSize` (default 96px) so the

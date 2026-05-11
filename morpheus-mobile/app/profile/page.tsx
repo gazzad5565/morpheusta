@@ -9,6 +9,8 @@ import { getUser, signOut } from "@/lib/auth";
 import {
   getMyProfile,
   updateMyName,
+  updateMyEmail,
+  updateMyPassword,
   updateMyAvatar,
   compressAvatar,
   type Profile,
@@ -27,6 +29,12 @@ export default function ProfilePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  // Edit Account sheet — bottom-sheet modal for editing name + email
+  // + password in one place. Mirrors admin /settings/managers/[id]/edit
+  // so a manager + rep see the same field set from their respective
+  // sides. Reads from the profile state on open and writes back when
+  // save succeeds.
+  const [editOpen, setEditOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -380,37 +388,40 @@ export default function ProfilePage() {
             overflow: "hidden",
           }}
         >
-          {[
-            { label: "Account settings", icon: "info" as const },
-            { label: "Notifications", icon: "warn" as const },
-            { label: "Sync status", icon: "refresh" as const },
-            { label: "About", icon: "book" as const },
-          ].map((row, i, arr) => (
+          {/* The three dead rows that used to live here (Notifications,
+              Sync status, About) had no handlers and routed nowhere —
+              removing them was simpler than building placeholder
+              screens. The remaining Account settings row now opens a
+              real edit sheet for name / email / password. */}
+          <button
+            type="button"
+            onClick={() => setEditOpen(true)}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              background: "transparent",
+              border: "none",
+              padding: "14px 16px",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              cursor: "pointer",
+            }}
+          >
+            <Glyph name="info" size={18} color={MC.mute} />
             <div
-              key={row.label}
               style={{
-                padding: "14px 16px",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                borderBottom: i < arr.length - 1 ? `1px solid ${MC.line}` : "none",
+                flex: 1,
+                fontFamily: MC.font,
+                fontSize: 14.5,
+                fontWeight: 500,
+                color: MC.ink,
               }}
             >
-              <Glyph name={row.icon} size={18} color={MC.mute} />
-              <div
-                style={{
-                  flex: 1,
-                  fontFamily: MC.font,
-                  fontSize: 14.5,
-                  fontWeight: 500,
-                  color: MC.ink,
-                }}
-              >
-                {row.label}
-              </div>
-              <Glyph name="chev-r" size={16} color={MC.hint} />
+              Account settings
             </div>
-          ))}
+            <Glyph name="chev-r" size={16} color={MC.hint} />
+          </button>
         </div>
       </div>
 
@@ -439,6 +450,341 @@ export default function ProfilePage() {
       </div>
 
       <AppFooter />
+
+      {editOpen && profile && (
+        <EditAccountSheet
+          currentName={profile.name ?? ""}
+          currentEmail={profile.email}
+          onClose={() => setEditOpen(false)}
+          onSaved={(patch) => {
+            setProfile((p) =>
+              p
+                ? {
+                    ...p,
+                    name: patch.name ?? p.name,
+                    // Email is updated lazily via Supabase confirmation,
+                    // so we only optimistically reflect the change if
+                    // the new value matches what the user typed and the
+                    // confirmation copy will guide them through the rest.
+                    email: patch.email ?? p.email,
+                  }
+                : p
+            );
+            if (patch.email) setEmail(patch.email);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * EditAccountSheet — bottom-aligned modal for editing the rep's own
+ * name, email, and password. Mirrors the admin /settings/managers/[id]
+ * /edit field set so what a manager can see, the rep can also self-
+ * service from the app.
+ *
+ *   - Name change is instant (writes profiles.name + admin sees it
+ *     immediately).
+ *   - Email change goes through Supabase Auth + confirmation email.
+ *     We surface a one-line "check your email to confirm" notice when
+ *     the call succeeds.
+ *   - Password change is instant (Supabase Auth handles it via the
+ *     existing session; no old-password challenge required because
+ *     possessing the session IS the proof of identity).
+ *
+ * Save is per-section: each save button only writes what its section
+ * changed, so a flaky email field doesn't block a working name fix.
+ */
+function EditAccountSheet({
+  currentName,
+  currentEmail,
+  onClose,
+  onSaved,
+}: {
+  currentName: string;
+  currentEmail: string;
+  onClose: () => void;
+  onSaved: (patch: { name?: string; email?: string }) => void;
+}) {
+  const [name, setName] = useState(currentName);
+  const [email, setEmailField] = useState(currentEmail);
+  const [pw, setPw] = useState("");
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [errorBy, setErrorBy] = useState<Record<string, string | null>>({});
+  const [okBy, setOkBy] = useState<Record<string, string | null>>({});
+
+  const saveName = async () => {
+    setErrorBy((e) => ({ ...e, name: null }));
+    setOkBy((o) => ({ ...o, name: null }));
+    if (name.trim() === currentName.trim()) {
+      setErrorBy((e) => ({ ...e, name: "Nothing to update — name unchanged." }));
+      return;
+    }
+    setSavingKey("name");
+    const r = await updateMyName(name);
+    setSavingKey(null);
+    if (!r.ok) {
+      setErrorBy((e) => ({ ...e, name: r.error || "Couldn't save." }));
+      return;
+    }
+    setOkBy((o) => ({ ...o, name: "Saved." }));
+    onSaved({ name: name.trim() || undefined });
+  };
+
+  const saveEmail = async () => {
+    setErrorBy((e) => ({ ...e, email: null }));
+    setOkBy((o) => ({ ...o, email: null }));
+    setSavingKey("email");
+    const r = await updateMyEmail(email);
+    setSavingKey(null);
+    if (!r.ok) {
+      setErrorBy((e) => ({ ...e, email: r.error || "Couldn't save." }));
+      return;
+    }
+    setOkBy((o) => ({
+      ...o,
+      email: r.confirmationRequired
+        ? `Confirmation sent to ${email.trim()} — click the link in that email to finish the change.`
+        : "Saved.",
+    }));
+    onSaved({ email: email.trim() });
+  };
+
+  const savePassword = async () => {
+    setErrorBy((e) => ({ ...e, pw: null }));
+    setOkBy((o) => ({ ...o, pw: null }));
+    setSavingKey("pw");
+    const r = await updateMyPassword(pw);
+    setSavingKey(null);
+    if (!r.ok) {
+      setErrorBy((e) => ({ ...e, pw: r.error || "Couldn't save." }));
+      return;
+    }
+    setOkBy((o) => ({ ...o, pw: "Password updated." }));
+    setPw("");
+  };
+
+  // Lock body scroll while the sheet is open — desktop-class fix so
+  // a wheel scroll inside the sheet doesn't bleed into the page.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(10,15,30,.45)",
+          zIndex: 200,
+        }}
+      />
+      <div
+        role="dialog"
+        aria-label="Edit account"
+        style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "#fff",
+          borderTopLeftRadius: 18,
+          borderTopRightRadius: 18,
+          padding: "16px 16px calc(env(safe-area-inset-bottom, 0px) + 18px)",
+          zIndex: 201,
+          maxHeight: "90vh",
+          overflowY: "auto",
+          boxShadow: "0 -8px 32px rgba(10,15,30,.18)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <div
+            style={{
+              flex: 1,
+              fontFamily: MC.fontDisplay,
+              fontSize: 18,
+              fontWeight: 700,
+              color: MC.ink,
+              letterSpacing: -0.3,
+            }}
+          >
+            Account settings
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 10,
+              border: "none",
+              background: MC.bg,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Glyph name="close" size={14} color={MC.mute} />
+          </button>
+        </div>
+
+        <SheetSection
+          label="Full name"
+          hint="Shown on the admin console and in shift activity logs."
+          inputType="text"
+          value={name}
+          onChange={setName}
+          onSave={saveName}
+          saving={savingKey === "name"}
+          error={errorBy.name}
+          ok={okBy.name}
+          saveLabel="Save name"
+        />
+
+        <SheetSection
+          label="Email address"
+          hint="You'll get a confirmation email at the new address before the change takes effect."
+          inputType="email"
+          value={email}
+          onChange={setEmailField}
+          onSave={saveEmail}
+          saving={savingKey === "email"}
+          error={errorBy.email}
+          ok={okBy.email}
+          saveLabel="Update email"
+        />
+
+        <SheetSection
+          label="New password"
+          hint="At least 6 characters. Replaces your current password instantly — no old-password check, your active session is the proof."
+          inputType="password"
+          value={pw}
+          onChange={setPw}
+          onSave={savePassword}
+          saving={savingKey === "pw"}
+          error={errorBy.pw}
+          ok={okBy.pw}
+          saveLabel="Set new password"
+          placeholder="Type a new password"
+        />
+      </div>
+    </>
+  );
+}
+
+function SheetSection({
+  label,
+  hint,
+  inputType,
+  value,
+  onChange,
+  onSave,
+  saving,
+  error,
+  ok,
+  saveLabel,
+  placeholder,
+}: {
+  label: string;
+  hint: string;
+  inputType: "text" | "email" | "password";
+  value: string;
+  onChange: (v: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  error: string | null | undefined;
+  ok: string | null | undefined;
+  saveLabel: string;
+  placeholder?: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: "12px 0",
+        borderTop: `1px solid ${MC.line}`,
+      }}
+    >
+      <div
+        style={{
+          fontFamily: MC.font,
+          fontSize: 11,
+          color: MC.mute,
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
+      <input
+        type={inputType}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoComplete={
+          inputType === "password" ? "new-password" : inputType === "email" ? "email" : "name"
+        }
+        style={{
+          width: "100%",
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: `1px solid ${MC.line}`,
+          background: "#FBFBFC",
+          fontFamily: MC.font,
+          fontSize: 14,
+          color: MC.ink,
+          outline: "none",
+          boxSizing: "border-box",
+        }}
+      />
+      <div
+        style={{
+          fontFamily: MC.font,
+          fontSize: 11.5,
+          color: error ? MC.danger : ok ? "#0d6a45" : MC.hint,
+          marginTop: 6,
+          lineHeight: 1.4,
+          minHeight: 16,
+        }}
+      >
+        {error || ok || hint}
+      </div>
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={saving}
+        style={{
+          marginTop: 8,
+          padding: "8px 14px",
+          borderRadius: 8,
+          background: saving ? MC.line : MC.brand,
+          color: "#fff",
+          border: "none",
+          cursor: saving ? "wait" : "pointer",
+          fontFamily: MC.font,
+          fontSize: 13,
+          fontWeight: 600,
+          letterSpacing: -0.1,
+        }}
+      >
+        {saving ? "Saving…" : saveLabel}
+      </button>
     </div>
   );
 }
