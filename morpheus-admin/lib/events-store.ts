@@ -28,6 +28,13 @@ export type EventType =
   | "shift.break_ended"
   | "shift.travel_started"
   | "shift.travel_ended"
+  // Attention overlay — rep raises "can't make it", manager resolves
+  | "shift.rep_unable_to_attend"
+  | "shift.rep_unable_withdrawn"
+  | "shift.reassigned"
+  | "shift.released"
+  | "shift.acknowledged"
+  | "shift.cancelled"
   // Requests
   | "request.submitted"
   | "request.scheduled"
@@ -175,6 +182,12 @@ export const EVENT_LABEL: Record<EventType, string> = {
   "shift.break_ended": "ended a break",
   "shift.travel_started": "started travelling",
   "shift.travel_ended": "arrived",
+  "shift.rep_unable_to_attend": "flagged a shift they can't make",
+  "shift.rep_unable_withdrawn": "withdrew their unable-to-attend flag",
+  "shift.reassigned": "reassigned a shift",
+  "shift.released": "released a shift to the claimable pool",
+  "shift.acknowledged": "acknowledged a shift change",
+  "shift.cancelled": "cancelled a shift",
   "request.submitted": "requested a customer",
   "request.scheduled": "approved a request",
   "request.declined": "declined a request",
@@ -200,6 +213,7 @@ export function eventTone(type: EventType): "ok" | "warn" | "danger" | "info" {
     type === "shift.checked_in_offsite" ||
     type === "shift.checked_out_offsite" ||
     type === "shift.deleted" ||
+    type === "shift.cancelled" ||
     type === "customer.deleted" ||
     type === "customer.site_deleted" ||
     type === "library.deleted" ||
@@ -211,11 +225,19 @@ export function eventTone(type: EventType): "ok" | "warn" | "danger" | "info" {
     type === "shift.checked_in_early" ||
     type === "shift.checked_out_early" ||
     type === "shift.auto_checked_out" ||
+    type === "shift.rep_unable_to_attend" ||
+    type === "shift.released" ||
     type === "customer.site_deactivated" ||
     type === "customer.site_reactivated"
   )
     return "warn";
-  if (type === "request.submitted") return "info";
+  if (
+    type === "request.submitted" ||
+    type === "shift.rep_unable_withdrawn" ||
+    type === "shift.reassigned" ||
+    type === "shift.acknowledged"
+  )
+    return "info";
   return "ok";
 }
 

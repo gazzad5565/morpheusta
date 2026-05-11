@@ -16,10 +16,17 @@ import {
   listMyShiftsToday,
   listUnassignedShiftsToday,
   claimShift,
+  raiseUnableToAttend,
+  withdrawUnableToAttend,
   subscribeShifts,
+  type UnableReason,
 } from "@/lib/shifts-store";
 import { AppHeader, AppFooter, CustomerTile, SectionLabel } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
+import {
+  UnableToAttendSheet,
+  unableReasonLabel,
+} from "@/components/UnableToAttendSheet";
 
 // A shift row from the DB carries internal id + state alongside the display fields.
 type DbShift = Shift & {
@@ -37,6 +44,18 @@ type DbShift = Shift & {
   siteLat?: number | null;
   siteLng?: number | null;
   siteGeofenceM?: number | null;
+  siteContactName?: string | null;
+  siteContactPhone?: string | null;
+  siteContactEmail?: string | null;
+  siteNotes?: string | null;
+  /** Attention overlay — see ShiftAttentionFields. Optional here
+   *  because the row also serves "requested shift" placeholders
+   *  that don't carry attention fields. */
+  attention?: string | null;
+  attentionReason?: string | null;
+  attentionNote?: string | null;
+  attentionRaisedAt?: string | null;
+  attentionResolvedAt?: string | null;
 };
 
 export default function ShiftsListPage() {
@@ -144,6 +163,46 @@ export default function ShiftsListPage() {
   const onRemoveRequested = (id: string) => {
     setRequested((rs) => rs.filter((r) => r.id !== id));
     removeRequestedShift(id);
+  };
+
+  // "I can't make this shift" state machine — which row is in flight
+  // (sheet open or DB write running) so we can disable the row's
+  // affordance while busy. `unableSheetFor` holds the row currently
+  // showing the confirm sheet; null otherwise. We pass the row's
+  // ShiftWithMeta so the sheet header can show the customer name
+  // without re-fetching.
+  const [unableSheetFor, setUnableSheetFor] = useState<
+    | { realId: string; name: string }
+    | null
+  >(null);
+  const [unableBusyFor, setUnableBusyFor] = useState<string | null>(null);
+
+  const handleRaiseUnable = async (
+    realId: string,
+    reason: UnableReason,
+    note: string
+  ) => {
+    setUnableBusyFor(realId);
+    const r = await raiseUnableToAttend(realId, reason, note);
+    setUnableBusyFor(null);
+    if (!r.ok) {
+      alert(r.error || "Couldn't notify your manager. Try again?");
+      throw new Error(r.error || "Failed");
+    }
+    setUnableSheetFor(null);
+    reload();
+  };
+
+  const handleWithdrawUnable = async (realId: string) => {
+    if (!confirm("Withdraw the unable-to-attend flag? You'll be back on the schedule.")) return;
+    setUnableBusyFor(realId);
+    const r = await withdrawUnableToAttend(realId);
+    setUnableBusyFor(null);
+    if (!r.ok) {
+      alert(r.error || "Couldn't withdraw — your manager may already have actioned it.");
+      return;
+    }
+    reload();
   };
 
   // Apply the search filter across every section. Match is
@@ -400,6 +459,11 @@ export default function ShiftsListPage() {
               }
               onCheckIn={() => onCheckIn(s.realId)}
               onResume={() => onResumeShift(s.realId)}
+              onUnableToAttend={() =>
+                setUnableSheetFor({ realId: s.realId, name: s.name })
+              }
+              onWithdrawUnable={() => handleWithdrawUnable(s.realId)}
+              unableBusy={unableBusyFor === s.realId}
             />
           ))
         )}
@@ -439,6 +503,23 @@ export default function ShiftsListPage() {
       <div style={{ height: 12 }} />
 
       <AppFooter />
+
+      {/* Confirm-and-pick-reason sheet. Mounted at the root so it
+          slides up over the whole page; the row triggers it by
+          setting `unableSheetFor`. */}
+      {unableSheetFor && (
+        <UnableToAttendSheet
+          shiftName={unableSheetFor.name}
+          onClose={() =>
+            unableBusyFor === unableSheetFor.realId
+              ? undefined
+              : setUnableSheetFor(null)
+          }
+          onSubmit={(reason, note) =>
+            handleRaiseUnable(unableSheetFor.realId, reason, note)
+          }
+        />
+      )}
     </div>
   );
 }
@@ -492,6 +573,9 @@ function ShiftRow({
   onResume,
   onRemove,
   onClaim,
+  onUnableToAttend,
+  onWithdrawUnable,
+  unableBusy,
 }: {
   shift: Shift & {
     siteId?: string | null;
@@ -500,6 +584,12 @@ function ShiftRow({
     siteContactPhone?: string | null;
     siteContactName?: string | null;
     siteNotes?: string | null;
+    /** Attention overlay — when 'unable_to_attend' (and not yet
+     *  resolved) the row shows an amber "Awaiting manager" pill
+     *  and the Can't-make-it action is replaced by Withdraw. */
+    attention?: string | null;
+    attentionReason?: string | null;
+    attentionResolvedAt?: string | null;
   };
   /** The shift's lifecycle state (scheduled | in-progress | complete | late). Only meaningful for "Mine". */
   state?: string;
@@ -521,6 +611,15 @@ function ShiftRow({
   onResume?: () => void;
   onRemove?: () => void;
   onClaim?: () => void;
+  /** Open the "I can't make this shift" sheet for this row.
+   *  Defined only when the row is a scheduled shift owned by the
+   *  current rep AND attention isn't already raised. */
+  onUnableToAttend?: () => void;
+  /** Withdraw a previously-raised flag. Only valid before the
+   *  manager has actioned it. */
+  onWithdrawUnable?: () => void;
+  /** True while the parent is sending raise/withdraw to the DB. */
+  unableBusy?: boolean;
 }) {
   const isComplete = state === "complete";
   const isInProgress = state === "in-progress";
@@ -787,6 +886,72 @@ function ShiftRow({
             padding: "12px 14px 14px",
           }}
         >
+          {/* Awaiting-manager banner — only when the rep has raised an
+              unable-to-attend flag and the manager hasn't actioned it.
+              Replaces the normal "Can't make it" affordance below; the
+              rep can withdraw until the manager acts. */}
+          {shift.attention === "unable_to_attend" && !shift.attentionResolvedAt && (
+            <div
+              style={{
+                marginBottom: 10,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: MC.warnTint,
+                border: `1px solid ${MC.warn}55`,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <Glyph name="warn" size={16} color={MC.warn} strokeWidth={2.2} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#6d4808",
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  Awaiting manager
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 11.5,
+                    color: "#7d5708",
+                    marginTop: 2,
+                  }}
+                >
+                  Reason: {unableReasonLabel(shift.attentionReason)} ·
+                  Your manager will reassign or release this shift.
+                </div>
+              </div>
+              {onWithdrawUnable && (
+                <button
+                  type="button"
+                  onClick={onWithdrawUnable}
+                  disabled={unableBusy}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: `1px solid ${MC.warn}66`,
+                    background: "#fff",
+                    color: "#6d4808",
+                    fontFamily: MC.font,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: unableBusy ? "not-allowed" : "pointer",
+                    opacity: unableBusy ? 0.6 : 1,
+                  }}
+                >
+                  {unableBusy ? "…" : "Withdraw"}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Site contact strip — phone is tap-to-call, useful when
               the rep is travelling and needs to give an ETA or ask
               for the back-entrance code. Only renders when the site
@@ -856,7 +1021,11 @@ function ShiftRow({
             </div>
           )}
 
-          {isComplete ? (
+          {/* When the rep has raised an unable-to-attend flag we skip
+              the regular action row entirely — the amber banner +
+              Withdraw button above are the only valid affordances
+              until the manager actions it. */}
+          {shift.attention === "unable_to_attend" && !shift.attentionResolvedAt ? null : isComplete ? (
             <div
               style={{
                 display: "flex",
@@ -957,6 +1126,39 @@ function ShiftRow({
               </button>
             </div>
           )}
+
+          {/* "I can't make this shift" — friction-by-design text link
+              that opens the confirmation sheet. Only renders for
+              scheduled (mine) shifts where attention isn't already
+              raised. Once raised the row shows the amber Awaiting
+              banner above with a Withdraw button instead. */}
+          {state === "scheduled" &&
+            !shift.attention &&
+            !!onUnableToAttend && (
+              <button
+                type="button"
+                onClick={onUnableToAttend}
+                style={{
+                  marginTop: 12,
+                  width: "100%",
+                  background: "transparent",
+                  border: "none",
+                  color: MC.danger,
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  letterSpacing: -0.1,
+                  padding: "8px 0 2px",
+                  cursor: "pointer",
+                  textAlign: "center",
+                  textDecoration: "underline",
+                  textUnderlineOffset: 3,
+                  opacity: 0.85,
+                }}
+              >
+                I can&apos;t make this shift
+              </button>
+            )}
         </div>
       )}
     </div>

@@ -27,6 +27,15 @@ interface ShiftRow {
   check_in_at: string | null;
   tasks_done: number;
   tasks_total: number;
+  /** Attention overlay — null when nothing needs a manager to look
+   *  at it, otherwise one of 'unable_to_attend' | 'no_show' | …
+   *  Resolved when attention_resolved_at is set. See the 2026-05-11
+   *  migration for the full lifecycle. */
+  attention: string | null;
+  attention_reason: string | null;
+  attention_note: string | null;
+  attention_raised_at: string | null;
+  attention_resolved_at: string | null;
   customers: {
     id: string;
     name: string;
@@ -85,8 +94,27 @@ export interface ShiftSiteFields {
   siteNotes: string | null;
 }
 
+/**
+ * Attention overlay surfaced to mobile screens. Mirrors the DB columns
+ * added by the 2026-05-11 migration so the row UI can branch on
+ * "awaiting manager" without joining or re-querying.
+ *
+ * Open = `attention != null && attentionResolvedAt == null`.
+ * Resolved = `attentionResolvedAt != null` (the manager acted).
+ * The rep app generally treats *resolved* attention as ancient
+ * history and doesn't display it.
+ */
+export interface ShiftAttentionFields {
+  attention: string | null;
+  attentionReason: string | null;
+  attentionNote: string | null;
+  attentionRaisedAt: string | null;
+  attentionResolvedAt: string | null;
+}
+
 export type ShiftWithMeta = Shift &
-  ShiftSiteFields & {
+  ShiftSiteFields &
+  ShiftAttentionFields & {
     realId: string;
     repId: string | null;
     checkInAt: string | null;
@@ -130,6 +158,11 @@ function rowToShift(row: ShiftRow): ShiftWithMeta {
     siteContactPhone: s?.contact_phone ?? null,
     siteContactEmail: s?.contact_email ?? null,
     siteNotes: s?.notes ?? null,
+    attention: row.attention ?? null,
+    attentionReason: row.attention_reason ?? null,
+    attentionNote: row.attention_note ?? null,
+    attentionRaisedAt: row.attention_raised_at ?? null,
+    attentionResolvedAt: row.attention_resolved_at ?? null,
   };
 }
 
@@ -626,6 +659,155 @@ export async function setShiftTravellingState(
  * Wrapped in try/catch so a misbehaving realtime client (publication
  * not configured, websocket can't open) can never crash the page.
  */
+// ─── Attention: "I can't make this shift" rep flow ─────────────────────
+//
+// The rep can flag a shift they can't attend BEFORE checking in. The
+// flag is an overlay column on shifts (see the 2026-05-11 migration);
+// the shift's `state` stays 'scheduled' so the calendar / list still
+// shows it. Manager-side resolution (reassign / release / acknowledge
+// / cancel) lives in admin-side code; here we own the rep half of
+// the lifecycle: raise + withdraw.
+//
+// Guards:
+//   - Only `state='scheduled'` shifts can have attention raised.
+//     Once a rep checks in, the right path is the existing
+//     check-out-early flow, not this one.
+//   - Only the assigned rep can raise on their own shift. The DB
+//     write is permissive for any authenticated user (Phase-pre-4
+//     RLS) so we enforce ownership in the SQL filter itself, which
+//     is enough: a rep can only mutate a row where rep_id = their id.
+//   - Idempotent: raising twice in a row is a no-op; the second call
+//     is filtered out by the `attention IS NULL` guard.
+
+export type UnableReason =
+  | "sick"
+  | "family"
+  | "double_booked"
+  | "transport"
+  | "other";
+
+/**
+ * Rep flags they can't attend a scheduled shift. Updates the attention
+ * overlay and logs an audit event. Returns ok+true even if the row
+ * couldn't be matched (filtered out by guards) — the UI treats it
+ * as a successful no-op.
+ */
+export async function raiseUnableToAttend(
+  shiftId: string,
+  reason: UnableReason,
+  note: string | null
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) return { ok: false, error: "Not signed in" };
+
+  // Read the row once so the audit event carries customer_id and the
+  // mobile UI can verify the shift was actually flipped (count check).
+  const { data: before } = await supabase
+    .from("shifts")
+    .select("customer_id, state, attention, rep_id")
+    .eq("id", shiftId)
+    .maybeSingle();
+  const beforeRow =
+    (before as { customer_id?: string; state?: string; attention?: string | null; rep_id?: string | null } | null) ?? null;
+
+  if (!beforeRow) return { ok: false, error: "Shift not found" };
+  if (beforeRow.rep_id !== userId) return { ok: false, error: "Not your shift" };
+  if (beforeRow.state !== "scheduled") {
+    return { ok: false, error: "Only scheduled shifts can be flagged" };
+  }
+  if (beforeRow.attention) {
+    // Already flagged — idempotent no-op, the UI shouldn't normally
+    // get here (the "Can't make it" affordance is hidden once raised).
+    return { ok: true };
+  }
+
+  const { error } = await supabase
+    .from("shifts")
+    .update({
+      attention: "unable_to_attend",
+      attention_reason: reason,
+      attention_note: note?.trim() || null,
+      attention_raised_at: new Date().toISOString(),
+    })
+    .eq("id", shiftId)
+    .eq("rep_id", userId)
+    .eq("state", "scheduled")
+    .is("attention", null);
+  if (error) return { ok: false, error: error.message };
+
+  await logEvent({
+    event_type: "shift.rep_unable_to_attend",
+    shift_id: shiftId,
+    ...(beforeRow.customer_id ? { customer_id: beforeRow.customer_id } : {}),
+    message: `Rep flagged unable to attend (${reason})`,
+    meta: { reason, hasNote: !!note?.trim() },
+  });
+  return { ok: true };
+}
+
+/**
+ * Rep changes their mind BEFORE the manager has acted. Clears the
+ * attention overlay so the shift goes back to a clean "scheduled"
+ * state with the rep assigned. Once the manager has resolved
+ * (attention_resolved_at is set), this is a no-op — the rep no
+ * longer "owns" the shift in that sense.
+ */
+export async function withdrawUnableToAttend(
+  shiftId: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) return { ok: false, error: "Not signed in" };
+
+  const { data: before } = await supabase
+    .from("shifts")
+    .select("customer_id, attention, attention_resolved_at, rep_id")
+    .eq("id", shiftId)
+    .maybeSingle();
+  const beforeRow =
+    (before as {
+      customer_id?: string;
+      attention?: string | null;
+      attention_resolved_at?: string | null;
+      rep_id?: string | null;
+    } | null) ?? null;
+
+  if (!beforeRow) return { ok: false, error: "Shift not found" };
+  if (beforeRow.rep_id !== userId) return { ok: false, error: "Not your shift" };
+  if (!beforeRow.attention) return { ok: true }; // already clear
+  if (beforeRow.attention_resolved_at) {
+    return { ok: false, error: "Already actioned by your manager" };
+  }
+
+  const { error } = await supabase
+    .from("shifts")
+    .update({
+      attention: null,
+      attention_reason: null,
+      attention_note: null,
+      attention_raised_at: null,
+    })
+    .eq("id", shiftId)
+    .eq("rep_id", userId)
+    .is("attention_resolved_at", null);
+  if (error) return { ok: false, error: error.message };
+
+  await logEvent({
+    event_type: "shift.rep_unable_withdrawn",
+    shift_id: shiftId,
+    ...(beforeRow.customer_id ? { customer_id: beforeRow.customer_id } : {}),
+    message: "Rep withdrew the unable-to-attend flag",
+  });
+  return { ok: true };
+}
+
 let _shiftsChannelCounter = 0;
 
 export function subscribeShifts(onChange: () => void): () => void {
