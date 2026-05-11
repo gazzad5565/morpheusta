@@ -78,12 +78,20 @@ interface RepLite {
 
 const TABS = [
   "All",
+  "Needs action",
   "In progress",
   "Travelling",
   "On break",
   "Unassigned",
   "Requested",
 ] as const;
+
+/** A shift "needs action" when the rep has flagged unable-to-attend
+ *  and the manager hasn't yet resolved the flag. Used by the
+ *  ShiftsList tab + count pill on Live Ops so attention rows show up
+ *  in the same place the manager already scans for the day. */
+const isNeedsAction = (s: ShiftRow): boolean =>
+  s.attention === "unable_to_attend" && !s.attention_resolved_at;
 
 // Discriminated union — request rows are real DB rows from
 // requested_shifts (separate table from shifts) but they live in this
@@ -197,6 +205,11 @@ export function ShiftsList() {
     if (active === "Requested") return reqRows;
     if (active === "Unassigned")
       return shiftRows.filter((r) => r.kind === "shift" && !r.shift.rep_id);
+    if (active === "Needs action") {
+      return shiftRows.filter(
+        (r) => r.kind === "shift" && isNeedsAction(r.shift)
+      );
+    }
     const key = active.toLowerCase().replace(" ", "-");
     return shiftRows.filter(
       (r) => r.kind === "shift" && effectiveState(r.shift) === key
@@ -223,8 +236,10 @@ export function ShiftsList() {
     ).length;
     const onBreak = rows.filter((s) => effectiveState(s) === "on-break").length;
     const unassigned = rows.filter((s) => !s.rep_id).length;
+    const needsAction = rows.filter(isNeedsAction).length;
     return {
       All: totalShifts + dedupedRequests.length,
+      "Needs action": needsAction,
       "In progress": inProgress,
       Travelling: travelling,
       "On break": onBreak,
@@ -269,7 +284,13 @@ export function ShiftsList() {
           {filtered.length}
         </span>
         <div style={{ flex: 1 }} />
-        <SegTabs tabs={TABS} active={active} onChange={setActive} counts={tabCounts} />
+        <SegTabs
+          tabs={TABS}
+          active={active}
+          onChange={setActive}
+          counts={tabCounts}
+          urgentTabs={["Needs action"]}
+        />
         <div style={{ width: 1, height: 18, background: AC.line }} />
         <button
           type="button"

@@ -1805,7 +1805,35 @@ function BreakChooserSheet({
           animation: "bcs-slide-up .26s cubic-bezier(.22, 1, .36, 1) both",
         }}
       >
-        <div style={{ width: 40, height: 4, borderRadius: 99, background: MC.line, margin: "0 auto 12px" }} />
+        {/* Handle row — was a static decorative pill; reps were tapping
+            it to close the sheet (iOS pattern) and nothing happened.
+            Now it's a real button covering the whole top strip so a
+            tap anywhere on the handle dismisses the sheet. */}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close sheet"
+          style={{
+            display: "block",
+            width: "100%",
+            padding: "6px 0 12px",
+            margin: "-16px 0 0",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
+          <div
+            aria-hidden
+            style={{
+              width: 40,
+              height: 4,
+              borderRadius: 99,
+              background: MC.line,
+              margin: "0 auto",
+            }}
+          />
+        </button>
         <div
           style={{
             fontFamily: MC.fontDisplay,

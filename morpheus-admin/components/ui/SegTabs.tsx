@@ -15,11 +15,16 @@ interface Props {
    * empty / partial map to skip pills on specific tabs.
    */
   counts?: Record<string, number>;
+  /** Tabs that should render in danger-tone when their count > 0
+   *  (e.g. "Needs action"). Drawn red so the manager's eye lands
+   *  on attention queues. Falls back to neutral when count is 0. */
+  urgentTabs?: readonly string[];
 }
 
-export function SegTabs({ tabs, active, onChange, counts }: Props) {
+export function SegTabs({ tabs, active, onChange, counts, urgentTabs }: Props) {
   const [internal, setInternal] = useState(active ?? tabs[0]);
   const current = active ?? internal;
+  const urgent = new Set(urgentTabs ?? []);
   return (
     <div
       style={{
@@ -34,6 +39,11 @@ export function SegTabs({ tabs, active, onChange, counts }: Props) {
       {tabs.map((t) => {
         const count = counts ? counts[t] : undefined;
         const isActive = t === current;
+        // An urgent tab with > 0 count gets danger styling — the
+        // label turns red and the count pill is a solid red disc
+        // even when the tab isn't active, so it pulls the eye.
+        const isUrgent =
+          urgent.has(t) && typeof count === "number" && count > 0;
         return (
           <button
             key={t}
@@ -49,7 +59,7 @@ export function SegTabs({ tabs, active, onChange, counts }: Props) {
               padding: "4px 10px",
               borderRadius: 6,
               background: isActive ? "#fff" : "transparent",
-              color: isActive ? AC.ink : AC.mute,
+              color: isUrgent ? AC.danger : isActive ? AC.ink : AC.mute,
               border: "none",
               cursor: "pointer",
               fontFamily: AC.font,
@@ -71,13 +81,18 @@ export function SegTabs({ tabs, active, onChange, counts }: Props) {
                   borderRadius: 99,
                   minWidth: 16,
                   textAlign: "center",
-                  background: isActive
+                  background: isUrgent
+                    ? AC.danger
+                    : isActive
                     ? AC.bg
                     : count > 0
                     ? AC.brandSoft
                     : "transparent",
-                  color:
-                    count > 0 ? (isActive ? AC.brandDeep : AC.brandDeep) : AC.faint,
+                  color: isUrgent
+                    ? "#fff"
+                    : count > 0
+                    ? AC.brandDeep
+                    : AC.faint,
                   border: count === 0 ? `1px solid ${AC.line}` : "none",
                   lineHeight: 1.5,
                 }}

@@ -185,7 +185,7 @@ export function MapPanelClient() {
       // colour-coding as before so the manager can still tell the
       // brands apart on a busy map.
       el.style.cssText = `
-        width: 26px; height: 26px; border-radius: 6px;
+        width: 28px; height: 28px; border-radius: 7px;
         background: ${c.color}; color: #fff;
         display: flex; align-items: center; justify-content: center;
         box-shadow: 0 1px 3px rgba(0,0,0,0.25);
@@ -248,8 +248,14 @@ export function MapPanelClient() {
         // face glyph. The shape (circle) deliberately contrasts with
         // the rounded-square house markers above so the manager can
         // tell at a glance which dots are sites and which are people.
+        // Sized to match the customer house markers (28 px). The
+        // outer 2 px white ring is implemented as box-shadow rather
+        // than border so the inner content fills the full 28 px and
+        // the visual weight reads identical to the houses — managers
+        // complained reps looked much larger and harder to scan
+        // alongside customer pins.
         el.style.cssText = `
-          width: 32px; height: 32px; border-radius: 99px;
+          width: 28px; height: 28px; border-radius: 99px;
           background: ${repColor}; color: #fff;
           display: flex; align-items: center; justify-content: center;
           box-shadow: 0 0 0 2px #fff, 0 1px 6px rgba(0,0,0,0.30);

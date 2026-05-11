@@ -135,15 +135,33 @@ export function UnableToAttendSheet({
           overflowY: "auto",
         }}
       >
-        <div
+        {/* Tappable drag handle — reps were trying to dismiss the
+            sheet by tapping this pill (iOS pattern). Now it works. */}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close sheet"
           style={{
-            width: 40,
-            height: 4,
-            borderRadius: 99,
-            background: MC.line,
-            margin: "0 auto 12px",
+            display: "block",
+            width: "100%",
+            padding: "6px 0 12px",
+            margin: "-16px 0 0",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
           }}
-        />
+        >
+          <div
+            aria-hidden
+            style={{
+              width: 40,
+              height: 4,
+              borderRadius: 99,
+              background: MC.line,
+              margin: "0 auto",
+            }}
+          />
+        </button>
 
         <div
           style={{

@@ -41,16 +41,69 @@ const CustomersMap = dynamic(
 type StatusFilter = "all" | "active" | "inactive";
 type ViewMode = "Grid" | "Table" | "Map";
 
+// localStorage key for /customers UI state — persists across nav so
+// going into a customer detail and back doesn't reset the view,
+// search, or filters. Bumped via the version suffix if we ever break
+// the saved shape so stale state quietly resets instead of crashing.
+const LS_KEY = "morpheus.customers_state.v1";
+
+interface PersistedState {
+  view?: ViewMode;
+  statusFilter?: StatusFilter;
+  withAddressOnly?: boolean;
+  search?: string;
+  sortKey?: CustomerSortKey;
+  sortDir?: "asc" | "desc";
+}
+
+function readPersisted(): PersistedState {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(LS_KEY);
+    return raw ? (JSON.parse(raw) as PersistedState) : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function CustomersPage() {
+  const persisted = useMemo(() => readPersisted(), []);
   const [customers, setCustomers] = useState<Customer[] | null>(null);
-  const [view, setView] = useState<ViewMode>("Grid");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [withAddressOnly, setWithAddressOnly] = useState(false);
-  const [search, setSearch] = useState("");
+  // Default = Table now. Managers wanted parity with /tasks (table only)
+  // and /reps (table-first). The Grid view + Map view remain accessible
+  // via the toggle; the last-used view is remembered across navigation
+  // via localStorage below.
+  const [view, setView] = useState<ViewMode>(persisted.view ?? "Table");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
+    persisted.statusFilter ?? "all"
+  );
+  const [withAddressOnly, setWithAddressOnly] = useState(
+    persisted.withAddressOnly ?? false
+  );
+  const [search, setSearch] = useState(persisted.search ?? "");
   const [sort, setSort] = useState<SortState<CustomerSortKey>>({
-    key: "name",
-    dir: "asc",
+    key: persisted.sortKey ?? "name",
+    dir: persisted.sortDir ?? "asc",
   });
+
+  // Persist any of the above on change. Write is debounced behind
+  // React's batching — every update lands on a single tick.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const payload: PersistedState = {
+        view,
+        statusFilter,
+        withAddressOnly,
+        search,
+        sortKey: sort.key,
+        sortDir: sort.dir,
+      };
+      window.localStorage.setItem(LS_KEY, JSON.stringify(payload));
+    } catch {
+      /* quota / disabled */
+    }
+  }, [view, statusFilter, withAddressOnly, search, sort.key, sort.dir]);
 
   useEffect(() => {
     let cancelled = false;
