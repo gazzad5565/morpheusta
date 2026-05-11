@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
+import { TimeCombobox } from "@/components/ui/TimeCombobox";
 import { SettingsShell } from "@/components/shell/SettingsShell";
 import { AC } from "@/lib/tokens";
 import {
@@ -269,22 +270,17 @@ export default function CheckInRulesPage() {
             Auto check-out time (24h)
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", maxWidth: 360 }}>
-            <input
-              type="time"
-              value={autoCheckoutTime}
-              disabled={!loaded || savingKey === "autoCheckout"}
-              onChange={(e) => setAutoCheckoutTimeState(e.target.value)}
-              style={{
-                flex: 1,
-                padding: "9px 11px",
-                borderRadius: 10,
-                border: `1px solid ${AC.line}`,
-                background: "#fff",
-                fontFamily: AC.fontMono,
-                fontSize: 14,
-                color: AC.ink,
-              }}
-            />
+            <div style={{ flex: 1 }}>
+              <TimeCombobox
+                value={autoCheckoutTime}
+                onChange={setAutoCheckoutTimeState}
+                // Auto-checkout sweep runs at end-of-day; default window
+                // 18:00–23:59 makes sense to most managers but we leave
+                // the full 06:00–22:00 default since this is the same
+                // 30-min grid the rest of the app uses.
+                disabled={!loaded || savingKey === "autoCheckout"}
+              />
+            </div>
             <Btn
               size="sm"
               kind="primary"

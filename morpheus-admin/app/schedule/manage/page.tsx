@@ -25,6 +25,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { Combobox } from "@/components/ui/Combobox";
+import { TimeCombobox } from "@/components/ui/TimeCombobox";
 import { LoadingBar } from "@/components/ui/LoadingBar";
 import { AC } from "@/lib/tokens";
 import {
@@ -1251,20 +1252,10 @@ function EditFutureModal({
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <FormField label="Start time">
-            <input
-              type="time"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-              style={selectStyle}
-            />
+            <TimeCombobox value={startTime} onChange={setStartTime} />
           </FormField>
           <FormField label="End time">
-            <input
-              type="time"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-              style={selectStyle}
-            />
+            <TimeCombobox value={endTime} onChange={setEndTime} />
           </FormField>
         </div>
 
@@ -1345,14 +1336,5 @@ function FormField({
   );
 }
 
-const selectStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "9px 11px",
-  borderRadius: 10,
-  border: `1px solid ${AC.line}`,
-  background: "#fff",
-  fontFamily: AC.font,
-  fontSize: 13.5,
-  color: AC.ink,
-  boxSizing: "border-box",
-};
+// (selectStyle removed — time inputs in the Edit-future modal now
+// use the shared TimeCombobox.)

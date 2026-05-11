@@ -316,13 +316,25 @@ function PreviewInput({ type, options }: { type: FieldType; options: string[] })
         </label>
       );
     case "select":
+      // Read-only chrome that visually matches Combobox triggers
+      // elsewhere — used to be a disabled native <select> which
+      // rendered with the browser's dropdown arrow and broke the
+      // visual rhythm of the rest of the form.
       return (
-        <select disabled style={inputStyle}>
-          <option>{options[0] || "Option…"}</option>
-          {options.slice(1).map((o) => (
-            <option key={o}>{o}</option>
-          ))}
-        </select>
+        <div
+          style={{
+            ...inputStyle,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            color: options[0] ? "currentColor" : "#9098A4",
+            cursor: "not-allowed",
+            background: "#FAFBFC",
+          }}
+        >
+          <span style={{ flex: 1 }}>{options[0] || "Option…"}</span>
+          <span style={{ color: "#9098A4", fontSize: 12 }}>▾</span>
+        </div>
       );
   }
 }

@@ -27,6 +27,7 @@ import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
 import { Combobox } from "@/components/ui/Combobox";
+import { TimeCombobox } from "@/components/ui/TimeCombobox";
 import { AC } from "@/lib/tokens";
 import {
   getShiftById,
@@ -491,20 +492,10 @@ export default function EditShiftPage({
               />
             </Field>
             <Field label="Start time" required>
-              <input
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                style={inputStyle}
-              />
+              <TimeCombobox value={startTime} onChange={setStartTime} />
             </Field>
             <Field label="End time" required>
-              <input
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                style={inputStyle}
-              />
+              <TimeCombobox value={endTime} onChange={setEndTime} />
             </Field>
           </div>
 

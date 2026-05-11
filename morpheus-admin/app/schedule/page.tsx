@@ -325,18 +325,9 @@ function assignLanes(
   return { visible, overflows };
 }
 
-// Shared dropdown style for the toolbar filters (rep + customer). Kept
-// here so the two selects line up cell-for-cell on every screen size.
-const filterSelectStyle: React.CSSProperties = {
-  padding: "6px 10px",
-  borderRadius: 8,
-  border: `1px solid #E2E8EE`,
-  background: "#fff",
-  fontFamily: "inherit",
-  fontSize: 12,
-  color: "#0E141B",
-  cursor: "pointer",
-};
+// (filterSelectStyle removed — the rep + customer filters in the
+// toolbar now use the shared Combobox component, no inline style
+// needed.)
 
 /**
  * Smart default start time for the "+ Add" button on a day cell.
