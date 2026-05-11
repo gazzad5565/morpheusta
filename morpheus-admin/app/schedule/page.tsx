@@ -215,10 +215,28 @@ interface LaneAssignment {
   overflows: OverflowGroup[];
 }
 
-function assignLanes(shifts: ShiftRow[]): LaneAssignment {
+function assignLanes(
+  shifts: ShiftRow[],
+  opts?: { singleRep?: boolean }
+): LaneAssignment {
   const visible = new Map<string, { lane: number; lanes: number }>();
   const overflows: OverflowGroup[] = [];
   if (shifts.length === 0) return { visible, overflows };
+
+  // Single-rep shortcut: every shift gets a full-width lane,
+  // no clustering, no overflow ever. The clustering pass below
+  // can otherwise pull a long cancelled / complete shift into a
+  // mega-cluster with everything that happens during its span,
+  // pushing the rest of the day into a "+N MORE" pill even though
+  // the rep can't be in two places at once. When the manager has
+  // explicitly filtered to one person, "show me every shift
+  // stacked vertically" is exactly what they want.
+  if (opts?.singleRep) {
+    for (const s of shifts) {
+      visible.set(s.id, { lane: 0, lanes: 1 });
+    }
+    return { visible, overflows };
+  }
 
   // Sort by start, then by longer-first so longer shifts get the
   // leftmost lane (feels more natural when scanning).
@@ -1055,20 +1073,26 @@ function formatHourLabel(h: number): string {
 function DayColumnContents({
   shifts,
   repNameMap,
+  singleRepFiltered,
   drag,
   onBeginDrag,
   onEndDrag,
 }: {
   shifts: ShiftRow[];
   repNameMap: Record<string, string>;
+  /** Inherited from DayColumn — when true the lane allocator
+   *  skips clustering and gives every shift its own full-width
+   *  row, so a single rep's day reads sequentially with no
+   *  overflow popover. */
+  singleRepFiltered: boolean;
   drag: { shift: ShiftRow; pickupOffsetMin: number } | null;
   onBeginDrag: (shift: ShiftRow, pickupOffsetMin: number) => void;
   onEndDrag: () => void;
 }) {
   const [openOverflowIdx, setOpenOverflowIdx] = useState<number | null>(null);
   const { visible: laneMap, overflows } = useMemo(
-    () => assignLanes(shifts),
-    [shifts]
+    () => assignLanes(shifts, { singleRep: singleRepFiltered }),
+    [shifts, singleRepFiltered]
   );
 
   return (
@@ -1510,6 +1534,7 @@ function DayColumn({
         <DayColumnContents
           shifts={shifts}
           repNameMap={repNameMap}
+          singleRepFiltered={singleRepFiltered}
           drag={drag}
           onBeginDrag={onBeginDrag}
           onEndDrag={onEndDrag}
