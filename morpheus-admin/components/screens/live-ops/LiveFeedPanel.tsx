@@ -36,6 +36,57 @@ import {
   eventTone,
   type ShiftEvent,
 } from "@/lib/events-store";
+import {
+  listOpenAttentionShifts,
+  reassignShift,
+  releaseShift,
+  acknowledgeAttention,
+  cancelShiftFromAttention,
+  subscribeShifts,
+  type ShiftRow,
+} from "@/lib/shifts-store";
+import {
+  listProfiles,
+  displayName,
+  type Profile,
+} from "@/lib/profiles-store";
+
+/**
+ * Map the rep-supplied `attention_reason` enum to a human label.
+ * Falls back to the raw value when an unknown reason somehow lands
+ * (e.g. enum extended later on mobile, this client still on the
+ * old build).
+ */
+function attentionReasonLabel(value: string | null | undefined): string {
+  switch (value) {
+    case "sick":
+      return "Sick / unwell";
+    case "family":
+      return "Family emergency";
+    case "double_booked":
+      return "Double-booked";
+    case "transport":
+      return "Transport problem";
+    case "other":
+      return "Other";
+    default:
+      return value || "Unspecified";
+  }
+}
+
+/** Short "X min ago" / "Y hr ago" relative time. */
+function relativeAgo(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
 
 type TabKey = "needs-action" | "all";
 type RangeKey = "today" | "7d" | "30d" | "all";
@@ -95,6 +146,16 @@ export function LiveFeedPanel() {
   const [events, setEvents] = useState<ShiftEvent[]>([]);
   const [eventsLoaded, setEventsLoaded] = useState(false);
 
+  // Unable-to-attend shifts (also in Needs action). Loaded separately
+  // from requests because the underlying tables are different and
+  // each has its own realtime channel.
+  const [attentionShifts, setAttentionShifts] = useState<ShiftRow[]>([]);
+  const [attentionLoaded, setAttentionLoaded] = useState(false);
+  // Rep roster used by the Reassign picker. Loaded once on mount;
+  // refreshed on visibilitychange so a newly-invited rep shows up
+  // when the manager returns to the tab.
+  const [reps, setReps] = useState<Profile[]>([]);
+
   // Tab-title alert + sidebar badge are handled in the Sidebar so they
   // work across every page, not just Live Ops. We don't duplicate the
   // logic here.
@@ -112,6 +173,37 @@ export function LiveFeedPanel() {
     // path but websockets drop and there's a connect-window where
     // freshly-mounted channels can miss the first INSERT.
     const unsub = subscribeRequests(load);
+    const onVis = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    const poll = window.setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      unsub();
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(poll);
+    };
+  }, []);
+
+  // Attention queue + rep roster — load on mount, subscribe to any
+  // shifts-table change (rep raises / withdraws / manager actions
+  // from another tab) + visibility + 60s poll for the same reasons
+  // the requests subscription has them.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      const [rows, profiles] = await Promise.all([
+        listOpenAttentionShifts(),
+        listProfiles({ role: "rep" }),
+      ]);
+      if (cancelled) return;
+      setAttentionShifts(rows);
+      setReps(profiles);
+      setAttentionLoaded(true);
+    };
+    load();
+    const unsub = subscribeShifts(load);
     const onVis = () => {
       if (document.visibilityState === "visible") load();
     };
@@ -188,6 +280,89 @@ export function LiveFeedPanel() {
     setRequests((rs) => rs.filter((x) => x.id !== r.id));
   };
 
+  // ─── Attention (unable-to-attend) actions ───────────────────────────
+  // Each handler optimistically removes the row from local state and
+  // then trusts the realtime channel + 60s poll to keep things in
+  // sync. If the DB call fails we re-fetch to roll back UI.
+
+  const refetchAttention = async () => {
+    const rows = await listOpenAttentionShifts();
+    setAttentionShifts(rows);
+  };
+
+  const onReassign = async (shift: ShiftRow, newRepId: string) => {
+    setBusyId(shift.id);
+    const r = await reassignShift(shift.id, newRepId);
+    setBusyId(null);
+    if (!r.ok) {
+      alert(`Couldn't reassign: ${r.error}`);
+      await refetchAttention();
+      return;
+    }
+    setAttentionShifts((rs) => rs.filter((x) => x.id !== shift.id));
+  };
+
+  const onRelease = async (shift: ShiftRow) => {
+    const customerName = shift.customers?.name || "this shift";
+    if (!confirm(`Release ${customerName} to the claimable pool? Any rep can pick it up.`)) {
+      return;
+    }
+    setBusyId(shift.id);
+    const r = await releaseShift(shift.id);
+    setBusyId(null);
+    if (!r.ok) {
+      alert(`Couldn't release: ${r.error}`);
+      await refetchAttention();
+      return;
+    }
+    setAttentionShifts((rs) => rs.filter((x) => x.id !== shift.id));
+  };
+
+  const onAcknowledge = async (shift: ShiftRow) => {
+    const customerName = shift.customers?.name || "this shift";
+    if (
+      !confirm(
+        `Acknowledge ${customerName} as resolved without changing assignment? Use this when you've sorted things out with the rep directly.`
+      )
+    ) {
+      return;
+    }
+    setBusyId(shift.id);
+    const r = await acknowledgeAttention(shift.id);
+    setBusyId(null);
+    if (!r.ok) {
+      alert(`Couldn't acknowledge: ${r.error}`);
+      await refetchAttention();
+      return;
+    }
+    setAttentionShifts((rs) => rs.filter((x) => x.id !== shift.id));
+  };
+
+  const onCancelShift = async (shift: ShiftRow) => {
+    const customerName = shift.customers?.name || "this shift";
+    if (
+      !confirm(
+        `Cancel ${customerName}? The shift will be marked cancelled; this can't be undone here (you'd need to recreate it).`
+      )
+    ) {
+      return;
+    }
+    setBusyId(shift.id);
+    const r = await cancelShiftFromAttention(shift.id);
+    setBusyId(null);
+    if (!r.ok) {
+      alert(`Couldn't cancel: ${r.error}`);
+      await refetchAttention();
+      return;
+    }
+    setAttentionShifts((rs) => rs.filter((x) => x.id !== shift.id));
+  };
+
+  // Total open items across both flavours of "Needs action": rep
+  // requests for a new shift + unable-to-attend overlays on existing
+  // shifts. The pill counts both so a single number tells the manager
+  // exactly how many things still want them.
+  const needsActionCount = requests.length + attentionShifts.length;
   const tabs: {
     key: TabKey;
     label: string;
@@ -203,8 +378,8 @@ export function LiveFeedPanel() {
     {
       key: "needs-action",
       label: "Needs action",
-      count: requests.length,
-      alert: requests.length > 0,
+      count: needsActionCount,
+      alert: needsActionCount > 0,
     },
   ];
 
@@ -313,7 +488,7 @@ export function LiveFeedPanel() {
       {activeTab === "needs-action" && (
         <NeedsActionList
           requests={requests}
-          loaded={requestsLoaded}
+          loaded={requestsLoaded && attentionLoaded}
           busyId={busyId}
           recentEvents={events}
           eventsLoaded={eventsLoaded}
@@ -321,6 +496,12 @@ export function LiveFeedPanel() {
           onSchedule={onSchedule}
           onApprove={onApprove}
           onDecline={onDecline}
+          attentionShifts={attentionShifts}
+          reps={reps}
+          onReassign={onReassign}
+          onRelease={onRelease}
+          onAcknowledge={onAcknowledge}
+          onCancelShift={onCancelShift}
         />
       )}
       {activeTab === "all" && (
@@ -347,6 +528,12 @@ function NeedsActionList({
   onSchedule,
   onApprove,
   onDecline,
+  attentionShifts,
+  reps,
+  onReassign,
+  onRelease,
+  onAcknowledge,
+  onCancelShift,
 }: {
   requests: PendingRequest[];
   loaded: boolean;
@@ -359,6 +546,15 @@ function NeedsActionList({
   onSchedule: (r: PendingRequest) => void;
   onApprove: (r: PendingRequest) => void;
   onDecline: (r: PendingRequest) => void;
+  /** Open unable-to-attend rows. Rendered ABOVE pending requests
+   *  because someone's existing shift is more time-critical than
+   *  someone wanting to add a new one. */
+  attentionShifts: ShiftRow[];
+  reps: Profile[];
+  onReassign: (shift: ShiftRow, newRepId: string) => Promise<void>;
+  onRelease: (shift: ShiftRow) => Promise<void>;
+  onAcknowledge: (shift: ShiftRow) => Promise<void>;
+  onCancelShift: (shift: ShiftRow) => Promise<void>;
 }) {
   if (!loaded) {
     return (
@@ -367,7 +563,9 @@ function NeedsActionList({
       </div>
     );
   }
-  if (requests.length === 0) {
+  // Empty inbox = no requests AND no attention rows. Either alone is
+  // enough to surface the lists below.
+  if (requests.length === 0 && attentionShifts.length === 0) {
     // Inbox-zero state: lead with a satisfying "all caught up" line,
     // then drop the 5 most recent activity events below so the
     // panel still has something useful to look at. Tap "View all"
@@ -504,6 +702,35 @@ function NeedsActionList({
   }
   return (
     <div style={{ padding: "8px 10px 10px", background: AC.brandSoft }}>
+      {/* Attention rows first — someone with an existing shift who
+          can't make it is more time-critical than a rep wanting to
+          add a new one. Each row carries its own four-button
+          resolution strip. */}
+      {attentionShifts.length > 0 && (
+        <div style={{ marginBottom: requests.length > 0 ? 10 : 0 }}>
+          <SectionHeader
+            label={`Can't make it (${attentionShifts.length})`}
+            tone="warn"
+          />
+          {attentionShifts.map((s) => (
+            <AttentionRow
+              key={s.id}
+              shift={s}
+              reps={reps}
+              busy={busyId === s.id}
+              onReassign={onReassign}
+              onRelease={onRelease}
+              onAcknowledge={onAcknowledge}
+              onCancelShift={onCancelShift}
+            />
+          ))}
+        </div>
+      )}
+
+      {requests.length > 0 && attentionShifts.length > 0 && (
+        <SectionHeader label={`Rep requests (${requests.length})`} tone="info" />
+      )}
+
       {requests.map((r, i) => (
         <div
           key={r.id}
@@ -808,5 +1035,287 @@ function AllActivityList({
       })}
       </div>
     </>
+  );
+}
+
+// ─── Attention row (unable-to-attend) ─────────────────────────────────
+
+function SectionHeader({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "warn" | "info";
+}) {
+  const color = tone === "warn" ? "#7d5708" : AC.brandDeep;
+  return (
+    <div
+      style={{
+        fontFamily: AC.font,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: 0.5,
+        textTransform: "uppercase",
+        color,
+        padding: "4px 4px 6px",
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
+function AttentionRow({
+  shift,
+  reps,
+  busy,
+  onReassign,
+  onRelease,
+  onAcknowledge,
+  onCancelShift,
+}: {
+  shift: ShiftRow;
+  reps: Profile[];
+  busy: boolean;
+  onReassign: (shift: ShiftRow, newRepId: string) => Promise<void>;
+  onRelease: (shift: ShiftRow) => Promise<void>;
+  onAcknowledge: (shift: ShiftRow) => Promise<void>;
+  onCancelShift: (shift: ShiftRow) => Promise<void>;
+}) {
+  // Inline rep picker — collapsed by default; "Reassign" toggles it.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickedRepId, setPickedRepId] = useState<string | null>(null);
+
+  const customer = shift.customers;
+  const site = shift.site;
+  const showSite = site && site.name && site.name !== "Head office";
+  const originalRep = reps.find((r) => r.id === shift.rep_id);
+  const originalRepLabel = originalRep
+    ? displayName(originalRep)
+    : shift.rep_id
+    ? "Unknown rep"
+    : "Unassigned";
+
+  const handleReassignConfirm = async () => {
+    if (!pickedRepId) return;
+    await onReassign(shift, pickedRepId);
+    // Sheet stays open visually only until the realtime/refetch
+    // removes the row from local state, but resetting is cheap.
+    setPickerOpen(false);
+    setPickedRepId(null);
+  };
+
+  return (
+    <div
+      style={{
+        padding: 10,
+        marginBottom: 6,
+        background: "#fff",
+        border: `1px solid ${AC.warn}55`,
+        borderLeft: `3px solid ${AC.warn}`,
+        borderRadius: 8,
+      }}
+    >
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 7,
+            background: customer?.color || AC.mute,
+            color: "#fff",
+            fontFamily: AC.font,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: 0.4,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          {customer?.initials || "??"}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 13,
+              fontWeight: 700,
+              color: AC.ink,
+              letterSpacing: -0.1,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {customer?.name || "Unknown customer"}
+            {showSite && (
+              <span style={{ color: AC.mute, fontWeight: 500 }}>
+                {" · "}
+                {site!.name}
+              </span>
+            )}
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11.5,
+              color: AC.mute,
+              marginTop: 2,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              flexWrap: "wrap",
+            }}
+          >
+            <span
+              style={{
+                textDecoration: "line-through",
+                textDecorationColor: AC.danger,
+              }}
+            >
+              {originalRepLabel}
+            </span>
+            <span
+              style={{
+                padding: "1px 6px",
+                borderRadius: 99,
+                background: AC.warnTint,
+                color: "#7d5708",
+                fontWeight: 700,
+                fontSize: 10.5,
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+              }}
+            >
+              {attentionReasonLabel(shift.attention_reason)}
+            </span>
+            <span>
+              {shift.shift_date} · {shift.start_time?.slice(0, 5)}–
+              {shift.end_time?.slice(0, 5)}
+            </span>
+            <span style={{ color: AC.hint }}>
+              · raised {relativeAgo(shift.attention_raised_at)}
+            </span>
+          </div>
+          {shift.attention_note && (
+            <div
+              style={{
+                marginTop: 6,
+                padding: "6px 8px",
+                background: AC.warnTint,
+                borderRadius: 6,
+                fontFamily: AC.font,
+                fontSize: 11.5,
+                color: "#6d4808",
+                lineHeight: 1.4,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              “{shift.attention_note}”
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Inline rep picker (only shown after "Reassign" is tapped). */}
+      {pickerOpen && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: 8,
+            background: AC.bg,
+            borderRadius: 8,
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Combobox
+              value={pickedRepId}
+              onChange={(v) => setPickedRepId(v)}
+              triggerIcon="reps"
+              placeholder="Pick a rep…"
+              clearable={false}
+              options={reps
+                .filter((r) => r.id !== shift.rep_id)
+                .map((r) => ({
+                  value: r.id,
+                  label: displayName(r),
+                  sublabel: r.email,
+                }))}
+            />
+          </div>
+          <Btn
+            size="sm"
+            kind="primary"
+            icon="check"
+            disabled={busy || !pickedRepId}
+            onClick={handleReassignConfirm}
+          >
+            Reassign
+          </Btn>
+          <Btn
+            size="sm"
+            onClick={() => {
+              setPickerOpen(false);
+              setPickedRepId(null);
+            }}
+            disabled={busy}
+          >
+            Cancel
+          </Btn>
+        </div>
+      )}
+
+      {/* Action row. Reassign is primary; the rest are secondary. */}
+      {!pickerOpen && (
+        <div
+          style={{
+            marginTop: 8,
+            display: "flex",
+            gap: 6,
+            flexWrap: "wrap",
+          }}
+        >
+          <Btn
+            size="sm"
+            kind="primary"
+            icon="reps"
+            onClick={() => setPickerOpen(true)}
+            disabled={busy}
+          >
+            Reassign
+          </Btn>
+          <Btn
+            size="sm"
+            icon="send"
+            onClick={() => onRelease(shift)}
+            disabled={busy}
+          >
+            Release
+          </Btn>
+          <Btn
+            size="sm"
+            icon="check"
+            onClick={() => onAcknowledge(shift)}
+            disabled={busy}
+          >
+            Acknowledge
+          </Btn>
+          <Btn
+            size="sm"
+            kind="danger"
+            icon="x"
+            onClick={() => onCancelShift(shift)}
+            disabled={busy}
+          >
+            Cancel shift
+          </Btn>
+        </div>
+      )}
+    </div>
   );
 }

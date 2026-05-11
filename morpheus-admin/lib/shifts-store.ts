@@ -41,6 +41,15 @@ export interface ShiftRow {
     color: string;
     code: number;
   } | null;
+  /** Attention overlay — when not null + not resolved, the shift
+   *  surfaces in Live Ops "Needs action". See the 2026-05-11
+   *  migration for the full lifecycle. */
+  attention: string | null;
+  attention_reason: string | null;
+  attention_note: string | null;
+  attention_raised_at: string | null;
+  attention_resolved_at: string | null;
+  attention_resolved_by: string | null;
   /** Joined site row when the shift has a site_id. The customer's
    *  legacy address fields are still populated for back-compat but
    *  every read path should prefer the site coords / address. */
@@ -794,6 +803,252 @@ export async function cancelShiftSeries(
  * page that called us. Worst case: no live updates, manual refresh
  * still works.
  */
+// ─── Attention: manager-side "Needs action" queue ─────────────────────
+//
+// The rep flags a shift they can't attend (mobile /shifts or home
+// up-next card → UnableToAttendSheet) which sets `attention` and
+// `attention_reason` on the shift. Manager resolves via Live Ops
+// "Needs action" — four affordances, each clears the overlay by
+// stamping attention_resolved_at + attention_resolved_by:
+//
+//   reassignShift(id, newRepId)
+//     → rep_id := newRepId; overlay cleared; event shift.reassigned
+//
+//   releaseShift(id)
+//     → rep_id := null (claimable); overlay cleared; event shift.released
+//
+//   acknowledgeAttention(id)
+//     → overlay cleared, rep_id/state untouched; event shift.acknowledged
+//       (used when the manager just wants to mark it resolved — eg
+//       they spoke to the rep and worked something out off-app.)
+//
+//   cancelShiftFromAttention(id)
+//     → state := 'cancelled'; overlay cleared; event shift.cancelled
+
+/**
+ * Every shift with an open attention overlay. The Live Ops "Needs
+ * action" tab drives off this. Ordered by raised_at desc so the
+ * freshest issues bubble to the top — matches the partial index
+ * the schema migration creates for this exact query.
+ */
+export async function listOpenAttentionShifts(): Promise<ShiftRow[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const { data, error } = await supabase
+    .from("shifts")
+    .select(
+      "*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)"
+    )
+    .not("attention", "is", null)
+    .is("attention_resolved_at", null)
+    .order("attention_raised_at", { ascending: false });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] listOpenAttention:", error.message);
+    return [];
+  }
+  return (data as ShiftRow[]) ?? [];
+}
+
+async function getResolverId(): Promise<string | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.auth.getUser();
+  return data.user?.id ?? null;
+}
+
+/**
+ * Read the shift's name + reason once before mutating so the audit
+ * event and the toast message both carry useful context. Returns
+ * null when the row is gone (race with delete).
+ */
+async function readAttentionContext(shiftId: string): Promise<
+  | {
+      customer_id: string;
+      customer_name: string;
+      attention_reason: string | null;
+      original_rep_id: string | null;
+    }
+  | null
+> {
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from("shifts")
+    .select("customer_id, rep_id, attention_reason, customers(name)")
+    .eq("id", shiftId)
+    .maybeSingle();
+  if (!data) return null;
+  const row = data as {
+    customer_id: string;
+    rep_id: string | null;
+    attention_reason: string | null;
+    customers: { name?: string } | { name?: string }[] | null;
+  };
+  const cust = Array.isArray(row.customers) ? row.customers[0] : row.customers;
+  return {
+    customer_id: row.customer_id,
+    customer_name: cust?.name || "a shift",
+    attention_reason: row.attention_reason,
+    original_rep_id: row.rep_id,
+  };
+}
+
+/** Reassign a flagged shift to a different rep. Clears the overlay. */
+export async function reassignShift(
+  shiftId: string,
+  newRepId: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const resolverId = await getResolverId();
+  const ctx = await readAttentionContext(shiftId);
+  const { error } = await supabase
+    .from("shifts")
+    .update({
+      rep_id: newRepId,
+      attention: null,
+      attention_reason: null,
+      attention_note: null,
+      attention_raised_at: null,
+      attention_resolved_at: new Date().toISOString(),
+      attention_resolved_by: resolverId,
+    })
+    .eq("id", shiftId);
+  if (error) {
+    notifySaveError(error.message, "shift");
+    return { ok: false, error: error.message };
+  }
+  await logEvent({
+    event_type: "shift.reassigned",
+    shift_id: shiftId,
+    ...(ctx?.customer_id ? { customer_id: ctx.customer_id } : {}),
+    message: `Reassigned ${ctx?.customer_name || "shift"}`,
+    meta: {
+      original_rep_id: ctx?.original_rep_id ?? null,
+      new_rep_id: newRepId,
+      reason: ctx?.attention_reason ?? null,
+    },
+  });
+  notifySaved("shift");
+  return { ok: true };
+}
+
+/** Release a flagged shift to the claimable pool (rep_id = null). */
+export async function releaseShift(
+  shiftId: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const resolverId = await getResolverId();
+  const ctx = await readAttentionContext(shiftId);
+  const { error } = await supabase
+    .from("shifts")
+    .update({
+      rep_id: null,
+      attention: null,
+      attention_reason: null,
+      attention_note: null,
+      attention_raised_at: null,
+      attention_resolved_at: new Date().toISOString(),
+      attention_resolved_by: resolverId,
+    })
+    .eq("id", shiftId);
+  if (error) {
+    notifySaveError(error.message, "shift");
+    return { ok: false, error: error.message };
+  }
+  await logEvent({
+    event_type: "shift.released",
+    shift_id: shiftId,
+    ...(ctx?.customer_id ? { customer_id: ctx.customer_id } : {}),
+    message: `Released ${ctx?.customer_name || "shift"} to the claimable pool`,
+    meta: {
+      original_rep_id: ctx?.original_rep_id ?? null,
+      reason: ctx?.attention_reason ?? null,
+    },
+  });
+  notifySaved("shift");
+  return { ok: true };
+}
+
+/**
+ * Acknowledge — clears the overlay without changing rep_id or state.
+ * Used when the manager resolved the issue out-of-band (called the
+ * rep, etc) and just wants the queue clean.
+ */
+export async function acknowledgeAttention(
+  shiftId: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const resolverId = await getResolverId();
+  const ctx = await readAttentionContext(shiftId);
+  const { error } = await supabase
+    .from("shifts")
+    .update({
+      attention: null,
+      attention_reason: null,
+      attention_note: null,
+      attention_raised_at: null,
+      attention_resolved_at: new Date().toISOString(),
+      attention_resolved_by: resolverId,
+    })
+    .eq("id", shiftId);
+  if (error) {
+    notifySaveError(error.message, "shift");
+    return { ok: false, error: error.message };
+  }
+  await logEvent({
+    event_type: "shift.acknowledged",
+    shift_id: shiftId,
+    ...(ctx?.customer_id ? { customer_id: ctx.customer_id } : {}),
+    message: `Acknowledged unable-to-attend on ${ctx?.customer_name || "shift"}`,
+    meta: { reason: ctx?.attention_reason ?? null },
+  });
+  notifySaved("shift");
+  return { ok: true };
+}
+
+/** Cancel the shift outright. Sets state='cancelled', clears overlay. */
+export async function cancelShiftFromAttention(
+  shiftId: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const resolverId = await getResolverId();
+  const ctx = await readAttentionContext(shiftId);
+  const { error } = await supabase
+    .from("shifts")
+    .update({
+      state: "cancelled",
+      attention: null,
+      attention_reason: null,
+      attention_note: null,
+      attention_raised_at: null,
+      attention_resolved_at: new Date().toISOString(),
+      attention_resolved_by: resolverId,
+    })
+    .eq("id", shiftId);
+  if (error) {
+    notifySaveError(error.message, "shift");
+    return { ok: false, error: error.message };
+  }
+  await logEvent({
+    event_type: "shift.cancelled",
+    shift_id: shiftId,
+    ...(ctx?.customer_id ? { customer_id: ctx.customer_id } : {}),
+    message: `Cancelled ${ctx?.customer_name || "shift"}`,
+    meta: {
+      original_rep_id: ctx?.original_rep_id ?? null,
+      reason: ctx?.attention_reason ?? null,
+    },
+  });
+  notifySaved("shift");
+  return { ok: true };
+}
+
 let _shiftsChannelCounter = 0;
 
 export function subscribeShifts(onChange: () => void): () => void {
