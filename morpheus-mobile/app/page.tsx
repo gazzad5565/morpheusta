@@ -1224,7 +1224,7 @@ function WelcomeStrip({
         // island) since the strip now sits at the very top of the
         // page — the black AppHeader band used to handle this.
         margin: "max(env(safe-area-inset-top, 0px), 12px) 14px 4px",
-        padding: "12px 14px 14px",
+        padding: "10px 14px 12px",
         borderRadius: 18,
         background: `linear-gradient(135deg, ${MC.brand} 0%, ${MC.brandDeep} 60%, #073B47 110%)`,
         color: "#fff",
@@ -1243,7 +1243,12 @@ function WelcomeStrip({
           pointerEvents: "none",
         }}
       />
-      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 12 }}>
+      {/* alignItems:flex-start so when the greeting wraps to two lines,
+          the menu button sits next to the FIRST line rather than
+          floating in the vertical centre of the whole text block. Cuts
+          the empty space below the menu that managers noticed when the
+          rep had a long name. */}
+      <div style={{ position: "relative", display: "flex", alignItems: "flex-start", gap: 12 }}>
         <div
           style={{
             width: 38,
@@ -1271,6 +1276,11 @@ function WelcomeStrip({
           )}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
+          {/* Top small-caps line carries org · date · last-sync all
+              on one row. lastSync used to live in its own row below
+              the card and was the main source of wasted vertical
+              space; folding it here keeps every piece of metadata
+              the rep cares about visible without growing the card. */}
           <div
             style={{
               fontFamily: MC.font,
@@ -1279,9 +1289,20 @@ function WelcomeStrip({
               letterSpacing: 1.2,
               textTransform: "uppercase",
               color: "rgba(255,255,255,.75)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
           >
             {orgName || "Morpheus"} · {todayHeader}
+            {lastSync ? (
+              <>
+                {" · "}
+                <span style={{ color: "rgba(255,255,255,.55)" }}>
+                  Sync {lastSync}
+                </span>
+              </>
+            ) : null}
           </div>
           <div
             style={{
@@ -1332,22 +1353,10 @@ function WelcomeStrip({
           <Glyph name="menu" size={20} color="#fff" strokeWidth={2.2} />
         </button>
       </div>
-      {lastSync && (
-        <div
-          style={{
-            position: "relative",
-            marginTop: 8,
-            fontFamily: MC.font,
-            fontSize: 10,
-            color: "rgba(255,255,255,.55)",
-            letterSpacing: 0.4,
-            textTransform: "uppercase",
-            textAlign: "right",
-          }}
-        >
-          Last sync · {lastSync}
-        </div>
-      )}
+      {/* The "Last sync · …" line that used to live in its own row
+          here has been folded into the small-caps line above next to
+          the org name + date, eliminating the empty band of card
+          background that was sitting under the greeting. */}
     </div>
   );
 }
