@@ -18,7 +18,7 @@
  * Running / complete shifts are never touched (audit integrity).
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
@@ -559,12 +559,19 @@ export default function ManageShiftsPage() {
   );
 }
 
+// Column template shared between SeriesHeader and SeriesRow so the
+// header always lines up with the rows below it. The action column
+// is sized to fit [View] [Edit future] [⋮] on a single line without
+// wrapping — old design crammed in two extra destructive buttons that
+// fell to a second row and made the page look broken.
+const SERIES_GRID = "1.4fr 1.2fr 1.4fr 90px 90px 200px";
+
 function SeriesHeader() {
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1.4fr 1.2fr 1.4fr 90px 90px 220px",
+        gridTemplateColumns: SERIES_GRID,
         gap: 14,
         padding: "10px 16px",
         background: AC.bg,
@@ -582,7 +589,7 @@ function SeriesHeader() {
       <div>Date range</div>
       <div>Time</div>
       <div>Shifts</div>
-      <div></div>
+      <div style={{ textAlign: "right" }}>Actions</div>
     </div>
   );
 }
@@ -625,7 +632,7 @@ function SeriesRow({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1.4fr 1.2fr 1.4fr 90px 90px 220px",
+        gridTemplateColumns: SERIES_GRID,
         gap: 14,
         alignItems: "center",
         padding: "12px 16px",
@@ -672,12 +679,19 @@ function SeriesRow({
           {series.pastCount > 0 ? ` · ${series.pastCount} past` : ""}
         </div>
       </div>
-      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+      {/* Three primary affordances — View (navigate), Edit future
+          (the most common edit), and a ⋮ overflow holding the two
+          destructive Cancel actions. Eliminates the old layout's
+          two bare red buttons (with a confusingly-labelled "All")
+          competing for attention on every row. */}
+      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
         <Link
           href={`/schedule?seriesStart=${series.firstDate}`}
           style={{ textDecoration: "none" }}
         >
-          <Btn size="sm">View</Btn>
+          <Btn size="sm" icon="eye" title="Open this series on the calendar">
+            View
+          </Btn>
         </Link>
         <Btn
           size="sm"
@@ -693,30 +707,194 @@ function SeriesRow({
         >
           Edit future
         </Btn>
-        <Btn
-          size="sm"
-          kind="danger"
-          onClick={onCancelFuture}
-          disabled={futureBusy || allBusy || noFuture}
-          title={
-            noFuture
-              ? "No upcoming shifts to cancel"
-              : "Cancel scheduled shifts from today forward"
-          }
-        >
-          {futureBusy ? "…" : "Cancel future"}
-        </Btn>
-        <Btn
-          size="sm"
-          kind="danger"
-          onClick={onCancelAll}
-          disabled={futureBusy || allBusy}
-          title="Cancel every scheduled shift in the series"
-        >
-          {allBusy ? "…" : "All"}
-        </Btn>
+        <RowActionMenu
+          busy={futureBusy || allBusy}
+          futureBusy={futureBusy}
+          allBusy={allBusy}
+          upcomingCount={series.upcomingCount}
+          totalCount={series.shiftCount}
+          onCancelFuture={onCancelFuture}
+          onCancelAll={onCancelAll}
+        />
       </div>
     </div>
+  );
+}
+
+/**
+ * Compact overflow menu for the destructive series actions. Sits
+ * behind a ⋮ button so the row stays calm-by-default; opens a small
+ * popover with the two cancel options spelled out in full ("Cancel
+ * upcoming N shifts" / "Cancel entire series — N shifts"). No more
+ * one-word "All" button that left managers guessing what it would
+ * actually do.
+ *
+ * Closes on: outside click, escape, or after a menu item runs.
+ */
+function RowActionMenu({
+  busy,
+  futureBusy,
+  allBusy,
+  upcomingCount,
+  totalCount,
+  onCancelFuture,
+  onCancelAll,
+}: {
+  busy: boolean;
+  futureBusy: boolean;
+  allBusy: boolean;
+  upcomingCount: number;
+  totalCount: number;
+  onCancelFuture: () => void;
+  onCancelAll: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const noFuture = upcomingCount === 0;
+  const noShifts = totalCount === 0;
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <Btn
+        size="sm"
+        icon="more"
+        aria-label="More actions"
+        title="More actions"
+        onClick={() => setOpen((o) => !o)}
+        disabled={busy}
+        style={{ padding: "5px 8px" }}
+      >
+        {busy ? "…" : ""}
+      </Btn>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            minWidth: 240,
+            background: "#fff",
+            border: `1px solid ${AC.line}`,
+            borderRadius: 10,
+            boxShadow: "0 16px 40px rgba(10,15,30,.16)",
+            zIndex: 30,
+            padding: 4,
+            fontFamily: AC.font,
+          }}
+        >
+          <MenuItem
+            danger
+            disabled={noFuture || futureBusy || allBusy}
+            onClick={() => {
+              setOpen(false);
+              onCancelFuture();
+            }}
+            label={
+              futureBusy
+                ? "Cancelling upcoming shifts…"
+                : noFuture
+                ? "No upcoming shifts to cancel"
+                : `Cancel upcoming ${upcomingCount} shift${upcomingCount === 1 ? "" : "s"}`
+            }
+            sublabel="From today onward · running and complete shifts kept"
+          />
+          <div style={{ height: 1, background: AC.lineDim, margin: "4px 6px" }} />
+          <MenuItem
+            danger
+            disabled={noShifts || futureBusy || allBusy}
+            onClick={() => {
+              setOpen(false);
+              onCancelAll();
+            }}
+            label={
+              allBusy
+                ? "Cancelling entire series…"
+                : `Cancel entire series · ${totalCount} shift${totalCount === 1 ? "" : "s"}`
+            }
+            sublabel="Only state='scheduled' rows are deleted · audit trail kept"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({
+  label,
+  sublabel,
+  danger,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  sublabel?: string;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      style={{
+        width: "100%",
+        textAlign: "left",
+        background: "transparent",
+        border: "none",
+        padding: "8px 10px",
+        borderRadius: 6,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+        color: danger ? AC.danger : AC.ink,
+        fontFamily: AC.font,
+        display: "block",
+      }}
+      onMouseEnter={(e) => {
+        if (!disabled) e.currentTarget.style.background = AC.bg;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: -0.1 }}>
+        {label}
+      </div>
+      {sublabel && (
+        <div
+          style={{
+            fontSize: 11.5,
+            color: AC.mute,
+            marginTop: 2,
+            fontWeight: 400,
+            lineHeight: 1.4,
+          }}
+        >
+          {sublabel}
+        </div>
+      )}
+    </button>
   );
 }
 
