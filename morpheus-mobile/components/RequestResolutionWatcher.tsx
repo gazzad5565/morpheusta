@@ -166,36 +166,64 @@ export function RequestResolutionWatcher() {
           // eslint-disable-next-line no-console
           console.warn("[resolution-watcher] cold-start query:", error.message);
         } else if (events) {
-          const newBanners: ResolutionBanner[] = [];
+          // Two-pass over the event list so we can:
+          //   1. Mark EVERY unseen event seen — including ones we
+          //      decide not to banner — so they don't re-trigger
+          //      next cold start.
+          //   2. Then dedupe by customer (keep only the most-recent
+          //      resolution per customer) AND hard-cap the banner
+          //      queue.
+          //
+          // Why: a rep who keeps re-requesting the same customer
+          // (request → declined → request again → declined again)
+          // will have many resolution events on that customer in
+          // the 14-day window. The previous version banner-ed all
+          // 8+ of them on cold start, which managers reported as
+          // a "request approved / declined" wall blocking the home
+          // page (see screenshot 2026-05-11). Cap at 3 banners
+          // total, most-recent-first, one per customer.
+          const COLD_START_BANNER_CAP = 3;
+          const unseenEvents: typeof events = [];
           for (const e of events) {
             if (!e.id || seenRef.current[e.id]) continue;
-            // Mark seen whether we banner or not — we don't want to
-            // banner the same resolution twice across reloads.
             seenRef.current[e.id] = Date.now();
-            if (isFirstEver) continue;
-            const customerId = (e.customer_id as string | null) ?? "";
-            const customerName =
-              customerNameById.get(customerId) ||
-              (e.message as string | null) ||
-              "Your request";
-            const kind: "approved" | "declined" =
-              e.event_type === "request.declined" ? "declined" : "approved";
-            newBanners.push({
-              id: e.id as string,
-              kind,
-              customerName,
-              message:
-                kind === "approved"
-                  ? `Your request was approved — ${customerName} is on your shifts.`
-                  : `Your request for ${customerName} was declined.`,
-              ts: Date.now(),
-            });
+            unseenEvents.push(e);
           }
           writeSeen(seenRef.current);
-          if (newBanners.length > 0) {
-            // Reverse so oldest-resolved appears first in the stack.
-            newBanners.reverse();
-            setBanners((prev) => [...prev, ...newBanners]);
+
+          if (!isFirstEver) {
+            const seenCustomers = new Set<string>();
+            const newBanners: ResolutionBanner[] = [];
+            // Events came back newest-first; iterating in that
+            // order means we keep the most recent resolution per
+            // customer.
+            for (const e of unseenEvents) {
+              if (newBanners.length >= COLD_START_BANNER_CAP) break;
+              const customerId = (e.customer_id as string | null) ?? "";
+              if (customerId && seenCustomers.has(customerId)) continue;
+              if (customerId) seenCustomers.add(customerId);
+              const customerName =
+                customerNameById.get(customerId) ||
+                (e.message as string | null) ||
+                "Your request";
+              const kind: "approved" | "declined" =
+                e.event_type === "request.declined" ? "declined" : "approved";
+              newBanners.push({
+                id: e.id as string,
+                kind,
+                customerName,
+                message:
+                  kind === "approved"
+                    ? `Your request was approved — ${customerName} is on your shifts.`
+                    : `Your request for ${customerName} was declined.`,
+                ts: Date.now(),
+              });
+            }
+            if (newBanners.length > 0) {
+              // Reverse so oldest-resolved appears first in the stack.
+              newBanners.reverse();
+              setBanners((prev) => [...prev, ...newBanners]);
+            }
           }
         }
         if (isFirstEver && typeof window !== "undefined") {
