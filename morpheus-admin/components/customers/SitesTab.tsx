@@ -799,7 +799,11 @@ function SiteEditor({
               Cancel
             </Btn>
             <Btn size="sm" kind="primary" icon="check" onClick={onSave} disabled={busy}>
-              {busy ? "Saving…" : mode === "create" ? "Add site" : "Save"}
+              {busy
+                ? "Saving…"
+                : mode === "create"
+                ? "Create site"
+                : "Save changes"}
             </Btn>
           </div>
         </div>

@@ -19,7 +19,7 @@ import { Combobox } from "@/components/ui/Combobox";
 import { inputStyle } from "@/components/ui/Filters";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
-import { getCustomer, updateCustomer } from "@/lib/customers-store";
+import { getCustomer, updateCustomer, deleteCustomer } from "@/lib/customers-store";
 import type { Customer } from "@/lib/types";
 
 const SWATCHES = [
@@ -176,6 +176,27 @@ export default function EditCustomerPage() {
       return;
     }
     router.push(`/customers/${id}`);
+  }
+
+  async function onDelete() {
+    if (busy) return;
+    const label = original?.name || "this customer";
+    if (
+      !confirm(
+        `Delete ${label}? This removes the customer along with all their sites, tasks, and library files. Past shifts stay for the audit trail. There's no undo.`
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const result = await deleteCustomer(id);
+    setBusy(false);
+    if (!result.ok) {
+      setError(result.error || "Couldn't delete.");
+      return;
+    }
+    router.push("/customers");
   }
 
   if (loading) {
@@ -393,11 +414,30 @@ export default function EditCustomerPage() {
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Btn onClick={() => router.push(`/customers/${id}`)}>Cancel</Btn>
-            <Btn kind="primary" icon="check" onClick={onSave} disabled={busy}>
-              {busy ? "Saving…" : "Save changes"}
+          {/* Button row mirrors every other entity edit form in the
+              admin (task, library, shift, user): Delete pinned left,
+              Cancel + Save on the right. Managers asked for the same
+              layout everywhere so muscle memory transfers between
+              entity types. */}
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <Btn kind="danger" onClick={onDelete} disabled={busy}>
+              Delete customer
             </Btn>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn onClick={() => router.push(`/customers/${id}`)} disabled={busy}>
+                Cancel
+              </Btn>
+              <Btn kind="primary" icon="check" onClick={onSave} disabled={busy}>
+                {busy ? "Saving…" : "Save changes"}
+              </Btn>
+            </div>
           </div>
         </Card>
 

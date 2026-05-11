@@ -269,9 +269,11 @@ export default function NewCustomerPage() {
           )}
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Btn onClick={() => router.push("/customers")}>Cancel</Btn>
-            <Btn kind="primary" icon="check" onClick={onSubmit}>
-              {busy ? "Saving…" : "Add customer"}
+            <Btn onClick={() => router.push("/customers")} disabled={busy}>
+              Cancel
+            </Btn>
+            <Btn kind="primary" icon="check" onClick={onSubmit} disabled={busy}>
+              {busy ? "Creating…" : "Create customer"}
             </Btn>
           </div>
         </Card>
