@@ -276,273 +276,319 @@ export default function EditCustomerPage() {
           alignItems: "start",
         }}
       >
-        <Card padding={20}>
-          <SectionTitle>Edit customer</SectionTitle>
+        {/* Left column — stacked Cards, one per concern area.
+            Earlier this page was a single giant Card with twelve
+            fields jammed into it; the per-customer exception
+            overrides (which are conceptually layered on top of the
+            org defaults at /settings/check-in-rules) read as just
+            another row on the customer record. Now each concern has
+            its own labelled Card so managers can scan the page and
+            know where they are:
+              1. Identity      — name / code / initials / colour / logo
+              2. Location      — region / address / geofence
+              3. Check-in exceptions — per-customer overrides, with a
+                                 one-line explainer that they're
+                                 overrides on top of the org-wide
+                                 rules (not standalone settings).
+              4. Action row    — Delete / Cancel / Save (outside any
+                                 card so it doesn't look like a field). */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* ───── 1. Identity ───────────────────────────────────── */}
+          <Card padding={20}>
+            <SectionTitle>Identity</SectionTitle>
 
-          <Field label="Name" required>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              style={inputStyle}
-              autoFocus
-            />
-          </Field>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Field label="Code">
-              <input value={code} onChange={(e) => setCode(e.target.value)} style={inputStyle} />
-            </Field>
-            <Field label="Initials" hint="Shown on the avatar tile.">
+            <Field label="Name" required>
               <input
-                value={initials}
-                onChange={(e) => {
-                  setInitialsTouched(true);
-                  setInitials(e.target.value.toUpperCase().slice(0, 3));
-                }}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 style={inputStyle}
-                maxLength={3}
+                autoFocus
               />
             </Field>
-          </div>
 
-          <Field label="Avatar colour">
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {SWATCHES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setColor(s)}
-                  aria-label={s}
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 8,
-                    background: s,
-                    cursor: "pointer",
-                    border:
-                      color === s
-                        ? `3px solid ${AC.ink}`
-                        : "1px solid rgba(0,0,0,.08)",
-                    padding: 0,
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <Field label="Code">
+                <input value={code} onChange={(e) => setCode(e.target.value)} style={inputStyle} />
+              </Field>
+              <Field label="Initials" hint="Shown on the avatar tile.">
+                <input
+                  value={initials}
+                  onChange={(e) => {
+                    setInitialsTouched(true);
+                    setInitials(e.target.value.toUpperCase().slice(0, 3));
                   }}
+                  style={inputStyle}
+                  maxLength={3}
                 />
-              ))}
+              </Field>
             </div>
-          </Field>
 
-          {/* Logo upload — overrides the initials tile in the rep app.
-              Saves immediately on pick (separate from the form Save
-              button) because file uploads are their own commit-step
-              UX: managers want to see the new logo land before
-              fiddling with the rest of the form. We compress to a
-              tiny base64 JPEG so it travels in the same row as the
-              customer — no Supabase Storage round-trip per render. */}
-          <Field
-            label="Customer logo"
-            hint={
-              logoUrl
-                ? "Replaces the initials tile in the rep app. Compressed automatically to keep mobile data tight."
-                : "Optional. Upload an image to show in place of the initials tile on the rep's device."
-            }
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
+            <Field label="Avatar colour">
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {SWATCHES.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setColor(s)}
+                    aria-label={s}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 8,
+                      background: s,
+                      cursor: "pointer",
+                      border:
+                        color === s
+                          ? `3px solid ${AC.ink}`
+                          : "1px solid rgba(0,0,0,.08)",
+                      padding: 0,
+                    }}
+                  />
+                ))}
+              </div>
+            </Field>
+
+            {/* Logo upload — overrides the initials tile in the rep app.
+                Saves immediately on pick (separate from the form Save
+                button) because file uploads are their own commit-step
+                UX: managers want to see the new logo land before
+                fiddling with the rest of the form. We compress to a
+                tiny base64 JPEG so it travels in the same row as the
+                customer — no Supabase Storage round-trip per render. */}
+            <Field
+              label="Customer logo"
+              hint={
+                logoUrl
+                  ? "Replaces the initials tile in the rep app. Compressed automatically to keep mobile data tight."
+                  : "Optional. Upload an image to show in place of the initials tile on the rep's device."
+              }
             >
               <div
                 style={{
-                  width: 64,
-                  height: 64,
-                  borderRadius: 12,
-                  background: logoUrl ? "#fff" : color,
-                  border: `1px solid ${AC.line}`,
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  color: "#fff",
-                  fontFamily: AC.font,
-                  fontWeight: 700,
-                  fontSize: 20,
-                  letterSpacing: 0.4,
-                  flexShrink: 0,
-                  overflow: "hidden",
+                  gap: 12,
+                  flexWrap: "wrap",
                 }}
               >
-                {logoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={logoUrl}
-                    alt="Customer logo"
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "contain",
-                      display: "block",
-                      background: "#fff",
-                    }}
-                  />
-                ) : (
-                  <span>{(initials || deriveInitials(name) || "??").slice(0, 3)}</span>
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Btn
-                  onClick={() => logoInputRef.current?.click()}
-                  disabled={logoUploading}
-                >
-                  {logoUploading
-                    ? "Uploading…"
-                    : logoUrl
-                    ? "Replace logo"
-                    : "Upload logo"}
-                </Btn>
-                {logoUrl && (
-                  <Btn
-                    kind="danger"
-                    onClick={onRemoveLogo}
-                    disabled={logoUploading}
-                  >
-                    Remove
-                  </Btn>
-                )}
-              </div>
-              <input
-                ref={logoInputRef}
-                type="file"
-                accept="image/*"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] || null;
-                  // Reset so re-picking the same file fires onChange.
-                  e.target.value = "";
-                  void onPickLogo(file);
-                }}
-                style={{ display: "none" }}
-              />
-            </div>
-            {logoError && (
-              <div
-                style={{
-                  marginTop: 8,
-                  fontSize: 12,
-                  color: "#9c1a3c",
-                  fontFamily: AC.font,
-                }}
-              >
-                {logoError}
-              </div>
-            )}
-          </Field>
-
-          <Field label="Region">
-            <Combobox
-              value={region}
-              onChange={(v) => setRegion((v ?? REGIONS[0]) as Customer["region"])}
-              triggerIcon="pin"
-              clearable={false}
-              options={REGIONS.map((r) => ({ value: r as string, label: r as string }))}
-            />
-          </Field>
-
-          <Field
-            label="Address"
-            hint={
-              pickedCoords
-                ? `New coordinates: ${pickedCoords.lat.toFixed(5)}, ${pickedCoords.lng.toFixed(5)}`
-                : coords
-                ? `Current: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
-                : "Start typing — pick a match to lock coordinates."
-            }
-          >
-            <AddressAutocomplete
-              value={address}
-              onChange={(v) => {
-                setAddress(v);
-                if (pickedCoords) setPickedCoords(null);
-              }}
-              onSelect={(s) => {
-                setPickedCoords({ lat: s.latitude, lng: s.longitude });
-              }}
-              placeholder="e.g. 1480 Riverside Way, Cape Town"
-            />
-          </Field>
-
-          <Field
-            label={`Geofence radius · ${geofenceM} m`}
-            hint="Reps must be inside this radius to check in without an off-site exception."
-          >
-            <input
-              type="range"
-              min={25}
-              max={500}
-              step={5}
-              value={geofenceM}
-              onChange={(e) => setGeofenceM(parseInt(e.target.value, 10))}
-              style={{ width: "100%" }}
-            />
-            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-              {[50, 75, 100, 150, 250].map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setGeofenceM(m)}
+                <div
                   style={{
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    border: `1px solid ${geofenceM === m ? AC.ink : AC.line}`,
-                    background: geofenceM === m ? AC.ink : "#fff",
-                    color: geofenceM === m ? "#fff" : AC.ink2,
+                    width: 64,
+                    height: 64,
+                    borderRadius: 12,
+                    background: logoUrl ? "#fff" : color,
+                    border: `1px solid ${AC.line}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#fff",
                     fontFamily: AC.font,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: "pointer",
+                    fontWeight: 700,
+                    fontSize: 20,
+                    letterSpacing: 0.4,
+                    flexShrink: 0,
+                    overflow: "hidden",
                   }}
                 >
-                  {m} m
-                </button>
-              ))}
+                  {logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={logoUrl}
+                      alt="Customer logo"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "contain",
+                        display: "block",
+                        background: "#fff",
+                      }}
+                    />
+                  ) : (
+                    <span>{(initials || deriveInitials(name) || "??").slice(0, 3)}</span>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Btn
+                    onClick={() => logoInputRef.current?.click()}
+                    disabled={logoUploading}
+                  >
+                    {logoUploading
+                      ? "Uploading…"
+                      : logoUrl
+                      ? "Replace logo"
+                      : "Upload logo"}
+                  </Btn>
+                  {logoUrl && (
+                    <Btn
+                      kind="danger"
+                      onClick={onRemoveLogo}
+                      disabled={logoUploading}
+                    >
+                      Remove
+                    </Btn>
+                  )}
+                </div>
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    // Reset so re-picking the same file fires onChange.
+                    e.target.value = "";
+                    void onPickLogo(file);
+                  }}
+                  style={{ display: "none" }}
+                />
+              </div>
+              {logoError && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: "#9c1a3c",
+                    fontFamily: AC.font,
+                  }}
+                >
+                  {logoError}
+                </div>
+              )}
+            </Field>
+          </Card>
+
+          {/* ───── 2. Location ───────────────────────────────────── */}
+          <Card padding={20}>
+            <SectionTitle>Location</SectionTitle>
+
+            <Field label="Region">
+              <Combobox
+                value={region}
+                onChange={(v) => setRegion((v ?? REGIONS[0]) as Customer["region"])}
+                triggerIcon="pin"
+                clearable={false}
+                options={REGIONS.map((r) => ({ value: r as string, label: r as string }))}
+              />
+            </Field>
+
+            <Field
+              label="Address"
+              hint={
+                pickedCoords
+                  ? `New coordinates: ${pickedCoords.lat.toFixed(5)}, ${pickedCoords.lng.toFixed(5)}`
+                  : coords
+                  ? `Current: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
+                  : "Start typing — pick a match to lock coordinates."
+              }
+            >
+              <AddressAutocomplete
+                value={address}
+                onChange={(v) => {
+                  setAddress(v);
+                  if (pickedCoords) setPickedCoords(null);
+                }}
+                onSelect={(s) => {
+                  setPickedCoords({ lat: s.latitude, lng: s.longitude });
+                }}
+                placeholder="e.g. 1480 Riverside Way, Cape Town"
+              />
+            </Field>
+
+            <Field
+              label={`Geofence radius · ${geofenceM} m`}
+              hint="Reps must be inside this radius to check in without an off-site exception."
+            >
+              <input
+                type="range"
+                min={25}
+                max={500}
+                step={5}
+                value={geofenceM}
+                onChange={(e) => setGeofenceM(parseInt(e.target.value, 10))}
+                style={{ width: "100%" }}
+              />
+              <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                {[50, 75, 100, 150, 250].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setGeofenceM(m)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: 999,
+                      border: `1px solid ${geofenceM === m ? AC.ink : AC.line}`,
+                      background: geofenceM === m ? AC.ink : "#fff",
+                      color: geofenceM === m ? "#fff" : AC.ink2,
+                      fontFamily: AC.font,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {m} m
+                  </button>
+                ))}
+              </div>
+            </Field>
+          </Card>
+
+          {/* ───── 3. Check-in exceptions ────────────────────────── */}
+          {/* Conceptually separate from the rest of the form: these
+              are per-customer OVERRIDES on top of the org-wide
+              defaults at Settings → Check-in rules. Inherit (the
+              default) means "use whatever the org says". On / Off
+              force the behaviour for this customer only. The
+              explainer paragraph below the section title makes that
+              hierarchy explicit so a manager scanning the page
+              doesn't think these are standalone toggles. */}
+          <Card padding={20}>
+            <SectionTitle>Check-in exceptions</SectionTitle>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 12.5,
+                color: AC.mute,
+                lineHeight: 1.5,
+                marginBottom: 14,
+                marginTop: -4,
+              }}
+            >
+              Override your org-wide defaults for this customer only. Leave
+              both on <b style={{ color: AC.ink2 }}>Inherit</b> to use the
+              settings from{" "}
+              <b style={{ color: AC.ink2 }}>Settings → Check-in rules</b>.
             </div>
-          </Field>
 
-          {/* Per-customer exception overrides — tri-state. "Inherit"
-              is the default and uses whatever the org's
-              /settings/check-in-rules toggle says; On / Off override
-              for this customer specifically. Sits below the geofence
-              slider because the location override controls whether
-              the geofence is even consulted at check-in time. */}
-          <Field
-            label="Off-site exceptions for this customer"
-            hint="Override the org-wide setting. Inherit uses whatever is set on Settings → Check-in rules."
-          >
-            <ExceptionOverridePicker
-              value={locExceptionsOverride}
-              onChange={setLocExceptionsOverride}
-            />
-          </Field>
+            <Field
+              label="Off-site exceptions"
+              hint="Whether the rep can check in from outside the geofence with a reason."
+            >
+              <ExceptionOverridePicker
+                value={locExceptionsOverride}
+                onChange={setLocExceptionsOverride}
+              />
+            </Field>
 
-          <Field
-            label="Late / early exceptions for this customer"
-            hint="Override the org-wide setting. Inherit uses whatever is set on Settings → Check-in rules."
-          >
-            <ExceptionOverridePicker
-              value={timeExceptionsOverride}
-              onChange={setTimeExceptionsOverride}
-            />
-          </Field>
+            <Field
+              label="Late / early exceptions"
+              hint="Whether the rep can check in outside the shift's scheduled window with a reason."
+            >
+              <ExceptionOverridePicker
+                value={timeExceptionsOverride}
+                onChange={setTimeExceptionsOverride}
+              />
+            </Field>
+          </Card>
 
+          {/* ───── 4. Status messages + action row ───────────────── */}
           {note && (
             <div
               style={{
                 padding: "10px 12px",
-                background: AC.bg,
+                background: AC.card,
                 color: AC.ink2,
-                borderRadius: 10,
+                borderRadius: AC.radiusCard,
                 fontSize: 13,
                 fontWeight: 500,
-                marginBottom: 12,
                 border: `1px solid ${AC.line}`,
               }}
             >
@@ -555,13 +601,13 @@ export default function EditCustomerPage() {
                 padding: "10px 12px",
                 background: AC.dangerTint,
                 color: "#9c1a3c",
-                borderRadius: 10,
+                borderRadius: AC.radiusCard,
                 fontSize: 13,
                 fontWeight: 500,
                 display: "flex",
                 gap: 8,
                 alignItems: "flex-start",
-                marginBottom: 12,
+                border: `1px solid ${AC.danger}33`,
               }}
             >
               <AGlyph name="warn" size={14} color="#9c1a3c" />
@@ -569,17 +615,19 @@ export default function EditCustomerPage() {
             </div>
           )}
 
-          {/* Button row mirrors every other entity edit form in the
+          {/* Action row mirrors every other entity edit form in the
               admin (task, library, shift, user): Delete pinned left,
               Cancel + Save on the right. Managers asked for the same
               layout everywhere so muscle memory transfers between
-              entity types. */}
+              entity types. Sits OUTSIDE the cards so it reads as a
+              page-level commit, not a field on the last section. */}
           <div
             style={{
               display: "flex",
               gap: 8,
               justifyContent: "space-between",
               alignItems: "center",
+              paddingTop: 4,
             }}
           >
             <Btn kind="danger" onClick={onDelete} disabled={busy}>
@@ -594,7 +642,7 @@ export default function EditCustomerPage() {
               </Btn>
             </div>
           </div>
-        </Card>
+        </div>
 
         {/* Live preview — mirrors the header card on the detail page. */}
         <Card padding={18}>
