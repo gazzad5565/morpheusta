@@ -36,6 +36,7 @@ interface ShiftRow {
   attention_note: string | null;
   attention_raised_at: string | null;
   attention_resolved_at: string | null;
+  attention_resolution: string | null;
   customers: {
     id: string;
     name: string;
@@ -110,6 +111,11 @@ export interface ShiftAttentionFields {
   attentionNote: string | null;
   attentionRaisedAt: string | null;
   attentionResolvedAt: string | null;
+  /** What the manager (or rep, via withdraw) did to resolve the
+   *  flag. One of 'reassigned' | 'released' | 'acknowledged' |
+   *  'cancelled' | 'withdrawn'. Drives the brief feedback pill that
+   *  shows on the rep's row for a few hours after resolution. */
+  attentionResolution: string | null;
 }
 
 export type ShiftWithMeta = Shift &
@@ -163,6 +169,7 @@ function rowToShift(row: ShiftRow): ShiftWithMeta {
     attentionNote: row.attention_note ?? null,
     attentionRaisedAt: row.attention_raised_at ?? null,
     attentionResolvedAt: row.attention_resolved_at ?? null,
+    attentionResolution: row.attention_resolution ?? null,
   };
 }
 
@@ -666,6 +673,64 @@ export async function setShiftTravellingState(
  * Wrapped in try/catch so a misbehaving realtime client (publication
  * not configured, websocket can't open) can never crash the page.
  */
+/**
+ * Decide whether to surface a "your manager did X" pill on a row for
+ * a recently-resolved attention flag. We only show this when the
+ * outcome leaves the rep still seeing the shift in their list —
+ * which is essentially the acknowledged case (rep still owns it) or
+ * the withdrawn case (rep changed their own mind). Reassigned /
+ * released / cancelled all remove the row from the rep's view
+ * anyway, so they never reach this code path.
+ *
+ * The pill auto-expires four hours after resolution to keep the row
+ * from looking weird the next day. After that the row is just a
+ * normal scheduled shift.
+ */
+const RESOLVED_FEEDBACK_WINDOW_MS = 4 * 60 * 60 * 1000;
+
+export type ResolvedFeedback = {
+  tone: "ok" | "info";
+  label: string;
+  detail: string;
+};
+
+export function resolvedAttentionFeedback(shift: {
+  attentionResolvedAt?: string | null;
+  attentionResolution?: string | null;
+  /** Mobile sometimes uses `attention_resolved_at` (db naming). Accept both. */
+  attention_resolved_at?: string | null;
+  attention_resolution?: string | null;
+}): ResolvedFeedback | null {
+  const resolvedAtIso =
+    shift.attentionResolvedAt ?? shift.attention_resolved_at ?? null;
+  const resolution = shift.attentionResolution ?? shift.attention_resolution ?? null;
+  if (!resolvedAtIso || !resolution) return null;
+  const age = Date.now() - new Date(resolvedAtIso).getTime();
+  if (!Number.isFinite(age) || age < 0 || age > RESOLVED_FEEDBACK_WINDOW_MS) {
+    return null;
+  }
+  switch (resolution) {
+    case "acknowledged":
+      return {
+        tone: "ok",
+        label: "Manager confirmed",
+        detail: "You're still scheduled on this shift — check in as normal.",
+      };
+    case "withdrawn":
+      return {
+        tone: "info",
+        label: "Flag withdrawn",
+        detail: "You're back on the schedule.",
+      };
+    // 'reassigned' / 'released' / 'cancelled' shouldn't surface here
+    // because the row leaves the rep's view in those cases. If for
+    // some reason a stale row arrives, render nothing rather than a
+    // confusing message.
+    default:
+      return null;
+  }
+}
+
 // ─── Attention: "I can't make this shift" rep flow ─────────────────────
 //
 // The rep can flag a shift they can't attend BEFORE checking in. The
@@ -793,6 +858,11 @@ export async function withdrawUnableToAttend(
     return { ok: false, error: "Already actioned by your manager" };
   }
 
+  // Withdraw clears the flag but doesn't stamp resolved_at — the
+  // "open" state simply ends. The resolution column gets stamped
+  // 'withdrawn' so any UI that wants to render a follow-up status
+  // can do so; we don't set resolved_at because that's reserved for
+  // manager-side actions in the audit trail.
   const { error } = await supabase
     .from("shifts")
     .update({
@@ -800,6 +870,7 @@ export async function withdrawUnableToAttend(
       attention_reason: null,
       attention_note: null,
       attention_raised_at: null,
+      attention_resolution: "withdrawn",
     })
     .eq("id", shiftId)
     .eq("rep_id", userId)

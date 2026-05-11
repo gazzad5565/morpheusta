@@ -18,6 +18,7 @@ import {
   claimShift,
   raiseUnableToAttend,
   withdrawUnableToAttend,
+  resolvedAttentionFeedback,
   subscribeShifts,
   type UnableReason,
 } from "@/lib/shifts-store";
@@ -590,6 +591,7 @@ function ShiftRow({
     attention?: string | null;
     attentionReason?: string | null;
     attentionResolvedAt?: string | null;
+    attentionResolution?: string | null;
   };
   /** The shift's lifecycle state (scheduled | in-progress | complete | late). Only meaningful for "Mine". */
   state?: string;
@@ -951,6 +953,63 @@ function ShiftRow({
               )}
             </div>
           )}
+
+          {/* Resolved-recently pill — surfaces what the manager (or
+              rep) actually did to a previously-raised flag. Only
+              renders for outcomes that leave the rep still seeing
+              the row (acknowledged / withdrawn); reassigned /
+              released / cancelled remove the row from the rep's view
+              entirely, so they never get here. Auto-expires four
+              hours after resolution. */}
+          {(() => {
+            const fb = resolvedAttentionFeedback(shift);
+            if (!fb) return null;
+            const isOk = fb.tone === "ok";
+            return (
+              <div
+                style={{
+                  marginBottom: 10,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  background: isOk ? MC.okTint : MC.brandTint,
+                  border: `1px solid ${isOk ? MC.ok + "55" : MC.brand + "55"}`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <Glyph
+                  name="check-circle"
+                  size={16}
+                  color={isOk ? MC.ok : MC.brandDeep}
+                  strokeWidth={2.2}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontFamily: MC.font,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: isOk ? "#0d6a45" : MC.brandInk,
+                      letterSpacing: -0.1,
+                    }}
+                  >
+                    {fb.label}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: MC.font,
+                      fontSize: 11.5,
+                      color: isOk ? "#0d6a45" : MC.brandDeep,
+                      marginTop: 2,
+                    }}
+                  >
+                    {fb.detail}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Site contact strip — phone is tap-to-call, useful when
               the rep is travelling and needs to give an ETA or ask

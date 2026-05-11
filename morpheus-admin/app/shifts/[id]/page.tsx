@@ -31,6 +31,7 @@ import {
   releaseShift,
   acknowledgeAttention,
   cancelShiftFromAttention,
+  listRepConflictsForSlot,
   type ShiftRow,
 } from "@/lib/shifts-store";
 import { listTasksForCustomer, type TaskRow } from "@/lib/tasks-store";
@@ -140,6 +141,34 @@ export default function ShiftDetailPage({
   const [attBusy, setAttBusy] = useState(false);
   const [attPickerOpen, setAttPickerOpen] = useState(false);
   const [attPickedRepId, setAttPickedRepId] = useState<string | null>(null);
+  // Conflict guard for the reassign picker — see LiveFeedPanel for
+  // the matching logic; loaded lazily when the picker opens.
+  const [attConflictRepIds, setAttConflictRepIds] = useState<Set<string>>(
+    new Set()
+  );
+  useEffect(() => {
+    if (!attPickerOpen || !shift) return;
+    let cancelled = false;
+    listRepConflictsForSlot({
+      shiftDate: shift.shift_date,
+      startTime: shift.start_time,
+      endTime: shift.end_time,
+      excludeShiftId: shift.id,
+    }).then((s) => {
+      if (!cancelled) setAttConflictRepIds(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    attPickerOpen,
+    shift?.id,
+    shift?.shift_date,
+    shift?.start_time,
+    shift?.end_time,
+  ]);
+  const attPickedHasConflict =
+    !!attPickedRepId && attConflictRepIds.has(attPickedRepId);
 
   // Reload the shift after a manager action so the banner clears (or
   // navigates away if the shift was cancelled).
@@ -181,6 +210,18 @@ export default function ShiftDetailPage({
 
   const onAttReassign = async () => {
     if (!shift || !attPickedRepId) return;
+    // Double-book guard at submit time — mirrors the Live Ops picker.
+    if (attPickedHasConflict) {
+      const picked = reps.find((r) => r.id === attPickedRepId);
+      const name = picked ? displayName(picked) : "this rep";
+      if (
+        !confirm(
+          `${name} already has a shift in that time slot. Reassign anyway and double-book them?`
+        )
+      ) {
+        return;
+      }
+    }
     setAttBusy(true);
     const r = await reassignShift(shift.id, attPickedRepId);
     setAttBusy(false);
@@ -213,7 +254,7 @@ export default function ShiftDetailPage({
     if (!shift) return;
     if (
       !confirm(
-        `Acknowledge this as resolved without changing assignment? Use this when you've sorted things out with the rep directly.`
+        `Keep this shift with the same rep?\n\nThe rep raised "can't make it" but they'll stay assigned. They'll see a "Manager confirmed — you're still on this shift" message on their phone. Only use this if you've spoken to them and agreed they're still doing it.\n\nIf they're not doing the shift, use Reassign, Release, or Cancel instead.`
       )
     )
       return;
@@ -221,7 +262,7 @@ export default function ShiftDetailPage({
     const r = await acknowledgeAttention(shift.id);
     setAttBusy(false);
     if (!r.ok) {
-      alert(`Couldn't acknowledge: ${r.error}`);
+      alert(`Couldn't keep: ${r.error}`);
       return;
     }
     await reloadShift();
@@ -432,12 +473,37 @@ export default function ShiftDetailPage({
                           clearable={false}
                           options={reps
                             .filter((r) => r.id !== shift.rep_id)
-                            .map((r) => ({
-                              value: r.id,
-                              label: displayName(r),
-                              sublabel: r.email,
-                            }))}
+                            .map((r) => {
+                              const conflict = attConflictRepIds.has(r.id);
+                              return {
+                                value: r.id,
+                                label: displayName(r),
+                                sublabel: conflict
+                                  ? `⚠ Conflict · already booked at this time`
+                                  : r.email,
+                                color: conflict ? AC.danger : undefined,
+                              };
+                            })}
                         />
+                        {attPickedHasConflict && (
+                          <div
+                            style={{
+                              marginTop: 6,
+                              padding: "6px 10px",
+                              background: AC.dangerTint,
+                              color: "#9c1a3c",
+                              borderRadius: 8,
+                              fontFamily: AC.font,
+                              fontSize: 11.5,
+                              fontWeight: 600,
+                              lineHeight: 1.4,
+                            }}
+                          >
+                            This rep already has an overlapping shift. You can
+                            still reassign — you&apos;ll be asked to confirm
+                            a double-book.
+                          </div>
+                        )}
                       </div>
                       <Btn
                         size="sm"
@@ -483,8 +549,9 @@ export default function ShiftDetailPage({
                         icon="check"
                         onClick={onAttAcknowledge}
                         disabled={attBusy}
+                        title="Use only when you've spoken to the rep and they're still doing it. They'll see a confirmation on their phone."
                       >
-                        Acknowledge
+                        Keep · rep stays on
                       </Btn>
                       <Btn
                         size="sm"
@@ -495,6 +562,20 @@ export default function ShiftDetailPage({
                       >
                         Cancel shift
                       </Btn>
+                      {/* Escape hatch — manager wants the full edit
+                          form for date/time/customer/site/etc, not
+                          one of the canned resolutions. Routes to the
+                          shift edit page; whichever change they make
+                          there doesn't auto-resolve the flag, so the
+                          banner persists until they pick a resolution. */}
+                      <Link
+                        href={`/shifts/${shift.id}/edit`}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Btn size="sm" icon="edit" disabled={attBusy}>
+                          Edit shift…
+                        </Btn>
+                      </Link>
                     </div>
                   )}
                 </div>

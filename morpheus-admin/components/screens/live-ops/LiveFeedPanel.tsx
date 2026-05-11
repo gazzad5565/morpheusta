@@ -15,7 +15,8 @@
  * were redundant — they're the same thing. Merged into one.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AC } from "@/lib/tokens";
 import { Card } from "@/components/ui/Card";
@@ -38,6 +39,7 @@ import {
 } from "@/lib/events-store";
 import {
   listOpenAttentionShifts,
+  listRepConflictsForSlot,
   reassignShift,
   releaseShift,
   acknowledgeAttention,
@@ -322,7 +324,7 @@ export function LiveFeedPanel() {
     const customerName = shift.customers?.name || "this shift";
     if (
       !confirm(
-        `Acknowledge ${customerName} as resolved without changing assignment? Use this when you've sorted things out with the rep directly.`
+        `Keep ${customerName} with the same rep?\n\nThey'll stay assigned and see a "Manager confirmed — you're still on this shift" message on their phone. Only use this if you've spoken to them and agreed they're still doing it.\n\nIf they're not doing the shift, use Reassign, Release, or Cancel instead.`
       )
     ) {
       return;
@@ -1085,6 +1087,25 @@ function AttentionRow({
   // Inline rep picker — collapsed by default; "Reassign" toggles it.
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickedRepId, setPickedRepId] = useState<string | null>(null);
+  // Reps already booked into a shift that overlaps this slot —
+  // loaded the moment the picker opens so we can warn the manager
+  // before they double-book someone. Empty until first load.
+  const [conflictRepIds, setConflictRepIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let cancelled = false;
+    listRepConflictsForSlot({
+      shiftDate: shift.shift_date,
+      startTime: shift.start_time,
+      endTime: shift.end_time,
+      excludeShiftId: shift.id,
+    }).then((s) => {
+      if (!cancelled) setConflictRepIds(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pickerOpen, shift.id, shift.shift_date, shift.start_time, shift.end_time]);
 
   const customer = shift.customers;
   const site = shift.site;
@@ -1095,9 +1116,26 @@ function AttentionRow({
     : shift.rep_id
     ? "Unknown rep"
     : "Unassigned";
+  const pickedHasConflict = !!pickedRepId && conflictRepIds.has(pickedRepId);
 
   const handleReassignConfirm = async () => {
     if (!pickedRepId) return;
+    // Double-book guard — the picker already shows a "Conflict" tag
+    // next to the option, but we hard-confirm at submit time too in
+    // case the manager picked it anyway.
+    if (pickedHasConflict) {
+      const repName =
+        reps.find((r) => r.id === pickedRepId)?.name ||
+        reps.find((r) => r.id === pickedRepId)?.email ||
+        "this rep";
+      if (
+        !confirm(
+          `${repName} already has a shift in that time slot. Reassign anyway and double-book them?`
+        )
+      ) {
+        return;
+      }
+    }
     await onReassign(shift, pickedRepId);
     // Sheet stays open visually only until the realtime/refetch
     // removes the row from local state, but resetting is cheap.
@@ -1241,12 +1279,36 @@ function AttentionRow({
               clearable={false}
               options={reps
                 .filter((r) => r.id !== shift.rep_id)
-                .map((r) => ({
-                  value: r.id,
-                  label: displayName(r),
-                  sublabel: r.email,
-                }))}
+                .map((r) => {
+                  const hasConflict = conflictRepIds.has(r.id);
+                  return {
+                    value: r.id,
+                    label: displayName(r),
+                    sublabel: hasConflict
+                      ? `⚠ Conflict · already booked at this time`
+                      : r.email,
+                    color: hasConflict ? AC.danger : undefined,
+                  };
+                })}
             />
+            {pickedHasConflict && (
+              <div
+                style={{
+                  marginTop: 6,
+                  padding: "6px 10px",
+                  background: AC.dangerTint,
+                  color: "#9c1a3c",
+                  borderRadius: 8,
+                  fontFamily: AC.font,
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  lineHeight: 1.4,
+                }}
+              >
+                This rep already has an overlapping shift. You can still
+                reassign — you'll be asked to confirm a double-book.
+              </div>
+            )}
           </div>
           <Btn
             size="sm"
@@ -1302,8 +1364,9 @@ function AttentionRow({
             icon="check"
             onClick={() => onAcknowledge(shift)}
             disabled={busy}
+            title="Keep the rep on this shift. They'll see a confirmation on their phone."
           >
-            Acknowledge
+            Keep · rep stays on
           </Btn>
           <Btn
             size="sm"
@@ -1314,6 +1377,19 @@ function AttentionRow({
           >
             Cancel shift
           </Btn>
+          {/* Escape hatch — full edit form when none of the canned
+              resolutions fit (eg manager wants to change date/time
+              or move to a different customer). The shift edit page
+              doesn't auto-clear the flag, so the banner persists
+              until they action it. */}
+          <Link
+            href={`/shifts/${shift.id}/edit`}
+            style={{ textDecoration: "none" }}
+          >
+            <Btn size="sm" icon="edit" disabled={busy}>
+              Edit…
+            </Btn>
+          </Link>
         </div>
       )}
     </div>

@@ -50,6 +50,10 @@ export interface ShiftRow {
   attention_raised_at: string | null;
   attention_resolved_at: string | null;
   attention_resolved_by: string | null;
+  /** Which manager-side action resolved the flag — see the
+   *  2026-05-11 attention_resolution migration. NULL until a manager
+   *  (or the rep, via withdraw) acts. */
+  attention_resolution: string | null;
   /** Joined site row when the shift has a site_id. The customer's
    *  legacy address fields are still populated for back-compat but
    *  every read path should prefer the site coords / address. */
@@ -826,6 +830,50 @@ export async function cancelShiftSeries(
 //     → state := 'cancelled'; overlay cleared; event shift.cancelled
 
 /**
+ * Find rep_ids that already have a shift overlapping a given window
+ * on the given date. Used by the Reassign picker to warn (or block)
+ * the manager from double-booking a rep when they're reassigning a
+ * flagged shift away from its original rep.
+ *
+ * Excludes:
+ *   - The shift being reassigned itself (excludeShiftId)
+ *   - State='cancelled' rows (they're not really occupying the slot)
+ *
+ * Returns a Set of rep_ids for cheap O(1) membership tests in the UI.
+ */
+export async function listRepConflictsForSlot(opts: {
+  shiftDate: string;
+  startTime: string;
+  endTime: string;
+  excludeShiftId?: string;
+}): Promise<Set<string>> {
+  if (!isSupabaseConfigured() || !supabase) return new Set();
+  let q = supabase
+    .from("shifts")
+    .select("rep_id, start_time, end_time, id")
+    .eq("shift_date", opts.shiftDate)
+    .not("rep_id", "is", null)
+    .neq("state", "cancelled")
+    // Half-open overlap: rows where existing.start < ours.end AND
+    // ours.start < existing.end. Filtered server-side to keep the
+    // payload small even on busy days.
+    .lt("start_time", opts.endTime)
+    .gt("end_time", opts.startTime);
+  if (opts.excludeShiftId) q = q.neq("id", opts.excludeShiftId);
+  const { data, error } = await q;
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] listRepConflictsForSlot:", error.message);
+    return new Set();
+  }
+  const out = new Set<string>();
+  for (const row of (data ?? []) as Array<{ rep_id: string | null }>) {
+    if (row.rep_id) out.add(row.rep_id);
+  }
+  return out;
+}
+
+/**
  * Every shift with an open attention overlay. The Live Ops "Needs
  * action" tab drives off this. Ordered by raised_at desc so the
  * freshest issues bubble to the top — matches the partial index
@@ -911,6 +959,7 @@ export async function reassignShift(
       attention_raised_at: null,
       attention_resolved_at: new Date().toISOString(),
       attention_resolved_by: resolverId,
+      attention_resolution: "reassigned",
     })
     .eq("id", shiftId);
   if (error) {
@@ -951,6 +1000,7 @@ export async function releaseShift(
       attention_raised_at: null,
       attention_resolved_at: new Date().toISOString(),
       attention_resolved_by: resolverId,
+      attention_resolution: "released",
     })
     .eq("id", shiftId);
   if (error) {
@@ -993,6 +1043,7 @@ export async function acknowledgeAttention(
       attention_raised_at: null,
       attention_resolved_at: new Date().toISOString(),
       attention_resolved_by: resolverId,
+      attention_resolution: "acknowledged",
     })
     .eq("id", shiftId);
   if (error) {
@@ -1029,6 +1080,7 @@ export async function cancelShiftFromAttention(
       attention_raised_at: null,
       attention_resolved_at: new Date().toISOString(),
       attention_resolved_by: resolverId,
+      attention_resolution: "cancelled",
     })
     .eq("id", shiftId);
   if (error) {

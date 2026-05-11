@@ -26,6 +26,7 @@ import {
   UnableToAttendSheet,
   unableReasonLabel,
 } from "@/components/UnableToAttendSheet";
+import { resolvedAttentionFeedback } from "@/lib/shifts-store";
 
 // MapLibre needs `window`; defer to client-only.
 const DashboardMap = dynamic(
@@ -52,6 +53,7 @@ type DbShift = Shift & {
   attention?: string | null;
   attentionReason?: string | null;
   attentionResolvedAt?: string | null;
+  attentionResolution?: string | null;
 };
 
 function formatTodayHeader(): string {
@@ -855,6 +857,62 @@ function UpNextCard({
             </div>
           ) : (
             <>
+              {/* Resolved-recently pill — when the rep raised a flag
+                  and it's since been actioned (or they withdrew it),
+                  show a brief confirmation for up to four hours.
+                  Only renders for outcomes that leave the rep still
+                  seeing the row (acknowledged / withdrawn). */}
+              {(() => {
+                const fb = resolvedAttentionFeedback(next);
+                if (!fb) return null;
+                const isOk = fb.tone === "ok";
+                return (
+                  <div
+                    style={{
+                      marginTop: 14,
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      background: isOk ? MC.okTint : MC.brandTint,
+                      border: `1px solid ${isOk ? MC.ok + "55" : MC.brand + "55"}`,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <Glyph
+                      name="check-circle"
+                      size={18}
+                      color={isOk ? MC.ok : MC.brandDeep}
+                      strokeWidth={2.2}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontFamily: MC.font,
+                          fontSize: 13.5,
+                          fontWeight: 700,
+                          color: isOk ? "#0d6a45" : MC.brandInk,
+                          letterSpacing: -0.1,
+                        }}
+                      >
+                        {fb.label}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: MC.font,
+                          fontSize: 12,
+                          color: isOk ? "#0d6a45" : MC.brandDeep,
+                          marginTop: 2,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {fb.detail}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Actions */}
               <div
                 style={{
