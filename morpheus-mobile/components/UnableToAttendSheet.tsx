@@ -83,11 +83,20 @@ export function UnableToAttendSheet({
 
   async function handleSubmit() {
     if (!picked || !canSubmit) return;
+    // eslint-disable-next-line no-console
+    console.warn("[unable] sheet: submit pressed", {
+      reason: picked,
+      hasNote: !!note.trim(),
+    });
     setBusy(true);
     setError(null);
     try {
       await onSubmit(picked, note);
+      // eslint-disable-next-line no-console
+      console.warn("[unable] sheet: onSubmit resolved");
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[unable] sheet: onSubmit threw", e);
       setBusy(false);
       setError(e instanceof Error ? e.message : "Couldn't send the flag — try again?");
     }

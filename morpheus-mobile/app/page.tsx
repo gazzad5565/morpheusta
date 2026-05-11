@@ -200,16 +200,34 @@ export default function DashboardPage() {
     reason: UnableReason,
     note: string
   ) => {
+    // eslint-disable-next-line no-console
+    console.warn("[unable] home: handleRaiseUnable entry", {
+      realId,
+      reason,
+    });
     setUnableBusyFor(realId);
     const r = await raiseUnableToAttend(realId, reason, note);
     setUnableBusyFor(null);
+    // eslint-disable-next-line no-console
+    console.warn("[unable] home: raise returned", r);
     if (!r.ok) {
       throw new Error(r.error || "Couldn't notify your manager");
     }
     setUnableSheetFor(null);
     // Refetch so the up-next card flips to "Awaiting manager" without
     // waiting for Realtime to round-trip on slow networks.
-    void listMyShiftsToday().then((rows) => setShifts(rows));
+    void listMyShiftsToday().then((rows) => {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[unable] home: refetched shifts",
+        rows.map((r) => ({
+          realId: r.realId,
+          state: r.state,
+          attention: r.attention,
+        }))
+      );
+      setShifts(rows);
+    });
   };
 
   const handleWithdrawUnable = async (realId: string) => {
@@ -1005,7 +1023,15 @@ function UpNextCard({
               {!isResume && onUnableToAttend && (
                 <button
                   type="button"
-                  onClick={() => onUnableToAttend(next)}
+                  onClick={() => {
+                    // eslint-disable-next-line no-console
+                    console.warn("[unable] home: button tapped", {
+                      realId: next.realId,
+                      name: next.name,
+                      state: next.state,
+                    });
+                    onUnableToAttend(next);
+                  }}
                   style={{
                     marginTop: 6,
                     width: "100%",
