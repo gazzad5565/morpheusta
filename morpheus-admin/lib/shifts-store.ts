@@ -891,9 +891,18 @@ export async function listOpenAttentionShifts(): Promise<ShiftRow[]> {
     .order("attention_raised_at", { ascending: false });
   if (error) {
     // eslint-disable-next-line no-console
-    console.warn("[shifts] listOpenAttention:", error.message);
+    console.warn("[unable] admin listOpenAttention: query failed", error);
     return [];
   }
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[unable] admin listOpenAttention: ${(data ?? []).length} open row(s)`,
+    (data ?? []).map((r) => ({
+      id: (r as { id?: string }).id,
+      attention: (r as { attention?: string }).attention,
+      rep_id: (r as { rep_id?: string }).rep_id,
+    }))
+  );
   return (data as ShiftRow[]) ?? [];
 }
 

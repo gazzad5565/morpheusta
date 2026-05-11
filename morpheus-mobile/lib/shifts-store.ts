@@ -775,6 +775,8 @@ export async function raiseUnableToAttend(
   reason: UnableReason,
   note: string | null
 ): Promise<{ ok: boolean; error?: string }> {
+  // eslint-disable-next-line no-console
+  console.warn("[unable] raise: start", { shiftId, reason });
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
@@ -784,31 +786,48 @@ export async function raiseUnableToAttend(
 
   // Read the row once so the audit event carries customer_id and the
   // mobile UI can verify the shift was actually flipped (count check).
-  const { data: before } = await supabase
+  const { data: before, error: beforeErr } = await supabase
     .from("shifts")
     .select("customer_id, state, attention, rep_id")
     .eq("id", shiftId)
     .maybeSingle();
+  if (beforeErr) {
+    // eslint-disable-next-line no-console
+    console.warn("[unable] raise: pre-read failed", beforeErr);
+    return { ok: false, error: `Couldn't load shift: ${beforeErr.message}` };
+  }
   const beforeRow =
     (before as { customer_id?: string; state?: string; attention?: string | null; rep_id?: string | null } | null) ?? null;
+  // eslint-disable-next-line no-console
+  console.warn("[unable] raise: pre-read", beforeRow);
 
   if (!beforeRow) return { ok: false, error: "Shift not found" };
-  if (beforeRow.rep_id !== userId) return { ok: false, error: "Not your shift" };
+  if (beforeRow.rep_id !== userId) {
+    // eslint-disable-next-line no-console
+    console.warn("[unable] raise: rep_id mismatch", {
+      shiftRepId: beforeRow.rep_id,
+      myUserId: userId,
+    });
+    return { ok: false, error: "Not your shift" };
+  }
   // Pre-check-in states: scheduled, travelling, late. Anything after
   // check-in (in-progress, on-break) means the rep is already on the
   // job — the right path there is check-out-early, not unable-to-attend.
   // complete / cancelled are terminal so they're excluded too.
   const ALLOWED_STATES = new Set(["scheduled", "travelling", "late"]);
   if (!ALLOWED_STATES.has(beforeRow.state || "")) {
+    // eslint-disable-next-line no-console
+    console.warn("[unable] raise: state not allowed", beforeRow.state);
     return {
       ok: false,
-      error:
-        "This shift has already started. Use check-out if you need to leave early.",
+      error: `Can't flag a shift in state "${beforeRow.state || "unknown"}". This action only works before you check in.`,
     };
   }
   if (beforeRow.attention) {
     // Already flagged — idempotent no-op, the UI shouldn't normally
     // get here (the "Can't make it" affordance is hidden once raised).
+    // eslint-disable-next-line no-console
+    console.warn("[unable] raise: already flagged, no-op", beforeRow.attention);
     return { ok: true };
   }
 
@@ -825,7 +844,13 @@ export async function raiseUnableToAttend(
     .in("state", ["scheduled", "travelling", "late"])
     .is("attention", null)
     .select("id, attention");
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[unable] raise: UPDATE failed", error);
+    return { ok: false, error: error.message };
+  }
+  // eslint-disable-next-line no-console
+  console.warn("[unable] raise: UPDATE returned", updated);
   // Read-back: if 0 rows came back, the filter matched nothing — most
   // commonly a race with another writer (state flipped, attention
   // already set). Surface it instead of returning silent success.
@@ -844,6 +869,8 @@ export async function raiseUnableToAttend(
     message: `Rep flagged unable to attend (${reason})`,
     meta: { reason, hasNote: !!note?.trim() },
   });
+  // eslint-disable-next-line no-console
+  console.warn("[unable] raise: success");
   return { ok: true };
 }
 
