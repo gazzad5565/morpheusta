@@ -370,7 +370,7 @@ function CheckOutPage() {
             gap: 12,
           }}
         >
-          <CustomerTile initials={shift.initials} color={shift.color} size={44} />
+          <CustomerTile initials={shift.initials} color={shift.color} size={44} logoUrl={shift.logoUrl} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div
               style={{

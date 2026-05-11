@@ -447,42 +447,22 @@ function CheckInPage() {
         },
       });
     }
-    // 3. Forward EVERYTHING the success screen needs so it's not
-    //    static. Customer name + check-in clock time + a discriminator
-    //    saying whether late/early/offsite actually fired (and the
-    //    minutes for late/early) so the success card renders the
-    //    right pills only.
-    const checkInClock = formatClockTime(new Date());
-    const lateMinutes =
-      lateTriggered && lateInfo
-        ? String(Math.round(lateInfo.minutesLate))
-        : "";
-    const earlyMinutes =
-      earlyTriggered && earlyInfo
-        ? String(Math.round(earlyInfo.minutesEarly))
-        : "";
-    const sp = new URLSearchParams({
-      customer: shift.name,
-      shift: shift.realId,
-      checkInAt: checkInClock,
-      ...(offsiteTriggered && offsiteInfo && "distanceM" in offsiteInfo && offsiteInfo.distanceM != null
-        ? { offsiteDistanceM: String(Math.round(offsiteInfo.distanceM)) }
-        : {}),
-      ...(lateMinutes ? { lateMinutes } : {}),
-      ...(earlyMinutes ? { earlyMinutes } : {}),
-      ...(locationReason ? { locationReason, locationNote } : {}),
-      ...(lateReason ? { lateReason, lateNote } : {}),
-      ...(earlyReason ? { earlyReason, earlyNote } : {}),
-    });
     // Land on the "done" phase so the overlay flashes its complete
     // state (green tick + "You're checked in!") for ~550ms before we
     // route. Without the dwell the rep barely sees the celebratory
     // frame — it's the whole point of the overlay. The router.push is
     // still preloaded by Next so the actual navigation feels instant
     // once it fires.
+    //
+    // Used to route to a /check-in/success confirmation page that
+    // re-stated late/early/offsite reasons + had a "Start activities"
+    // button. Removed (May 11) because the overlay itself already
+    // confirms the check-in, the reasons are saved in the event log,
+    // and the extra tap to "Start activities" was friction. Now we
+    // land straight on /active where the rep can begin work.
     setCheckInPhase("done");
     await new Promise((r) => window.setTimeout(r, 550));
-    router.push(`/check-in/success?${sp.toString()}`);
+    router.push("/active");
   };
 
   return (
@@ -506,6 +486,7 @@ function CheckInPage() {
             initials={shift?.initials || "GW"}
             color={shift?.color || MC.swatch.GW}
             size={46}
+            logoUrl={shift?.logoUrl ?? null}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div

@@ -17,6 +17,11 @@ export interface Shift {
   start: string;
   end: string;
   distance: string;
+  /** Base64 data URL of the customer's logo. Optional — when present
+   *  the rep-side avatar tile renders the logo instead of the coloured
+   *  initials. Set on the admin-side customer edit form; travels with
+   *  every shift row via the customers join. */
+  logoUrl?: string | null;
 }
 
 export interface Customer {
@@ -36,6 +41,10 @@ export interface Customer {
   /** Per-customer override for late/early timing exceptions.
    *  null = inherit org-wide app_settings.timing_exceptions_enabled. */
   timing_exceptions_enabled?: boolean | null;
+  /** Customer logo as a base64 data URL. Set from the admin; the rep
+   *  app shows it on shift cards and the customer picker in place of
+   *  the coloured-initials tile. */
+  logo_url?: string | null;
 }
 
 export interface Task {

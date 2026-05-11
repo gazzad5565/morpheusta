@@ -3,6 +3,31 @@ import type { Customer, Rep } from "@/lib/types";
 
 export function CustomerSwatch({ customer, size = 32 }: { customer: Customer; size?: number }) {
   const r = size <= 32 ? 7 : 9;
+  // When the customer has uploaded a logo, render that on a white
+  // tile instead of the coloured initials. Keeps every CustomerSwatch
+  // call site honest about branding without each one having to know.
+  if (customer.logoUrl) {
+    return (
+      <div
+        style={{
+          width: size,
+          height: size,
+          borderRadius: r,
+          background: "#fff",
+          flexShrink: 0,
+          overflow: "hidden",
+          boxShadow: `0 0 0 1px ${AC.line}`,
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={customer.logoUrl}
+          alt={customer.initials}
+          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+        />
+      </div>
+    );
+  }
   return (
     <div
       style={{

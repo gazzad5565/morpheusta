@@ -47,6 +47,10 @@ interface ShiftRow {
     initials: string;
     color: string;
     code: number;
+    /** Base64 data URL of the customer logo, set from admin. The
+     *  rep-side avatar tile shows this in place of the coloured
+     *  initials when populated. Added by 2026_05_11_customers_logo. */
+    logo_url?: string | null;
   } | null;
   /** Joined site row when site_id is set. The mobile rep app prefers
    *  these coords/address/geofence over the customer's legacy fields
@@ -149,6 +153,7 @@ function rowToShift(row: ShiftRow): ShiftWithMeta {
     initials: c?.initials || "??",
     color: c?.color || "#888",
     code: c?.code || 0,
+    logoUrl: c?.logo_url ?? null,
     start: formatTimeLabel(row.start_time),
     end: formatTimeLabel(row.end_time),
     distance: row.distance_label || "",
@@ -254,7 +259,7 @@ export async function listMyShiftsToday(): Promise<
   const today = todayISO();
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
+    .select("*, customers(id,name,initials,color,code,logo_url), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("rep_id", userId)
     .eq("shift_date", today)
     // Cancelled shifts (manager resolved an attention flag with Cancel,
@@ -309,7 +314,7 @@ export async function getMyActiveShift(): Promise<
 
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
+    .select("*, customers(id,name,initials,color,code,logo_url), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("rep_id", userId)
     .eq("state", "in-progress")
     .order("check_in_at", { ascending: false })
@@ -332,7 +337,7 @@ export async function listUnassignedShiftsToday(): Promise<
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
+    .select("*, customers(id,name,initials,color,code,logo_url), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .is("rep_id", null)
     .eq("shift_date", todayISO())
     // Cancelled shifts aren't claimable.
@@ -450,7 +455,7 @@ export async function getShiftById(
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
+    .select("*, customers(id,name,initials,color,code,logo_url), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("id", shiftId)
     .maybeSingle();
   if (error || !data) {

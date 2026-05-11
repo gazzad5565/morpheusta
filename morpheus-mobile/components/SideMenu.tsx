@@ -22,6 +22,7 @@ interface Item {
 
 const ITEMS: Item[] = [
   { id: "shifts",    label: "Today",          icon: "clock", color: MC.brand,  href: "/" },
+  { id: "route",     label: "Plan my day",    icon: "target", color: "#1FA971", href: "/route" },
   { id: "addshift",  label: "Request shift",  icon: "pin",   color: MC.brand,  href: "/add-shift" },
   { id: "library",   label: "Library",        icon: "book",  color: "#5b3da5", href: "/library" },
   { id: "support",   label: "Support",        icon: "mic",   color: "#9c4a2c", href: "/support" },

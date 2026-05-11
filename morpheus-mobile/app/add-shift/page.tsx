@@ -238,7 +238,7 @@ export default function AddShiftPage() {
                 gap: 12,
               }}
             >
-              <CustomerTile initials={c.initials} color={c.color} size={40} />
+              <CustomerTile initials={c.initials} color={c.color} size={40} logoUrl={c.logo_url} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{

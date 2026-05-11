@@ -206,11 +206,49 @@ export function CustomerTile({
   initials,
   color,
   size = 56,
+  logoUrl,
 }: {
   initials: string;
   color: string;
   size?: number;
+  /** When set, renders the customer's uploaded logo on a white tile
+   *  in place of the coloured-initials swatch. Falls back to initials
+   *  silently if the image fails to decode (e.g. data URL got
+   *  truncated). The white background ensures transparent PNGs
+   *  read correctly on dark UI surfaces. */
+  logoUrl?: string | null;
 }) {
+  if (logoUrl) {
+    return (
+      <div
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 14,
+          background: "#FFFFFF",
+          boxShadow: `inset 0 0 0 1px ${MC.line}, 0 4px 12px rgba(10,15,30,.10)`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={logoUrl}
+          alt={initials}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            display: "block",
+          }}
+        />
+      </div>
+    );
+  }
   return (
     <div
       style={{

@@ -316,6 +316,35 @@ pass** — rep photos, house/face icons on maps, mobile chrome
 cleanup, exception toggles, notes per shift, banner notifications,
 nicer loading states, /schedule/manage row-actions rebuild.
 
+Then a third late push for the two biggest deferred items:
+**traffic-aware Plan-my-day routing** and **per-customer logo upload**.
+
+#### Plan my day · /route (mobile)
+
+The "perfect routing" feature we'd been deferring. End-to-end:
+
+- **Server-side API route `/api/route/plan`** (`morpheus-mobile/app/api/route/plan/route.ts`). POST origin + ordered stops, get back per-leg ETA + distance + polyline. Provider-agnostic: when `GOOGLE_ROUTES_API_KEY` is set, calls Google Routes v2 (`computeRoutes`) with `TRAFFIC_AWARE` preference and an explicit field mask; when unset, falls back to a mock that estimates from haversine × 1.4 winding × 30 km/h urban average. The mock keeps the feature usable for UX testing without burning Google quota and is the default in local dev.
+- **Greedy nearest-neighbour optimizer** (`optimizeOrder`) kicks in when the client passes `optimize: true`. O(n²) which is trivial at the 3–8 stops a rep visits per day; gets within ~5–10% of optimal in practice. Hard cap at 25 stops on the server.
+- **Fail-open**: any Google API failure (non-200, bad shape, network) silently falls back to mock + a `warning` field the client surfaces as a non-blocking pill. Reps never see a broken Plan-my-day.
+- **Client wrapper `lib/route-planner.ts`** with two flavours: `planRoute(origin, stops)` for direct calls, `planMyDay({ optimize })` as the convenience that grabs the rep's today shifts (excluding complete / cancelled / "unable to attend" / no-coord rows), gets GPS, calls the API, returns shifts in visit order. 5-minute in-memory cache keyed by (coords, stop ids, optimize flag) so mashing Refresh doesn't blow through Google quota. Cache cleared explicitly on user-initiated refresh.
+- **GPS fallback**: when the rep denies location, we ground the route at the first stop's coordinates and set `originFromFirstStop: true` so the UI can warn that ETAs are measured from there, not from the rep's current position.
+- **Mobile `/route` page** (`morpheus-mobile/app/route/page.tsx`). Sticky summary band: provider chip ("Live traffic" green when Google + traffic-aware, "Estimated" grey for mock), total duration + distance, Refresh button, Optimize-order pill switch. Vertical leg list with numbered step badges (1, 2, 3…), customer name + drive time + drive distance, ETA pill ("Arrive 9:42 AM"), Leave-by pill with three tones — green ("Leave by 9:18"), warn ("less than 10 min slack"), danger ("Late · sched 9:30"). Per-leg "Open in Maps" deep link. Bottom "Open whole day in Maps" button that emits a multi-waypoint Google Maps URL (iOS routes maps.google.com to Apple Maps, Android opens Google Maps).
+- **Dashboard entry point** — when the rep has ≥ 2 stops today, a "Plan my day" card appears below the dashboard map ("N stops · live traffic ETAs + Leave-by reminders"). Single stop = card hidden; Up Next already covers that case in one tap.
+- **Side-menu link** — "Plan my day" sits between "Today" and "Request shift".
+
+No new DB migration — the planner reads existing shifts/sites only. `GOOGLE_ROUTES_API_KEY` is documented under "Optional env vars" further down.
+
+#### Per-customer logo upload (admin → mobile)
+
+Mirror of the rep-avatar pattern, applied to customers. Replaces the coloured-initials tile with the customer's actual branding everywhere on the rep's device — without sending huge image files.
+
+- **DB migration `2026_05_11_customers_logo.sql`** — adds a single `customers.logo_url text` column. Same storage choice as profile avatars: base64 data URL in a text column, no Supabase Storage bucket needed. Tiny on the wire because of step 3.
+- **Compression on upload** — admin uses `compressCustomerLogo()` (in `lib/customers-store.ts`) which decodes the file, paints onto a 96×96 white canvas (letterbox, not square-crop, because logos are usually wordmarks not faces), and exports JPEG quality 0.82. Result is typically 5–15 KB per logo. White background means transparent PNGs still read on dark UI tints. 12 MB hard limit on source files before decode so a 50MP camera shot doesn't blow up.
+- **Customer edit form** — `/customers/[id]/edit` gains a "Customer logo" field below "Avatar colour" with a 64×64 preview tile, "Upload logo" / "Replace logo" / "Remove" buttons. Saves immediately on file pick (separate commit-step from the main form Save — managers want to see the logo land before fiddling with the rest).
+- **Auto-flows everywhere** — `CustomerSwatch` (admin) and `CustomerTile` (mobile) both branch on `logoUrl`: when set, render the logo on a white tile; when null, fall back to the original coloured-initials swatch. No call-site changes needed beyond passing the prop. Mobile call sites updated for: home up-next card, /shifts row, /active hero, /check-in hero, /check-in/success preview, /check-out hero, /add-shift customer picker, and /route leg badges.
+- **Shifts join carries the logo** — `lib/shifts-store.ts` (mobile) joins `customers(logo_url)` in every query so the logo travels with the shift row in one round-trip. `ShiftWithMeta.logoUrl` is the flat property the UI reads.
+- **Audit** — saves write a `customer.updated` event to `shift_events` (new event type added to the EventType union).
+
 Eighteen commits in order:
 
 #### Cancellation feature (8 commits, `7229cc4`..`e723c68`)
@@ -391,7 +420,7 @@ Eighteen commits in order:
 
 #### Migrations to run for May 11
 
-Five new files in `db/migrations/` — run in order in the Supabase SQL editor before the May 11 features hit prod:
+Six new files in `db/migrations/` — run in order in the Supabase SQL editor before the May 11 features hit prod:
 
 1. `2026_05_11_shifts_attention.sql` — cancellation overlay columns (`attention`, `attention_reason`, `attention_note`, `attention_raised_at`, `attention_resolved_at`, `attention_resolved_by`) + indexes
 2. `2026_05_11_shifts_attention_resolution.sql` — adds `attention_resolution` column for the rep-side feedback pill
@@ -399,8 +428,9 @@ Five new files in `db/migrations/` — run in order in the Supabase SQL editor b
 4. `2026_05_11_profile_avatars.sql` — adds `avatar_url text` to profiles (rep photo upload)
 5. `2026_05_11_exception_toggles.sql` — adds `location_exceptions_enabled` + `timing_exceptions_enabled` boolean overrides to customers
 6. `2026_05_11_perf_indexes.sql` — engineering pass; adds four hot-path indexes (`shift_events.shift_id` partial, `profiles.role`, `rep_locations.rep_id`, `customer_sites.active`)
+7. `2026_05_11_customers_logo.sql` — adds `logo_url text` to customers (per-customer logo upload)
 
-All six are idempotent and wrapped in `BEGIN; … COMMIT;` so failures roll back cleanly. The org-wide pair for the exception toggles is written into `app_settings` lazily on first admin UI save — no migration needed for them.
+All seven are idempotent and wrapped in `BEGIN; … COMMIT;` so failures roll back cleanly. The org-wide pair for the exception toggles is written into `app_settings` lazily on first admin UI save — no migration needed for them.
 
 Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`). Smoke-tested key routes return 200 on a local prod-mode boot.
 
@@ -987,6 +1017,18 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_w5trpMP3bFT4oCkFssbfIg_3W7W6oVd
 ```
 
 These are also stored in Vercel (Settings → Environment Variables for each project). Local + Vercel must stay in sync — if you rotate the anon key in Supabase, update both places.
+
+### Optional env vars
+
+**`GOOGLE_ROUTES_API_KEY`** (mobile app, server-side only — do NOT prefix with `NEXT_PUBLIC_`)
+
+Enables traffic-aware route planning on the mobile `/route` page via the Google Routes API (Compute Routes v2, `TRAFFIC_AWARE` preference). When set, `/api/route/plan` calls Google for ETAs, distances, and encoded polylines; when unset, the route falls back to a mock provider that estimates from haversine distance × 1.4 winding × 30 km/h urban average. The mock is fine for UX testing and demos; switch to the real key before reps rely on the ETAs in the field.
+
+Get a key from the [Google Cloud Console](https://console.cloud.google.com/apis/credentials), enable the **Routes API**, and add it to:
+- `morpheus-mobile/.env.local` for local dev
+- Vercel → `morpheusta` project → Settings → Environment Variables for prod
+
+Pricing: ~$5 per 1k requests after the $200/mo free tier. With the rep planning their day 1–3× and a 5-minute client-side cache (see `lib/route-planner.ts`), a small team stays well under the free tier. Cache invalidation: tap Refresh on `/route`, or call `clearRouteCache()` from code when shift data changes.
 
 ---
 

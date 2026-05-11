@@ -37,6 +37,10 @@ interface ShiftData {
   initials: string;
   color: string;
   code: number;
+  /** Customer logo (base64 data URL), when uploaded by admin. Lets
+   *  the active-shift hero swap the coloured-initials tile for the
+   *  customer's branding. */
+  logoUrl: string | null;
   distance: string;
   checkInAt: string | null;
   customerId: string;
@@ -84,6 +88,7 @@ export default function ActiveShiftPage() {
         initials: s.initials,
         color: s.color,
         code: s.code,
+        logoUrl: s.logoUrl ?? null,
         distance: s.distance,
         checkInAt: s.checkInAt,
         customerId: s.id,
@@ -465,7 +470,7 @@ export default function ActiveShiftPage() {
           <div
             style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}
           >
-            <CustomerTile initials={shift.initials} color={shift.color} size={48} />
+            <CustomerTile initials={shift.initials} color={shift.color} size={48} logoUrl={shift.logoUrl} />
             <div style={{ minWidth: 0 }}>
               <div
                 style={{
@@ -895,7 +900,11 @@ export default function ActiveShiftPage() {
           for a second or so, especially on slow networks. */}
       {opening && (
         <CheckingInOverlay
-          mode="opening"
+          // "leaving" — lightweight tap-feedback while /check-out
+          // mounts. Same animation as "opening" but the headline
+          // reads "Wrapping up…" rather than "Opening…" because
+          // the rep is leaving the store, not opening anything.
+          mode="leaving"
           customerName={opening.customerName}
           phase="submitting"
         />

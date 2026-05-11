@@ -24,6 +24,10 @@ interface DbRow {
   geofence_radius_m: number | null;
   location_exceptions_enabled: boolean | null;
   timing_exceptions_enabled: boolean | null;
+  /** Base64 data URL of the customer logo. Added by
+   *  2026_05_11_customers_logo. Optional — null means use the
+   *  initials-tile fallback in the rep UI. */
+  logo_url: string | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -40,6 +44,7 @@ function rowToCustomer(row: DbRow): Customer {
     geofence_radius_m: row.geofence_radius_m,
     location_exceptions_enabled: row.location_exceptions_enabled,
     timing_exceptions_enabled: row.timing_exceptions_enabled,
+    logo_url: row.logo_url ?? null,
   };
 }
 

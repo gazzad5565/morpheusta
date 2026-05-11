@@ -26,6 +26,12 @@ interface DbRow {
   geofence_radius_m: number | null;
   location_exceptions_enabled: boolean | null;
   timing_exceptions_enabled: boolean | null;
+  /** Base64 data URL of the customer's logo (small JPEG). Added by
+   *  the 2026_05_11_customers_logo migration. Null until a manager
+   *  uploads one — the rep app keeps showing the coloured-initials
+   *  tile in that case. See compressCustomerLogo below for the
+   *  size/quality recipe. */
+  logo_url: string | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -46,6 +52,7 @@ function rowToCustomer(row: DbRow): Customer {
     active: row.active ?? true,
     locationExceptionsEnabled: row.location_exceptions_enabled,
     timingExceptionsEnabled: row.timing_exceptions_enabled,
+    logoUrl: row.logo_url ?? null,
   };
 }
 
@@ -156,6 +163,102 @@ export interface CustomerPatch {
   /** null = inherit org default · true/false = override. */
   location_exceptions_enabled?: boolean | null;
   timing_exceptions_enabled?: boolean | null;
+  /** Base64 data URL or null to clear. See compressCustomerLogo. */
+  logo_url?: string | null;
+}
+
+/**
+ * Compress a logo file to a small base64 JPEG data URL suitable for
+ * the customers.logo_url text column.
+ *
+ *   - Resizes the longest side to `maxSize` (default 96px) so the
+ *     base64 payload stays low-tens-of-KB.
+ *   - JPEG quality 0.82 — visibly fine at this size, tight on bytes.
+ *   - 12 MB hard limit on the source file so a 50MP camera shot
+ *     doesn't blow up the decoder.
+ *
+ * The output is safe to write directly to customers.logo_url. Sticking
+ * to a `text` column (vs Supabase Storage) keeps the deploy simple and
+ * makes a customer list request self-contained — we don't want every
+ * dashboard map pin to fire a fresh HTTP request for an avatar URL.
+ *
+ * Why "letterbox" instead of square-crop: customer logos are usually
+ * wordmarks or wide brand glyphs. Square-cropping centred would chop
+ * the edges off — bad. Instead we paint the source onto a white square
+ * canvas, fitting longest side to maxSize and centring it. The result
+ * works on light AND dark UI backgrounds because we hand the mobile
+ * app a fully-opaque tile.
+ */
+export async function compressCustomerLogo(
+  file: File,
+  maxSize = 96
+): Promise<{ ok: true; dataUrl: string } | { ok: false; error: string }> {
+  if (file.size > 12 * 1024 * 1024) {
+    return { ok: false, error: "That image is over 12 MB — try a smaller file." };
+  }
+  if (!file.type.startsWith("image/")) {
+    return { ok: false, error: "That file isn't an image." };
+  }
+  const bitmap = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Couldn't decode that image."));
+    img.src = URL.createObjectURL(file);
+  }).catch((e) => e as Error);
+  if (bitmap instanceof Error) return { ok: false, error: bitmap.message };
+
+  const canvas = document.createElement("canvas");
+  canvas.width = maxSize;
+  canvas.height = maxSize;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return { ok: false, error: "Canvas not available in this browser." };
+  // White background so a transparent PNG doesn't render as black on
+  // dark UI surfaces. Customer logos are nearly always presented on
+  // a light tile, and the rep app renders them onto a tinted card.
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, maxSize, maxSize);
+  // Letterbox: scale the source to fit inside maxSize×maxSize while
+  // preserving aspect ratio, then centre it. This handles wordmarks
+  // (wide) and round badges (square) sensibly.
+  const ratio = Math.min(maxSize / bitmap.width, maxSize / bitmap.height);
+  const drawW = bitmap.width * ratio;
+  const drawH = bitmap.height * ratio;
+  const dx = (maxSize - drawW) / 2;
+  const dy = (maxSize - drawH) / 2;
+  ctx.drawImage(bitmap, dx, dy, drawW, drawH);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+  URL.revokeObjectURL(bitmap.src);
+  return { ok: true, dataUrl };
+}
+
+/**
+ * Save a base64 data URL to customers.logo_url. Pass null to clear.
+ * Thin wrapper over updateCustomer that keeps the call site honest
+ * about its intent + lets us log a dedicated audit event.
+ */
+export async function updateCustomerLogo(
+  id: string,
+  dataUrl: string | null
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const value = dataUrl && dataUrl.length > 0 ? dataUrl : null;
+  const { error } = await supabase
+    .from("customers")
+    .update({ logo_url: value })
+    .eq("id", id);
+  if (error) {
+    notifySaveError(error.message, "customer");
+    return { ok: false, error: error.message };
+  }
+  await logEvent({
+    event_type: "customer.updated",
+    customer_id: id,
+    message: value ? "Updated customer logo" : "Removed customer logo",
+  });
+  notifySaved("customer");
+  return { ok: true };
 }
 
 export async function updateCustomer(

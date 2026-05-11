@@ -30,12 +30,22 @@ import { Glyph } from "@/components/Glyph";
 
 export type CheckInPhase = "submitting" | "logging" | "done";
 /** Drives the headline copy and which Glyph fills the brand circle.
- *  "in" / "out" share the same visual machinery (rings, stepper,
- *  progress bar, elapsed counter) so reps see the same affordance on
- *  both check-in and check-out flows. "opening" is the lighter
- *  variant used by tap-feedback overlays on home-page CTAs: same
- *  brand circle but a generic "Opening…" headline + no stepper. */
-export type CheckMode = "in" | "out" | "opening";
+ *
+ *  "in" / "out" — full visual machinery (rings, stepper, progress bar,
+ *  elapsed counter). Used by /check-in and /check-out while the real
+ *  DB work runs.
+ *
+ *  "opening" — lighter variant used by tap-feedback overlays on the
+ *  home / shifts / Up-Next cards: same brand circle + rings, no
+ *  stepper, headline "Opening…". Fits the rep moving INTO a shift
+ *  screen (Check in / Resume).
+ *
+ *  "leaving" — same lightweight variant as "opening" but with a
+ *  "Wrapping up…" headline. Used when the rep taps Check out from
+ *  /active and we want immediate visual feedback while the
+ *  /check-out page mounts. "Opening…" was the wrong word for that
+ *  path — the rep is leaving the store, not opening anything. */
+export type CheckMode = "in" | "out" | "opening" | "leaving";
 
 export function CheckingInOverlay({
   customerName,
@@ -59,6 +69,7 @@ export function CheckingInOverlay({
 
   const headline = (() => {
     if (mode === "opening") return "Opening…";
+    if (mode === "leaving") return "Wrapping up…";
     if (mode === "out") {
       if (phase === "done") return "You're checked out!";
       if (phase === "logging") return "Logging the details…";
@@ -74,7 +85,9 @@ export function CheckingInOverlay({
       role="status"
       aria-live="polite"
       aria-label={
-        mode === "opening"
+        // "opening" / "leaving" are lightweight tap-feedback modes
+        // with no customer-specific framing — just the action label.
+        mode === "opening" || mode === "leaving"
           ? headline
           : `${headline}${customerName ? ` at ${customerName}` : ""}`
       }
@@ -144,12 +157,13 @@ export function CheckingInOverlay({
             // Icon swaps with phase + mode:
             //   - done → tick (universal "complete" signal)
             //   - check-out in flight → "leave" (door / exit glyph)
+            //   - leaving (lightweight tap → /check-out) → "leave"
             //   - check-in in flight → "pin" (drop-pin / arrival)
             //   - opening → "arrow-r" (forward motion)
             name={
               phase === "done"
                 ? "check"
-                : mode === "out"
+                : mode === "out" || mode === "leaving"
                 ? "leave"
                 : mode === "opening"
                 ? "arrow-r"
@@ -194,6 +208,10 @@ export function CheckingInOverlay({
           <>
             Loading{customerName ? <> · <b style={{ color: MC.ink }}>{customerName}</b></> : null}
           </>
+        ) : mode === "leaving" ? (
+          <>
+            Closing out{customerName ? <> · <b style={{ color: MC.ink }}>{customerName}</b></> : null}
+          </>
         ) : mode === "out" ? (
           phase === "done" ? (
             <>Nicely done — you&apos;re off the clock at <b style={{ color: MC.ink }}>{customerName}</b>.</>
@@ -237,9 +255,10 @@ export function CheckingInOverlay({
 
       {/* Stepper — 3 dots labelled "Saving", "Logging", "Done".
           The active dot pulses; completed dots tick. Skipped in
-          "opening" mode because we don't know real phases yet —
-          just the pulsing brand circle is enough during navigation. */}
-      {mode !== "opening" && (
+          the lightweight "opening" / "leaving" modes because we
+          don't know real phases yet — just the pulsing brand circle
+          is enough during navigation. */}
+      {mode !== "opening" && mode !== "leaving" && (
         <div
           style={{
             display: "flex",

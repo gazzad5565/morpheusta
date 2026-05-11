@@ -31,6 +31,12 @@ export interface Customer {
   /** Per-customer override for late/early timing exceptions.
    *  null = inherit org-wide app_settings.timing_exceptions_enabled. */
   timingExceptionsEnabled?: boolean | null;
+  /** Base64 data URL of the customer logo (small compressed JPEG).
+   *  Uploaded from the admin customer-edit form. The mobile rep app
+   *  renders this in place of the coloured-initials tile when set.
+   *  Null = use the initials-tile fallback. See compressCustomerLogo
+   *  in customers-store.ts. */
+  logoUrl?: string | null;
 }
 
 /**

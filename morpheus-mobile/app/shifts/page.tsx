@@ -876,7 +876,7 @@ function ShiftRow({
           textAlign: "left",
         }}
       >
-        <CustomerTile initials={shift.initials} color={shift.color} size={52} />
+        <CustomerTile initials={shift.initials} color={shift.color} size={52} logoUrl={shift.logoUrl} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
@@ -1336,18 +1336,20 @@ function ShiftRow({
               <span>Shift complete. Nice work.</span>
             </div>
           ) : isInProgress ? (
+            // Directions used to live next to Resume here but it was
+            // a dead button — no onClick, no Link. Removed (May 11).
+            // The dashboard Up Next card carries the in-app Directions
+            // preview + Open-in-Maps handoff, and the /route page has
+            // per-leg deep links. This row is for checking in /
+            // resuming; navigation lives on the screens designed for it.
             <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" style={secondaryBtn}>
-                <Glyph name="pin" size={16} color={MC.ink2} />
-                <span>Directions</span>
-              </button>
               <button
                 type="button"
                 onClick={onResume}
                 disabled={navigating}
                 style={{
                   ...secondaryBtn,
-                  flex: 1.4,
+                  flex: 1,
                   opacity: navigating ? 0.7 : 1,
                   cursor: navigating ? "wait" : "pointer",
                 }}
@@ -1377,18 +1379,16 @@ function ShiftRow({
               </button>
             </div>
           ) : (
+            // Same reasoning as above — dead Directions button removed.
+            // Check-in is the single action on a not-yet-started row.
             <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" style={secondaryBtn}>
-                <Glyph name="pin" size={16} color={MC.ink2} />
-                <span>Directions</span>
-              </button>
               <button
                 type="button"
                 onClick={onCheckIn}
                 disabled={navigating}
                 style={{
                   ...secondaryBtn,
-                  flex: 1.4,
+                  flex: 1,
                   opacity: navigating ? 0.7 : 1,
                   cursor: navigating ? "wait" : "pointer",
                 }}

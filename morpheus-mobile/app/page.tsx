@@ -499,6 +499,69 @@ export default function DashboardPage() {
         onClosePreview={() => setDirectionsPreview(null)}
       />
 
+      {/* Plan my day — entry point into /route. Only render when the
+          rep actually has multiple stops; a single shift doesn't need
+          a "route" since Up Next already handles the one-tap travel /
+          directions path. Hides while shifts are still loading so we
+          don't flash the card in and out. */}
+      {shiftsLoaded && shifts.length >= 2 && (
+        <Link
+          href="/route"
+          style={{ padding: "0 16px 4px", textDecoration: "none", display: "block" }}
+        >
+          <div
+            style={{
+              background: MC.card,
+              borderRadius: MC.radiusCard,
+              border: `1px solid ${MC.line}`,
+              padding: 14,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              boxShadow: "0 1px 0 rgba(10,15,30,.02)",
+            }}
+          >
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 10,
+                background: MC.okTint,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Glyph name="target" size={20} color={MC.ok} strokeWidth={2.2} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: MC.ink,
+                  letterSpacing: -0.2,
+                }}
+              >
+                Plan my day
+              </div>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 12,
+                  color: MC.mute,
+                  marginTop: 2,
+                }}
+              >
+                {shifts.length} stops · live traffic ETAs + Leave-by reminders
+              </div>
+            </div>
+            <Glyph name="chev-r" size={18} color={MC.hint} />
+          </div>
+        </Link>
+      )}
+
       {/* Up Next — primary CTA */}
       <UpNextCard
         shifts={shifts}
@@ -676,11 +739,41 @@ function UpNextCard({
    *  destination-mount isn't a silent dead zone. */
   onOpenShift: (mode: CheckMode, customerName: string, href: string) => void;
 }) {
-  // Prefer the in-progress shift; otherwise the earliest scheduled one.
-  const inProgress = shifts.find((s) => s.state === "in-progress");
-  const scheduled = shifts.find((s) => s.state === "scheduled");
-  const next = inProgress || scheduled || null;
-  const isResume = !!inProgress;
+  // Pick the rep's "up next" shift.
+  //
+  // Bug fix (May 11 — second pass): the original code only looked at
+  // 'in-progress' and 'scheduled'. The shift state machine has other
+  // live values too:
+  //   - 'travelling' — rep started a travel timer toward the site
+  //   - 'on-break'   — rep is mid-shift, paused
+  //   - 'late'       — start time passed without check-in
+  // When the rep's only remaining shift was in one of those states
+  // (e.g. they had 4/5 complete and the last one was 'travelling'),
+  // `next` came back null and the card falsely rendered "No shift
+  // assigned today" — even though shifts.length > 0 and the progress
+  // strip above clearly showed work remaining.
+  //
+  // New rule: anything that isn't terminal is a candidate. Priority
+  // order surfaces the most urgent state first so the CTA reads
+  // sensibly. Cancelled shifts are already filtered out server-side
+  // (see listMyShiftsToday in lib/shifts-store.ts) so we only have to
+  // exclude 'complete' here.
+  const PRIORITY: Record<string, number> = {
+    "in-progress": 0,
+    "on-break": 1,
+    travelling: 2,
+    late: 3,
+    scheduled: 4,
+  };
+  const candidates = shifts
+    .filter((s) => s.state !== "complete" && PRIORITY[s.state] !== undefined)
+    .sort((a, b) => PRIORITY[a.state] - PRIORITY[b.state]);
+  const next = candidates[0] || null;
+  // "Resume" means the rep already has a live shift on-the-go — any
+  // non-scheduled live state qualifies. Without this, a rep mid-break
+  // saw "Check in to shift" again on the up-next card.
+  const isResume =
+    !!next && (next.state === "in-progress" || next.state === "on-break" || next.state === "travelling");
   void inProgressCount; // currently unused; kept for future polish
   const [now, setNow] = useState(Date.now());
 
@@ -708,9 +801,14 @@ function UpNextCard({
 
   // Empty state: distinguish "no shifts at all" vs "all shifts done today".
   // A rep who completed every shift shouldn't be told "no shift assigned".
+  // "Done" here means any terminal state — complete or cancelled — so the
+  // celebration fires even if one of the day's shifts ended up cancelled
+  // by a manager. (cancelled is normally filtered server-side, but
+  // mirroring the rule here keeps the check honest.)
   if (loaded && !next) {
     const totalToday = shifts.length;
-    const allDone = totalToday > 0 && shifts.every((s) => s.state === "complete");
+    const TERMINAL = new Set(["complete", "cancelled"]);
+    const allDone = totalToday > 0 && shifts.every((s) => TERMINAL.has(s.state));
     if (allDone) {
       return (
         <div style={{ padding: "12px 16px 0" }}>
@@ -910,7 +1008,7 @@ function UpNextCard({
           <div
             style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 14 }}
           >
-            <CustomerTile initials={next.initials} color={next.color} size={48} />
+            <CustomerTile initials={next.initials} color={next.color} size={48} logoUrl={next.logoUrl} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{

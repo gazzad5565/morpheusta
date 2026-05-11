@@ -8,7 +8,7 @@
  *   geofence radius. Save round-trips through updateCustomer.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
@@ -19,7 +19,13 @@ import { Combobox } from "@/components/ui/Combobox";
 import { inputStyle } from "@/components/ui/Filters";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
-import { getCustomer, updateCustomer, deleteCustomer } from "@/lib/customers-store";
+import {
+  getCustomer,
+  updateCustomer,
+  updateCustomerLogo,
+  compressCustomerLogo,
+  deleteCustomer,
+} from "@/lib/customers-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
@@ -67,6 +73,14 @@ export default function EditCustomerPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // Logo upload: optimistic — we save immediately on file pick so the
+  // manager can see the new logo right away without waiting for the
+  // full form Save. Cleared (and persisted) via the inline Remove
+  // button next to the preview.
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   // Auto-derive initials from name until the user manually edits the
   // initials field. Same behaviour as /customers/new.
@@ -93,6 +107,7 @@ export default function EditCustomerPage() {
         setGeofenceM(c.geofence ?? 100);
         setLocExceptionsOverride(c.locationExceptionsEnabled ?? null);
         setTimeExceptionsOverride(c.timingExceptionsEnabled ?? null);
+        setLogoUrl(c.logoUrl ?? null);
       }
       setLoading(false);
     })();
@@ -109,8 +124,44 @@ export default function EditCustomerPage() {
       code: code || original.code,
       initials: initials || original.initials,
       color,
+      logoUrl,
     };
-  }, [original, name, code, initials, color]);
+  }, [original, name, code, initials, color, logoUrl]);
+
+  async function onPickLogo(file: File | null | undefined) {
+    if (!file) return;
+    setLogoError(null);
+    setLogoUploading(true);
+    const compressed = await compressCustomerLogo(file);
+    if (!compressed.ok) {
+      setLogoUploading(false);
+      setLogoError(compressed.error);
+      return;
+    }
+    const result = await updateCustomerLogo(id, compressed.dataUrl);
+    setLogoUploading(false);
+    if (!result.ok) {
+      setLogoError(result.error || "Couldn't save the logo.");
+      return;
+    }
+    setLogoUrl(compressed.dataUrl);
+  }
+
+  async function onRemoveLogo() {
+    if (!logoUrl) return;
+    if (!confirm("Remove this customer's logo? The initials tile will show again.")) {
+      return;
+    }
+    setLogoUploading(true);
+    setLogoError(null);
+    const result = await updateCustomerLogo(id, null);
+    setLogoUploading(false);
+    if (!result.ok) {
+      setLogoError(result.error || "Couldn't remove the logo.");
+      return;
+    }
+    setLogoUrl(null);
+  }
 
   async function onSave() {
     if (busy) return;
@@ -277,6 +328,113 @@ export default function EditCustomerPage() {
                 />
               ))}
             </div>
+          </Field>
+
+          {/* Logo upload — overrides the initials tile in the rep app.
+              Saves immediately on pick (separate from the form Save
+              button) because file uploads are their own commit-step
+              UX: managers want to see the new logo land before
+              fiddling with the rest of the form. We compress to a
+              tiny base64 JPEG so it travels in the same row as the
+              customer — no Supabase Storage round-trip per render. */}
+          <Field
+            label="Customer logo"
+            hint={
+              logoUrl
+                ? "Replaces the initials tile in the rep app. Compressed automatically to keep mobile data tight."
+                : "Optional. Upload an image to show in place of the initials tile on the rep's device."
+            }
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <div
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 12,
+                  background: logoUrl ? "#fff" : color,
+                  border: `1px solid ${AC.line}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#fff",
+                  fontFamily: AC.font,
+                  fontWeight: 700,
+                  fontSize: 20,
+                  letterSpacing: 0.4,
+                  flexShrink: 0,
+                  overflow: "hidden",
+                }}
+              >
+                {logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={logoUrl}
+                    alt="Customer logo"
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "contain",
+                      display: "block",
+                      background: "#fff",
+                    }}
+                  />
+                ) : (
+                  <span>{(initials || deriveInitials(name) || "??").slice(0, 3)}</span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn
+                  onClick={() => logoInputRef.current?.click()}
+                  disabled={logoUploading}
+                >
+                  {logoUploading
+                    ? "Uploading…"
+                    : logoUrl
+                    ? "Replace logo"
+                    : "Upload logo"}
+                </Btn>
+                {logoUrl && (
+                  <Btn
+                    kind="danger"
+                    onClick={onRemoveLogo}
+                    disabled={logoUploading}
+                  >
+                    Remove
+                  </Btn>
+                )}
+              </div>
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  // Reset so re-picking the same file fires onChange.
+                  e.target.value = "";
+                  void onPickLogo(file);
+                }}
+                style={{ display: "none" }}
+              />
+            </div>
+            {logoError && (
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 12,
+                  color: "#9c1a3c",
+                  fontFamily: AC.font,
+                }}
+              >
+                {logoError}
+              </div>
+            )}
           </Field>
 
           <Field label="Region">

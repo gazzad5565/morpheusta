@@ -41,6 +41,7 @@ export type EventType =
   | "request.declined"
   // Customers
   | "customer.created"
+  | "customer.updated"
   | "customer.deactivated"
   | "customer.reactivated"
   | "customer.deleted"
@@ -216,6 +217,7 @@ export const EVENT_LABEL: Record<EventType, string> = {
   "request.scheduled": "approved a request",
   "request.declined": "declined a request",
   "customer.created": "added a customer",
+  "customer.updated": "updated a customer",
   "customer.deactivated": "deactivated a customer",
   "customer.reactivated": "reactivated a customer",
   "customer.deleted": "deleted a customer",
