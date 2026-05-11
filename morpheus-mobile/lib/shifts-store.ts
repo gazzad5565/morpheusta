@@ -184,6 +184,11 @@ export async function listMyShiftsToday(): Promise<
     .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("rep_id", userId)
     .eq("shift_date", today)
+    // Cancelled shifts (manager resolved an attention flag with Cancel,
+    // or cancelled outright) shouldn't appear in the rep's today list —
+    // they're done from the rep's perspective. The audit row in
+    // shift_events preserves the trail.
+    .neq("state", "cancelled")
     .order("start_time", { ascending: true });
 
   if (error) {
@@ -257,6 +262,8 @@ export async function listUnassignedShiftsToday(): Promise<
     .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .is("rep_id", null)
     .eq("shift_date", todayISO())
+    // Cancelled shifts aren't claimable.
+    .neq("state", "cancelled")
     .order("start_time", { ascending: true });
 
   if (error) {

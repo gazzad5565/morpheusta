@@ -12,6 +12,7 @@ import {
   getOrganisationLogoUrl,
 } from "@/lib/settings-store";
 import { listPendingRequests, subscribeRequests } from "@/lib/requests-store";
+import { listOpenAttentionShifts, subscribeShifts } from "@/lib/shifts-store";
 import { nameFromEmail, initialsFromNameOrEmail } from "@/lib/format";
 
 function userDisplayBits(email: string | null | undefined): { name: string; initials: string } {
@@ -29,10 +30,15 @@ export function Sidebar() {
   // fall back to the built-in MORPHEUS / Field Operations Suite block.
   const [orgName, setOrgName] = useState<string>("");
   const [orgLogoUrl, setOrgLogoUrl] = useState<string>("");
-  // Pending-rep-request count, kept live across every page so the
-  // manager always sees a flashing badge on Live Ops when something
-  // needs their attention — even if they're elsewhere in the app.
+  // Two queues both feed the Live Ops "Needs action" badge:
+  //   - Pending rep-requests for NEW shifts (requested_shifts table)
+  //   - Open unable-to-attend overlays on EXISTING shifts (shifts.attention)
+  // The badge sums them — one number tells the manager exactly how
+  // many things still want their attention. Kept live across every
+  // page so they see it no matter where they are.
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [attentionCount, setAttentionCount] = useState<number>(0);
+  const needsActionCount = pendingCount + attentionCount;
   useEffect(() => {
     let cancelled = false;
     getUser().then((u) => {
@@ -78,11 +84,37 @@ export function Sidebar() {
     };
   }, []);
 
+  // Attention overlay — same defence-in-depth: initial fetch +
+  // realtime shifts subscription + visibility refetch + 60s poll.
+  // Drives the sidebar badge in lockstep with pendingCount so a
+  // rep flagging "I can't make it" lights up Live Ops everywhere.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const rows = await listOpenAttentionShifts();
+      if (!cancelled) setAttentionCount(rows.length);
+    };
+    refresh();
+    const unsub = subscribeShifts(refresh);
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    const poll = window.setInterval(refresh, 60_000);
+    return () => {
+      cancelled = true;
+      unsub();
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(poll);
+    };
+  }, []);
+
   // Also refetch on every pathname change — covers the timing window
   // where a request lands while a fresh realtime channel hasn't quite
   // connected, or when the websocket dropped between page nav.
   useEffect(() => {
     listPendingRequests().then((rows) => setPendingCount(rows.length));
+    listOpenAttentionShifts().then((rows) => setAttentionCount(rows.length));
   }, [pathname]);
 
   // Browser tab title alert — prepend "(N) " when something needs
@@ -91,11 +123,12 @@ export function Sidebar() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const original = document.title.replace(/^\(\d+\)\s+/, "");
-    document.title = pendingCount > 0 ? `(${pendingCount}) ${original}` : original;
+    document.title =
+      needsActionCount > 0 ? `(${needsActionCount}) ${original}` : original;
     return () => {
       document.title = original;
     };
-  }, [pendingCount]);
+  }, [needsActionCount]);
   const { name: userName, initials: userInitials } = userDisplayBits(userEmail);
   const userRole = userEmail ? "Field Ops Manager" : "";
   const handleLogout = () => {
@@ -319,7 +352,7 @@ export function Sidebar() {
             // rep requests — the dashboard's Live Feed is where you go
             // to deal with them, so this tells the manager "you have
             // something to handle" from anywhere in the admin.
-            badgeCount={item.id === "ops" ? pendingCount : 0}
+            badgeCount={item.id === "ops" ? needsActionCount : 0}
           />
         ))}
       </div>
@@ -646,7 +679,7 @@ function NavItem({
       {badgeCount > 0 && (
         <span
           className="sb-pulse"
-          title={`${badgeCount} pending request${badgeCount === 1 ? "" : "s"}`}
+          title={`${badgeCount} item${badgeCount === 1 ? "" : "s"} need${badgeCount === 1 ? "s" : ""} action`}
           style={{
             fontFamily: AC.font,
             fontSize: 10.5,

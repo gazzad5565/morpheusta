@@ -2010,6 +2010,12 @@ function DraggableShiftCard({
   const stateBodyTint = STATE_BODY_TINT[shift.state] || `${color}18`;
   const isComplete = shift.state === "complete";
   const isDraggable = shift.state === "scheduled";
+  // Open attention overlay (rep flagged unable-to-attend, manager
+  // hasn't actioned). Drives a thick amber left-border + a warn
+  // pin on the card so the manager spots it at a glance without
+  // opening the popover.
+  const attentionOpen =
+    !!shift.attention && !shift.attention_resolved_at;
 
   const [popoverOpen, setPopoverOpen] = useState(false);
 
@@ -2051,7 +2057,10 @@ function DraggableShiftCard({
         left: `calc(${lanePct}% + 2px)`,
         right: `calc(${remainingPct}% + 2px)`,
         background: stateBodyTint,
-        borderLeft: `3px solid ${color}`,
+        // Attention overlay overrides the customer-coloured left rail
+        // with a thick amber bar so the manager spots the row instantly.
+        borderLeft: attentionOpen ? `4px solid #E5A017` : `3px solid ${color}`,
+        outline: attentionOpen ? `1px solid #E5A01755` : "none",
         borderRadius: 5,
         padding: "4px 7px",
         textDecoration: "none",
@@ -2061,7 +2070,11 @@ function DraggableShiftCard({
         opacity: dimmed ? 0.35 : isComplete ? 0.7 : 1,
         cursor: isDraggable ? "grab" : "pointer",
         overflow: "hidden",
-        boxShadow: dimmed ? "none" : "0 1px 2px rgba(10,15,30,.06)",
+        boxShadow: dimmed
+          ? "none"
+          : attentionOpen
+          ? "0 1px 2px rgba(229,160,23,0.35), 0 0 0 0 transparent"
+          : "0 1px 2px rgba(10,15,30,.06)",
         // Make sure scheduled (draggable) cards always sit ABOVE
         // complete cards in the rare case they share a lane — defends
         // against the silent "drag does nothing" bug if the layout
@@ -2080,9 +2093,28 @@ function DraggableShiftCard({
           overflow: "hidden",
           textOverflow: "ellipsis",
           textDecoration: isComplete ? "line-through" : "none",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
         }}
       >
-        {repLabel}
+        {attentionOpen && (
+          <span
+            title="Rep flagged unable to attend"
+            aria-label="Unable to attend"
+            style={{ display: "inline-flex", flexShrink: 0 }}
+          >
+            <AGlyph name="warn" size={11} color="#E5A017" />
+          </span>
+        )}
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {repLabel}
+        </span>
       </div>
 
       {/* Corner state dot — always visible, even on cards too short

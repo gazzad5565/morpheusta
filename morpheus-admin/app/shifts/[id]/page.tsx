@@ -24,13 +24,57 @@ import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import { AC } from "@/lib/tokens";
-import { getShiftById, isShiftEditable, type ShiftRow } from "@/lib/shifts-store";
+import {
+  getShiftById,
+  isShiftEditable,
+  reassignShift,
+  releaseShift,
+  acknowledgeAttention,
+  cancelShiftFromAttention,
+  type ShiftRow,
+} from "@/lib/shifts-store";
 import { listTasksForCustomer, type TaskRow } from "@/lib/tasks-store";
-import { getProfileById, type Profile, displayName } from "@/lib/profiles-store";
+import {
+  getProfileById,
+  listProfiles,
+  type Profile,
+  displayName,
+} from "@/lib/profiles-store";
+import { Combobox } from "@/components/ui/Combobox";
 import {
   listCompletionsForShift,
   type ShiftTaskCompletion,
 } from "@/lib/task-completions-store";
+
+function attentionReasonLabel(value: string | null | undefined): string {
+  switch (value) {
+    case "sick":
+      return "Sick / unwell";
+    case "family":
+      return "Family emergency";
+    case "double_booked":
+      return "Double-booked";
+    case "transport":
+      return "Transport problem";
+    case "other":
+      return "Other";
+    default:
+      return value || "Unspecified";
+  }
+}
+
+function relativeAgo(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
 
 function formatTimeRange(start: string, end: string): string {
   const fmt = (t: string) => {
@@ -91,12 +135,28 @@ export default function ShiftDetailPage({
   const [rep, setRep] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // Rep roster for the Reassign picker — loaded alongside the shift.
+  const [reps, setReps] = useState<Profile[]>([]);
+  const [attBusy, setAttBusy] = useState(false);
+  const [attPickerOpen, setAttPickerOpen] = useState(false);
+  const [attPickedRepId, setAttPickedRepId] = useState<string | null>(null);
+
+  // Reload the shift after a manager action so the banner clears (or
+  // navigates away if the shift was cancelled).
+  const reloadShift = async () => {
+    const s = await getShiftById(id);
+    if (s) setShift(s);
+  };
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const s = await getShiftById(id);
+      const [s, repList] = await Promise.all([
+        getShiftById(id),
+        listProfiles({ role: "rep" }),
+      ]);
       if (cancelled) return;
+      setReps(repList);
       if (!s) {
         setNotFound(true);
         setLoading(false);
@@ -118,6 +178,73 @@ export default function ShiftDetailPage({
       cancelled = true;
     };
   }, [id]);
+
+  const onAttReassign = async () => {
+    if (!shift || !attPickedRepId) return;
+    setAttBusy(true);
+    const r = await reassignShift(shift.id, attPickedRepId);
+    setAttBusy(false);
+    if (!r.ok) {
+      alert(`Couldn't reassign: ${r.error}`);
+      return;
+    }
+    setAttPickerOpen(false);
+    setAttPickedRepId(null);
+    await reloadShift();
+  };
+  const onAttRelease = async () => {
+    if (!shift) return;
+    if (
+      !confirm(
+        `Release this shift to the claimable pool? Any rep can pick it up.`
+      )
+    )
+      return;
+    setAttBusy(true);
+    const r = await releaseShift(shift.id);
+    setAttBusy(false);
+    if (!r.ok) {
+      alert(`Couldn't release: ${r.error}`);
+      return;
+    }
+    await reloadShift();
+  };
+  const onAttAcknowledge = async () => {
+    if (!shift) return;
+    if (
+      !confirm(
+        `Acknowledge this as resolved without changing assignment? Use this when you've sorted things out with the rep directly.`
+      )
+    )
+      return;
+    setAttBusy(true);
+    const r = await acknowledgeAttention(shift.id);
+    setAttBusy(false);
+    if (!r.ok) {
+      alert(`Couldn't acknowledge: ${r.error}`);
+      return;
+    }
+    await reloadShift();
+  };
+  const onAttCancel = async () => {
+    if (!shift) return;
+    if (
+      !confirm(
+        `Cancel this shift? It'll be marked cancelled; this can't be undone here (you'd need to recreate it).`
+      )
+    )
+      return;
+    setAttBusy(true);
+    const r = await cancelShiftFromAttention(shift.id);
+    setAttBusy(false);
+    if (!r.ok) {
+      alert(`Couldn't cancel: ${r.error}`);
+      return;
+    }
+    // After cancelling, send the admin back to the schedule so they
+    // don't sit on a now-cancelled shift detail page.
+    router.push("/schedule");
+  };
 
   if (loading) {
     return (
@@ -202,6 +329,178 @@ export default function ShiftDetailPage({
       >
         {/* Left: shift summary + tasks */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Attention banner — only when the rep has flagged
+              unable-to-attend and the manager hasn't actioned it
+              yet. The same four resolutions Live Ops shows, but in a
+              roomier layout since the detail page has space. */}
+          {shift.attention === "unable_to_attend" &&
+            !shift.attention_resolved_at && (
+              <Card padding={0}>
+                <div
+                  style={{
+                    padding: 16,
+                    background: AC.warnTint,
+                    borderLeft: `4px solid ${AC.warn}`,
+                    borderTopLeftRadius: 14,
+                    borderTopRightRadius: 14,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      marginBottom: 6,
+                    }}
+                  >
+                    <AGlyph name="warn" size={18} color={AC.warn} />
+                    <div
+                      style={{
+                        fontFamily: AC.font,
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: "#6d4808",
+                        letterSpacing: -0.1,
+                      }}
+                    >
+                      Rep is unable to attend
+                    </div>
+                    <span style={{ flex: 1 }} />
+                    <span
+                      style={{
+                        padding: "2px 8px",
+                        borderRadius: 99,
+                        background: "#fff",
+                        color: "#7d5708",
+                        fontFamily: AC.font,
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        letterSpacing: 0.4,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {attentionReasonLabel(shift.attention_reason)}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 12.5,
+                      color: "#6d4808",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {rep ? displayName(rep) : "The assigned rep"} raised this{" "}
+                    {relativeAgo(shift.attention_raised_at)}. Reassign, release
+                    to the claimable pool, acknowledge it as handled offline,
+                    or cancel the shift.
+                  </div>
+                  {shift.attention_note && (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        padding: "8px 10px",
+                        background: "#fff",
+                        border: `1px solid ${AC.warn}55`,
+                        borderRadius: 8,
+                        fontFamily: AC.font,
+                        fontSize: 12.5,
+                        color: "#6d4808",
+                        lineHeight: 1.45,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      “{shift.attention_note}”
+                    </div>
+                  )}
+                </div>
+                <div style={{ padding: 12 }}>
+                  {attPickerOpen ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Combobox
+                          value={attPickedRepId}
+                          onChange={(v) => setAttPickedRepId(v)}
+                          triggerIcon="reps"
+                          placeholder="Pick a rep…"
+                          clearable={false}
+                          options={reps
+                            .filter((r) => r.id !== shift.rep_id)
+                            .map((r) => ({
+                              value: r.id,
+                              label: displayName(r),
+                              sublabel: r.email,
+                            }))}
+                        />
+                      </div>
+                      <Btn
+                        size="sm"
+                        kind="primary"
+                        icon="check"
+                        disabled={attBusy || !attPickedRepId}
+                        onClick={onAttReassign}
+                      >
+                        Reassign
+                      </Btn>
+                      <Btn
+                        size="sm"
+                        onClick={() => {
+                          setAttPickerOpen(false);
+                          setAttPickedRepId(null);
+                        }}
+                        disabled={attBusy}
+                      >
+                        Cancel
+                      </Btn>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <Btn
+                        size="sm"
+                        kind="primary"
+                        icon="reps"
+                        onClick={() => setAttPickerOpen(true)}
+                        disabled={attBusy}
+                      >
+                        Reassign
+                      </Btn>
+                      <Btn
+                        size="sm"
+                        icon="send"
+                        onClick={onAttRelease}
+                        disabled={attBusy}
+                      >
+                        Release
+                      </Btn>
+                      <Btn
+                        size="sm"
+                        icon="check"
+                        onClick={onAttAcknowledge}
+                        disabled={attBusy}
+                      >
+                        Acknowledge
+                      </Btn>
+                      <Btn
+                        size="sm"
+                        kind="danger"
+                        icon="x"
+                        onClick={onAttCancel}
+                        disabled={attBusy}
+                      >
+                        Cancel shift
+                      </Btn>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            )}
+
           {/* Header card */}
           <Card padding={20}>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
