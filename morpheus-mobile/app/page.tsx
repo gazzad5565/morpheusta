@@ -423,8 +423,11 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Real map of today's shift locations + the rep's own GPS dot. */}
-      {shiftsLoaded && shifts.length > 0 && <DashboardMap shifts={shifts} />}
+      {/* Map of today's shifts + the rep's GPS dot. Always rendered
+          (no shifts-loaded gate) so the home screen doesn't reflow
+          every time the app cold-starts — pins just layer in as the
+          shifts data arrives. */}
+      <DashboardMap shifts={shifts} />
 
       {/* Up Next — primary CTA */}
       <UpNextCard

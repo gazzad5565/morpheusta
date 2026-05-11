@@ -44,7 +44,9 @@ import {
 import { Combobox } from "@/components/ui/Combobox";
 import {
   listCompletionsForShift,
+  getActiveTaskForShift,
   type ShiftTaskCompletion,
+  type ActiveTask,
 } from "@/lib/task-completions-store";
 
 function attentionReasonLabel(value: string | null | undefined): string {
@@ -136,6 +138,14 @@ export default function ShiftDetailPage({
   const [rep, setRep] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // Currently-active task for in-progress shifts. Refreshed every
+  // 30s alongside the live timer so the admin sees "started 12 min
+  // ago" tick up.
+  const [activeTask, setActiveTask] = useState<ActiveTask | null>(null);
+  // `now` is bumped every second so the live timer + active-task
+  // "started X ago" labels tick. Cheap setState; only renders the
+  // numeric labels.
+  const [now, setNow] = useState<number>(() => Date.now());
   // Rep roster for the Reassign picker — loaded alongside the shift.
   const [reps, setReps] = useState<Profile[]>([]);
   const [attBusy, setAttBusy] = useState(false);
@@ -192,21 +202,45 @@ export default function ShiftDetailPage({
         return;
       }
       setShift(s);
-      const [taskRows, comps, repProfile] = await Promise.all([
+      const [taskRows, comps, repProfile, active] = await Promise.all([
         listTasksForCustomer(s.customer_id),
         listCompletionsForShift(s.id),
         s.rep_id ? getProfileById(s.rep_id) : Promise.resolve(null),
+        s.state === "in-progress" || s.state === "on-break"
+          ? getActiveTaskForShift(s.id)
+          : Promise.resolve(null),
       ]);
       if (cancelled) return;
       setTasks(taskRows);
       setCompletions(comps);
       setRep(repProfile);
+      setActiveTask(active);
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
   }, [id]);
+
+  // Live timer + periodic active-task refresh while the shift is
+  // in-progress (or on-break). 1s tick for the elapsed display;
+  // 30s polling re-fetches the active task in case the rep starts a
+  // new one. Both intervals shut down when the shift is no longer
+  // live so we don't burn battery on a completed shift's detail page.
+  useEffect(() => {
+    if (!shift) return;
+    const live = shift.state === "in-progress" || shift.state === "on-break";
+    if (!live) return;
+    const tickHandle = setInterval(() => setNow(Date.now()), 1000);
+    const refreshHandle = setInterval(async () => {
+      const next = await getActiveTaskForShift(shift.id);
+      setActiveTask(next);
+    }, 30_000);
+    return () => {
+      clearInterval(tickHandle);
+      clearInterval(refreshHandle);
+    };
+  }, [shift?.id, shift?.state]);
 
   const onAttReassign = async () => {
     if (!shift || !attPickedRepId) return;
@@ -738,6 +772,20 @@ export default function ShiftDetailPage({
             )}
           </Card>
 
+          {/* Live card — only renders for in-progress / on-break
+              shifts. Shows when the rep checked in, the current
+              clock time, elapsed since check-in (live-ticking), and
+              the task they're working on right now (polled every
+              30 s). Disappears the moment the shift completes. */}
+          {(shift.state === "in-progress" || shift.state === "on-break") && (
+            <LiveActivityCard
+              checkInAt={shift.check_in_at}
+              now={now}
+              activeTask={activeTask}
+              onBreak={shift.state === "on-break"}
+            />
+          )}
+
           {/* Tasks card */}
           <Card padding={0}>
             <div
@@ -1047,4 +1095,146 @@ function TaskCompletionRow({
       </div>
     </div>
   );
+}
+
+/**
+ * LiveActivityCard — live readout for in-progress / on-break shifts.
+ * Shows when the rep checked in, the current clock time, elapsed
+ * since check-in, and whatever task they're working on RIGHT NOW
+ * (polled every 30 s by the parent). Brand-tinted with a pulsing
+ * dot so a manager glancing at the page instantly knows the shift
+ * is live.
+ */
+function LiveActivityCard({
+  checkInAt,
+  now,
+  activeTask,
+  onBreak,
+}: {
+  checkInAt: string | null;
+  now: number;
+  activeTask: ActiveTask | null;
+  onBreak: boolean;
+}) {
+  const checkInMs = checkInAt ? new Date(checkInAt).getTime() : null;
+  const elapsedMs =
+    checkInMs && Number.isFinite(checkInMs) ? Math.max(0, now - checkInMs) : null;
+  const elapsedLabel = formatElapsed(elapsedMs);
+  const checkInLabel = checkInMs
+    ? new Date(checkInMs).toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "—";
+  const nowLabel = new Date(now).toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const taskStartedMs = activeTask
+    ? new Date(activeTask.startedAt).getTime()
+    : null;
+  const taskElapsedLabel =
+    taskStartedMs && Number.isFinite(taskStartedMs)
+      ? formatElapsed(now - taskStartedMs)
+      : null;
+  const tone = onBreak ? "#5b3da5" : AC.brand;
+  const toneTint = onBreak ? "#EDE7F8" : AC.brandTint;
+  const toneDeep = onBreak ? "#3d2570" : AC.brandDeep;
+
+  return (
+    <Card padding={0}>
+      <div
+        style={{
+          padding: "12px 16px",
+          background: toneTint,
+          borderTopLeftRadius: 14,
+          borderTopRightRadius: 14,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <span
+          style={{
+            display: "inline-block",
+            width: 10,
+            height: 10,
+            borderRadius: 99,
+            background: tone,
+            boxShadow: `0 0 0 4px ${tone}44`,
+            animation: "live-pulse 1.4s ease-out infinite",
+          }}
+        />
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11,
+            fontWeight: 700,
+            color: toneDeep,
+            letterSpacing: 0.5,
+            textTransform: "uppercase",
+          }}
+        >
+          {onBreak ? "On break" : "Live"}
+        </div>
+        <div style={{ flex: 1 }} />
+        <div
+          style={{
+            fontFamily: AC.fontMono,
+            fontSize: 12,
+            color: toneDeep,
+            fontWeight: 600,
+          }}
+        >
+          {nowLabel}
+        </div>
+      </div>
+      <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+        <Stat label="Checked in" value={checkInLabel} />
+        <Stat label="Elapsed" value={elapsedLabel || "—"} />
+        <Stat
+          label={activeTask ? "Working on" : "Activity"}
+          value={
+            onBreak
+              ? "On break"
+              : activeTask?.taskName ||
+                (activeTask ? "(task name missing)" : "Between tasks")
+          }
+        />
+      </div>
+      {activeTask && taskElapsedLabel && (
+        <div
+          style={{
+            padding: "0 16px 14px",
+            fontFamily: AC.font,
+            fontSize: 12,
+            color: AC.mute,
+            lineHeight: 1.4,
+          }}
+        >
+          Started {taskElapsedLabel} ago.
+        </div>
+      )}
+      <style>{`
+        @keyframes live-pulse {
+          0%   { box-shadow: 0 0 0 0   ${tone}55; }
+          70%  { box-shadow: 0 0 0 10px ${tone}00; }
+          100% { box-shadow: 0 0 0 0   ${tone}00; }
+        }
+      `}</style>
+    </Card>
+  );
+}
+
+/** "1h 23m" / "12m" / "47s" — pick the chunkiest unit that's sane. */
+function formatElapsed(ms: number | null): string | null {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return null;
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return remMins === 0 ? `${hrs}h` : `${hrs}h ${remMins}m`;
 }

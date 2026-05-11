@@ -118,10 +118,14 @@ export function DashboardMap({
     };
   }, [shifts]);
 
-  // Init map when we have at least one placeable shift.
+  // Init the map immediately on first render, regardless of whether
+  // any shifts have loaded yet. The map being always-on (vs popping
+  // in once data arrives) keeps the home page from doing a big
+  // visual reflow every time the rep opens the app. Pins layer in
+  // separately as shifts data arrives; user-location dot runs
+  // independently.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    if (placed.length === 0) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: STYLE_URL,
@@ -135,7 +139,7 @@ export function DashboardMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [placed.length]);
+  }, []);
 
   // Render shift markers + fit bounds.
   useEffect(() => {
@@ -218,34 +222,11 @@ export function DashboardMap({
     };
   }, [loaded]);
 
-  if (placed.length === 0) {
-    // Nothing to plot. If the rep has shifts but no coords, show a hint;
-    // otherwise render nothing (the shift count above already covers it).
-    if (missing === 0 && shifts.length === 0) return null;
-    return (
-      <div style={{ padding: "12px 16px 0" }}>
-        <div
-          style={{
-            background: MC.card,
-            border: `1px dashed ${MC.line}`,
-            borderRadius: MC.radiusCard,
-            padding: 16,
-            textAlign: "center",
-            fontFamily: MC.font,
-            fontSize: 13,
-            color: MC.mute,
-          }}
-        >
-          {missing > 0
-            ? `${missing} shift${missing === 1 ? "" : "s"} today, but the customer${
-                missing === 1 ? " hasn't" : "s haven't"
-              } got an address yet — ask your manager to add one.`
-            : "Today's route shows up here once you have a shift."}
-        </div>
-      </div>
-    );
-  }
-
+  // The map container ALWAYS renders. When there are no shifts (or
+  // no placeable shifts yet), the map still shows — defaulted to
+  // Cape Town with just the rep's location dot. As shifts load, pins
+  // layer in without any "popping in" reflow. Keeps the home screen
+  // visually stable when the app cold-starts.
   return (
     <div style={{ padding: "12px 16px 0" }}>
       <div

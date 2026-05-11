@@ -81,3 +81,58 @@ export async function listCompletionsForShift(
     };
   });
 }
+
+/**
+ * Look up the task the rep currently has in progress on a given
+ * shift, if any. Computed from the audit log: take the most recent
+ * `shift.task_started` event whose task hasn't yet been completed.
+ * Returns null when no task is active (rep hasn't started anything,
+ * or finished what they started).
+ *
+ * Used by the admin shift detail page for in-progress shifts to
+ * show "Currently working on: Task X · started 12 min ago" alongside
+ * the live timer.
+ */
+export interface ActiveTask {
+  taskId: string;
+  taskName: string | null;
+  startedAt: string;
+}
+
+export async function getActiveTaskForShift(
+  shiftId: string
+): Promise<ActiveTask | null> {
+  if (!isSupabaseConfigured() || !supabase) return null;
+  const [{ data: starts }, { data: completions }] = await Promise.all([
+    supabase
+      .from("shift_events")
+      .select("created_at, meta")
+      .eq("shift_id", shiftId)
+      .eq("event_type", "shift.task_started")
+      .order("created_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("shift_task_completions")
+      .select("task_id, completed_at")
+      .eq("shift_id", shiftId),
+  ]);
+  const startedRows = (starts ?? []) as Array<{
+    created_at: string;
+    meta: { task_id?: string; task_name?: string } | null;
+  }>;
+  const completedSet = new Set<string>(
+    ((completions ?? []) as Array<{ task_id: string }>).map((c) => c.task_id)
+  );
+  for (const ev of startedRows) {
+    const taskId = ev.meta?.task_id;
+    if (!taskId) continue;
+    if (completedSet.has(taskId)) continue;
+    return {
+      taskId,
+      taskName: ev.meta?.task_name ?? null,
+      startedAt: ev.created_at,
+    };
+  }
+  return null;
+}
+
