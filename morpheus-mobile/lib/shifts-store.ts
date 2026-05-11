@@ -198,12 +198,44 @@ export async function saveShiftNotes(
   if (!userId) return { ok: false, error: "Not signed in" };
 
   const trimmed = notes.trim();
-  const { error } = await supabase
+  // Read-back via .select().single() rather than fire-and-forget.
+  // Two failure modes this catches:
+  //   1. The `rep_notes` column doesn't exist yet — Supabase returns
+  //      a "column does not exist" error that we can show the rep
+  //      instead of a silent OK. Migration `2026_05_11_shifts_notes.sql`
+  //      adds the column.
+  //   2. RLS / .eq("rep_id", userId) matched zero rows — UPDATE
+  //      succeeds with rowsAffected=0 (no error). Without the
+  //      .select().single() we'd report "Saved ✓" even though
+  //      nothing landed. .single() turns the empty result into a
+  //      hard error so we surface it.
+  const { data, error } = await supabase
     .from("shifts")
     .update({ rep_notes: trimmed || null })
     .eq("id", shiftId)
-    .eq("rep_id", userId);
-  if (error) return { ok: false, error: error.message };
+    .eq("rep_id", userId)
+    .select("id, rep_notes")
+    .single();
+  if (error) {
+    // Friendlier message when the underlying issue is a missing
+    // column — managers without admin SQL access were getting raw
+    // PostgREST strings and not knowing what to do with them.
+    const m = error.message || "";
+    if (/column .*rep_notes.* does not exist/i.test(m)) {
+      return {
+        ok: false,
+        error:
+          "Notes column not set up yet — ask your admin to run the latest DB migration (shifts.rep_notes).",
+      };
+    }
+    return { ok: false, error: m };
+  }
+  if (!data) {
+    return {
+      ok: false,
+      error: "Couldn't save — this shift may have been reassigned.",
+    };
+  }
   return { ok: true };
 }
 

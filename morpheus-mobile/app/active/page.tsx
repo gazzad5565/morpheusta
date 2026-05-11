@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { type Task } from "@/lib/mock-data";
@@ -1405,7 +1405,7 @@ function ShiftNotesCard({
     return () => window.clearTimeout(id);
   }, [savedAt]);
 
-  async function persist() {
+  const persist = useCallback(async () => {
     const trimmed = text.trim();
     if (trimmed === lastSaved.trim()) return;
     setSaving(true);
@@ -1418,7 +1418,43 @@ function ShiftNotesCard({
     }
     setLastSaved(trimmed);
     setSavedAt(Date.now());
-  }
+  }, [text, lastSaved, shiftId]);
+
+  // Debounced auto-save while typing — fires 1.5s after the last
+  // keystroke. Previously we only saved onBlur, which is fragile on
+  // mobile PWAs: tapping the hardware back button, locking the
+  // screen, or navigating from the side menu doesn't always blur
+  // the textarea, so the user "saves" a note and it never lands.
+  // Belt-and-braces: onBlur still saves immediately so explicit
+  // dismissals are instant.
+  useEffect(() => {
+    if (text.trim() === lastSaved.trim()) return;
+    const t = window.setTimeout(() => {
+      void persist();
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [text, lastSaved, persist]);
+
+  // Save on tab hide / page unload too — a rep who quickly switches
+  // apps after typing should not lose the note. visibilitychange
+  // fires more reliably than beforeunload on mobile browsers; the
+  // unload handler is the desktop / refresh fallback.
+  useEffect(() => {
+    const flush = () => {
+      if (text.trim() !== lastSaved.trim()) {
+        void persist();
+      }
+    };
+    const onVis = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, [text, lastSaved, persist]);
 
   return (
     <div
