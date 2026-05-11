@@ -43,6 +43,12 @@ export function CustomersMap({ customers }: { customers: Customer[] }) {
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+    map.on("load", () => {
+      // Collapse OSM attribution by default. (i) toggle stays.
+      containerRef.current
+        ?.querySelector(".maplibregl-ctrl-attrib")
+        ?.classList.remove("maplibregl-compact-show");
+    });
     mapRef.current = map;
     return () => {
       map.remove();

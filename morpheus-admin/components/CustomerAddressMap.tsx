@@ -84,6 +84,11 @@ export function CustomerAddressMap({
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     map.on("load", () => {
       loadedRef.current = true;
+      // Collapse OSM attribution by default — admin map cards are
+      // small, the (i) toggle stays for anyone who wants details.
+      containerRef.current
+        ?.querySelector(".maplibregl-ctrl-attrib")
+        ?.classList.remove("maplibregl-compact-show");
       if (showGeofence) {
         // Geofence layer — only added when the caller wants it. Org
         // address preview skips this since "office location" isn't a

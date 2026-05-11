@@ -614,7 +614,6 @@ function NewShiftPage() {
               <CustomerContextChips
                 customers={customers}
                 customerScope={customerScope}
-                tasksByCustomer={tasksByCustomer}
               />
             </Field>
 
@@ -1611,11 +1610,9 @@ function SitesNeedingPick({
 function CustomerContextChips({
   customers,
   customerScope,
-  tasksByCustomer,
 }: {
   customers: Customer[];
   customerScope: CustomerScope;
-  tasksByCustomer: Map<string, number>;
 }) {
   // Resolve the actual ids the chips should reflect.
   const ids =
@@ -1624,17 +1621,13 @@ function CustomerContextChips({
       : customerScope;
   if (ids.length === 0) return null;
 
-  // Aggregate counts. We only show a chip when we actually have
-  // numbers (counts may still be loading on first render).
-  const counts = ids
-    .map((id) => tasksByCustomer.get(id))
-    .filter((n): n is number => typeof n === "number");
-  const minTasks = counts.length > 0 ? Math.min(...counts) : null;
-  const maxTasks = counts.length > 0 ? Math.max(...counts) : null;
-
-  // Single-customer chip can show address.
+  // Single-customer scope shows an address chip. Tasks chip was
+  // removed (cluttered the form and managers don't price decisions
+  // on task count at scheduling time — they manage tasks separately
+  // from the /tasks page).
   const singleCustomer =
     ids.length === 1 ? customers.find((c) => c.id === ids[0]) : null;
+  if (!singleCustomer?.address) return null;
 
   return (
     <div
@@ -1645,7 +1638,7 @@ function CustomerContextChips({
         marginTop: 10,
       }}
     >
-      {/* Tasks chip */}
+      {/* Address chip — single-customer only. */}
       <div
         style={{
           display: "inline-flex",
@@ -1655,11 +1648,11 @@ function CustomerContextChips({
           borderRadius: 10,
           background: AC.bg,
           border: `1px solid ${AC.lineDim}`,
-          flex: "1 1 220px",
+          flex: "1 1 240px",
           minWidth: 0,
         }}
       >
-        <AGlyph name="tasks" size={14} color={AC.mute} />
+        <AGlyph name="pin" size={14} color={AC.mute} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div
             style={{
@@ -1671,113 +1664,25 @@ function CustomerContextChips({
               textTransform: "uppercase",
             }}
           >
-            Tasks
+            Address
           </div>
           <div
             style={{
               fontFamily: AC.font,
               fontSize: 12.5,
               color: AC.ink,
-              fontWeight: 600,
+              fontWeight: 500,
               marginTop: 2,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
+            title={singleCustomer.address}
           >
-            {counts.length === 0 ? (
-              <span style={{ color: AC.mute, fontWeight: 500 }}>
-                Counting…
-              </span>
-            ) : ids.length === 1 ? (
-              <>
-                {minTasks} task{minTasks === 1 ? "" : "s"}{" "}
-                <span
-                  style={{
-                    color: AC.mute,
-                    fontWeight: 500,
-                  }}
-                >
-                  · auto-counted from customer
-                </span>
-              </>
-            ) : minTasks === maxTasks ? (
-              <>
-                {minTasks} task{minTasks === 1 ? "" : "s"}{" "}
-                <span style={{ color: AC.mute, fontWeight: 500 }}>
-                  · per customer × {ids.length}
-                </span>
-              </>
-            ) : (
-              <>
-                {minTasks}–{maxTasks} tasks{" "}
-                <span style={{ color: AC.mute, fontWeight: 500 }}>
-                  · range across {ids.length} customers
-                </span>
-              </>
-            )}
+            {singleCustomer.address}
           </div>
         </div>
-        <Link
-          href="/tasks"
-          style={{
-            fontFamily: AC.font,
-            fontSize: 11.5,
-            fontWeight: 700,
-            color: AC.brandDeep,
-            textDecoration: "none",
-            whiteSpace: "nowrap",
-          }}
-        >
-          Manage →
-        </Link>
       </div>
-
-      {/* Address chip — single-customer only. Multi gets the count
-          chip above; address per-customer would be too noisy. */}
-      {singleCustomer?.address && (
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 12px",
-            borderRadius: 10,
-            background: AC.bg,
-            border: `1px solid ${AC.lineDim}`,
-            flex: "1 1 240px",
-            minWidth: 0,
-          }}
-        >
-          <AGlyph name="pin" size={14} color={AC.mute} />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 11,
-                color: AC.mute,
-                fontWeight: 700,
-                letterSpacing: 0.3,
-                textTransform: "uppercase",
-              }}
-            >
-              Address
-            </div>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 12.5,
-                color: AC.ink,
-                fontWeight: 500,
-                marginTop: 2,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-              title={singleCustomer.address}
-            >
-              {singleCustomer.address}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

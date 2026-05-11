@@ -868,6 +868,39 @@ function ShiftRow({
               </>
             )}
           </div>
+          {/* Small address line under the time row so the rep knows
+              WHERE the shift is without expanding. Truncates with
+              ellipsis on overflow. Only renders when the site has
+              an address — single-address customers in particular
+              benefit from the explicit street line. */}
+          {shift.siteAddress && (
+            <div
+              style={{
+                marginTop: 3,
+                fontFamily: MC.font,
+                fontSize: 11.5,
+                color: MC.hint,
+                letterSpacing: 0,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              title={shift.siteAddress}
+            >
+              <Glyph name="pin" size={11} color={MC.hint} strokeWidth={2} />
+              <span
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {shift.siteAddress}
+              </span>
+            </div>
+          )}
         </div>
         {!unscheduled && (
           <Glyph

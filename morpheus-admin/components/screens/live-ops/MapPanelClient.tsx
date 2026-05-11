@@ -56,7 +56,13 @@ export function MapPanelClient() {
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
-    map.on("load", () => setLoaded(true));
+    map.on("load", () => {
+      setLoaded(true);
+      // Collapse OSM attribution by default. (i) toggle stays.
+      containerRef.current
+        ?.querySelector(".maplibregl-ctrl-attrib")
+        ?.classList.remove("maplibregl-compact-show");
+    });
     mapRef.current = map;
 
     // The map's parent Card stretches to match the Live Feed's height

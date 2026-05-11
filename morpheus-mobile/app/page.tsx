@@ -5,7 +5,8 @@ import dynamic from "next/dynamic";
 import { useState, useEffect, useMemo } from "react";
 import { MC } from "@/lib/tokens";
 import { type Shift } from "@/lib/mock-data";
-import { AppHeader, AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
+import { AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
+import { useMenu } from "@/components/MenuShell";
 import { LoadingBar, Skeleton } from "@/components/Loading";
 import { Glyph, formatTime } from "@/components/Glyph";
 import { getUser } from "@/lib/auth";
@@ -324,18 +325,19 @@ export default function DashboardPage() {
         flex: 1,
       }}
     >
-      <AppHeader title="Dashboard" lastSync={nowLabel} compact />
       {!shiftsLoaded && <LoadingBar />}
 
-      {/* Welcome strip — thin, glassy, branded. Org logo (if uploaded
-          in admin /settings/organisation) sits left for personalised
-          feel; subtle gradient wash uses the Morpheus brand cyan. */}
+      {/* Welcome strip — thin, glassy, branded. Owns the menu button
+          inline (top-right) so the home page no longer needs the black
+          AppHeader band that used to sit above it. Saves vertical space
+          and keeps the dashboard feeling like a single hero card. */}
       <WelcomeStrip
         firstName={firstName}
         greeting={greeting}
         todayHeader={todayHeader}
         orgName={orgName}
         orgLogoUrl={orgLogoUrl}
+        lastSync={nowLabel}
       />
 
       {/* Shifts-today summary — real data */}
@@ -805,6 +807,31 @@ function UpNextCard({
               >
                 {next.start} – {next.end} · {next.distance}
               </div>
+              {/* Small address line so the rep can see the actual
+                  street without having to open the card. Truncates
+                  on overflow; tooltip shows the full string. */}
+              {next.siteAddress && (
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontFamily: MC.font,
+                    fontSize: 12,
+                    color: MC.hint,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                  title={next.siteAddress}
+                >
+                  <Glyph name="pin" size={11} color={MC.hint} strokeWidth={2} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {next.siteAddress}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1112,18 +1139,27 @@ function WelcomeStrip({
   todayHeader,
   orgName,
   orgLogoUrl,
+  lastSync,
 }: {
   firstName: string;
   greeting: string;
   todayHeader: string;
   orgName: string;
   orgLogoUrl: string;
+  /** When passed, shows a tiny "Last sync · …" line at the bottom-right
+   *  of the strip — used to take that role on the old black AppHeader
+   *  that the dashboard no longer renders. */
+  lastSync?: string;
 }) {
+  const { setOpen } = useMenu();
   return (
     <div
       style={{
         position: "relative",
-        margin: "16px 14px 4px",
+        // Top margin respects the iOS safe-area inset (notch / dynamic
+        // island) since the strip now sits at the very top of the
+        // page — the black AppHeader band used to handle this.
+        margin: "max(env(safe-area-inset-top, 0px), 12px) 14px 4px",
         padding: "12px 14px 14px",
         borderRadius: 18,
         background: `linear-gradient(135deg, ${MC.brand} 0%, ${MC.brandDeep} 60%, #073B47 110%)`,
@@ -1200,7 +1236,48 @@ function WelcomeStrip({
             {firstName ? `, ${firstName}` : ""}
           </div>
         </div>
+        {/* Hamburger menu — used to live in the black AppHeader strip
+            above the welcome card. Folding it inline frees up vertical
+            space and keeps everything on a single line so the greeting
+            is the first thing the rep notices. */}
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Menu"
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,.25)",
+            background: "rgba(255,255,255,.16)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          <Glyph name="menu" size={20} color="#fff" strokeWidth={2.2} />
+        </button>
       </div>
+      {lastSync && (
+        <div
+          style={{
+            position: "relative",
+            marginTop: 8,
+            fontFamily: MC.font,
+            fontSize: 10,
+            color: "rgba(255,255,255,.55)",
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+            textAlign: "right",
+          }}
+        >
+          Last sync · {lastSync}
+        </div>
+      )}
     </div>
   );
 }

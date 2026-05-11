@@ -133,7 +133,18 @@ export function DashboardMap({
       zoom: DEFAULT_ZOOM,
       attributionControl: { compact: true },
     });
-    map.on("load", () => setLoaded(true));
+    map.on("load", () => {
+      setLoaded(true);
+      // Collapse the OSM attribution by default — the (i) button stays
+      // so anyone curious can still tap to expand, but the small map
+      // tile doesn't waste a third of its width on "© OpenStreetMap"
+      // text on first paint. MapLibre opens compact-mode by default;
+      // we just remove the show class to flip that.
+      const attrib = containerRef.current?.querySelector(
+        ".maplibregl-ctrl-attrib"
+      );
+      attrib?.classList.remove("maplibregl-compact-show");
+    });
     mapRef.current = map;
     return () => {
       map.remove();
