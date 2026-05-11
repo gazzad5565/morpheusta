@@ -672,16 +672,20 @@ function ShiftRow({
 }) {
   const isComplete = state === "complete";
   const isInProgress = state === "in-progress";
+  // Only show a "lifecycle" badge for COMPLETE shifts — they have no
+  // countdown so the badge is the only state signal. For in-progress
+  // we deliberately don't render one: the green "Ends in 1h 25m"
+  // countdown pill already conveys "this is live" (tone + copy), and
+  // stacking "IN PROGRESS" next to "ENDS 1H 25M" made the row look
+  // crowded for no extra information.
   const stateBadge = (() => {
     if (unscheduled) return null;
     if (isComplete) {
       return { label: "Complete", bg: MC.okTint, fg: "#0d6a45" };
     }
-    if (isInProgress) {
-      return { label: "In progress", bg: MC.brandTint, fg: MC.brandInk };
-    }
     return null;
   })();
+  void isInProgress; // kept for future per-state styling hooks
   return (
     <div
       style={{

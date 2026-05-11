@@ -163,7 +163,13 @@ export function SideMenu() {
             >
               {profile ? deriveInitials(profile.name, profile.email) : "··"}
             </div>
-            <div style={{ minWidth: 0 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {/* flex:1 + minWidth:0 is what makes the ellipsis below
+                  actually trigger. Without flex:1 the wrapper takes
+                  intrinsic content width — a long name (or email) would
+                  push past the menu's right edge instead of truncating.
+                  whiteSpace:nowrap + textOverflow:ellipsis only do their
+                  job inside a constrained box. */}
               <div
                 style={{
                   fontFamily: MC.font,
