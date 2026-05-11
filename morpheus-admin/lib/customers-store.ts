@@ -152,7 +152,14 @@ export async function createCustomer(
 
 export interface CustomerPatch {
   name?: string;
-  code?: string;
+  /** The DB column is `integer`. Accept either a parsed number OR the
+   *  display string (with or without a leading `#` and leading zeros)
+   *  — updateCustomer normalises before writing. Anything that can't
+   *  be parsed is dropped from the patch so the rest of the save
+   *  still succeeds. Earlier this was typed as `string`, which let
+   *  the edit form round-trip "#0012" straight to Postgres and fail
+   *  with `invalid input syntax for type integer: "#0012"`. */
+  code?: string | number;
   initials?: string;
   color?: string;
   region?: string | null;
@@ -165,6 +172,30 @@ export interface CustomerPatch {
   timing_exceptions_enabled?: boolean | null;
   /** Base64 data URL or null to clear. See compressCustomerLogo. */
   logo_url?: string | null;
+}
+
+/**
+ * Coerce a customer-code patch value to a Postgres-integer-safe
+ * number. The admin UI renders codes as "#0012" for display, the
+ * input lets managers type "12", "0012", "#12" etc., and we accept
+ * raw numbers too. Returns:
+ *   - the parsed int when the input cleans to a non-empty digit run
+ *   - null when the input was an explicit clear (empty string)
+ *   - undefined when the input was nonsense, signalling the caller
+ *     to drop the field from the patch entirely (Postgres would
+ *     otherwise reject the whole UPDATE)
+ */
+function normaliseCustomerCode(value: string | number | undefined): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.trunc(value) : undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") return null; // explicit clear
+  const digits = trimmed.replace(/[^0-9]/g, "");
+  if (digits === "") return undefined; // nonsense — drop from patch
+  const n = parseInt(digits, 10);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 /**
@@ -268,7 +299,27 @@ export async function updateCustomer(
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
-  const { error } = await supabase.from("customers").update(patch).eq("id", id);
+  // Normalise the customer-code patch value before talking to Postgres.
+  // The admin UI renders codes as "#0012" for display and the edit
+  // input round-trips that exact string. Postgres' `code` column is
+  // an integer though, so a raw string write fails with:
+  //   invalid input syntax for type integer: "#0012"
+  // and the entire UPDATE rolls back — meaning the manager loses
+  // every other change in the same save (name, address, geofence,
+  // exception toggles, …). The helper strips the # / leading zeros,
+  // parses to int, and decides per-input whether to write a number,
+  // write null (explicit clear), or drop the field from the patch
+  // entirely (nonsense input → don't kill the rest of the save).
+  const cleanPatch: Record<string, unknown> = { ...patch };
+  if ("code" in cleanPatch) {
+    const normalised = normaliseCustomerCode(patch.code);
+    if (normalised === undefined) {
+      delete cleanPatch.code;
+    } else {
+      cleanPatch.code = normalised;
+    }
+  }
+  const { error } = await supabase.from("customers").update(cleanPatch).eq("id", id);
   if (error) {
     notifySaveError(error.message, "customer");
     return { ok: false, error: error.message };

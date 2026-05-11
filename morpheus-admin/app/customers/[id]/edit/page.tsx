@@ -307,8 +307,13 @@ export default function EditCustomerPage() {
             </Field>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <Field label="Code">
-                <input value={code} onChange={(e) => setCode(e.target.value)} style={inputStyle} />
+              <Field label="Code" hint="Numeric. The # and leading zeros are just display.">
+                <input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  inputMode="numeric"
+                  style={inputStyle}
+                />
               </Field>
               <Field label="Initials" hint="Shown on the avatar tile.">
                 <input
