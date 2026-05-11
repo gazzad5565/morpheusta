@@ -98,6 +98,41 @@ function nameFromEmail(email: string | null | undefined): string {
  */
 const TRAVEL_LS_KEY = "morpheus.travelling_since";
 
+/**
+ * True if we have ANY way to navigate to the shift's site —
+ * coordinates preferred, address as a fallback. Drives the
+ * disabled state on Directions + Start travelling buttons so a
+ * shift attached to a customer with no address yet doesn't get a
+ * dead-tap into the map app.
+ */
+function hasDestination(s: DbShift): boolean {
+  if (typeof s.siteLat === "number" && typeof s.siteLng === "number") return true;
+  return Boolean(s.siteAddress && s.siteAddress.trim().length > 0);
+}
+
+/**
+ * Build a maps deep link for the shift's destination. Coordinates
+ * are preferred because they're unambiguous; falls back to the
+ * address string when the site hasn't been geocoded yet.
+ *
+ * The URL form `https://www.google.com/maps/dir/?api=1&destination=...`
+ * works on both iOS (the system handles `maps.google.com` URLs into
+ * Apple Maps) and Android (Google Maps app if installed, else the
+ * web app). Returns null when there's nothing to navigate to.
+ */
+function buildDirectionsUrl(s: DbShift): string | null {
+  if (typeof s.siteLat === "number" && typeof s.siteLng === "number") {
+    return `https://www.google.com/maps/dir/?api=1&destination=${s.siteLat},${s.siteLng}`;
+  }
+  const addr = (s.siteAddress || "").trim();
+  if (addr) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+      addr
+    )}`;
+  }
+  return null;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   // Tap-feedback overlay shown the moment the rep taps "Check in to
@@ -114,11 +149,12 @@ export default function DashboardPage() {
     customerName: string;
   } | null>(null);
   // Lifted state — UpNextCard reacts to these.
-  // directionsOpen: rep tapped "Directions" to preview the route on the map.
+  // (directionsOpen / setDirectionsOpen removed — Directions now
+  // opens the OS map app directly via buildDirectionsUrl, no in-app
+  // preview state to lift.)
   // travellingSince: rep tapped "Start travelling" — route is now live.
   // Persisted to localStorage so closing the app mid-travel doesn't lose
   // the timer or leave a dangling shift.travel_started without an end.
-  const [directionsOpen, setDirectionsOpen] = useState(false);
   const [travellingSince, setTravellingSinceRaw] = useState<number | null>(null);
   // Hydrate from storage once on mount.
   useEffect(() => {
@@ -356,6 +392,7 @@ export default function DashboardPage() {
         todayHeader={todayHeader}
         orgName={orgName}
         orgLogoUrl={orgLogoUrl}
+        nowLabel={nowLabel}
       />
 
       {/* Shifts-today summary — real data */}
@@ -453,8 +490,6 @@ export default function DashboardPage() {
       <UpNextCard
         shifts={shifts}
         loaded={shiftsLoaded}
-        directionsOpen={directionsOpen}
-        setDirectionsOpen={setDirectionsOpen}
         travellingSince={travellingSince}
         setTravellingSince={setTravellingSince}
         inProgressCount={inProgressCount}
@@ -585,8 +620,6 @@ export default function DashboardPage() {
 function UpNextCard({
   shifts,
   loaded,
-  directionsOpen,
-  setDirectionsOpen,
   travellingSince,
   setTravellingSince,
   inProgressCount,
@@ -597,8 +630,6 @@ function UpNextCard({
 }: {
   shifts: DbShift[];
   loaded: boolean;
-  directionsOpen: boolean;
-  setDirectionsOpen: (v: boolean) => void;
   travellingSince: number | null;
   setTravellingSince: (v: number | null) => void;
   inProgressCount: number;
@@ -809,11 +840,41 @@ function UpNextCard({
             ) : (
               <StatusChip tone="brand" icon="sparkle">Up next</StatusChip>
             )}
-            {/* Customer-code pill removed — it's an internal "#19"
-                style identifier that meant nothing to the rep and
-                managers fed back that it cluttered the top-right of
-                the hero card. The customer is identified by name +
-                initials below; that's enough. */}
+            {/* "Can't make this shift?" — relocated to a tiny
+                icon-only affordance top-right of the card. The full
+                underlined "Can't make this shift?" link at the
+                bottom was too in-your-face right under the primary
+                Check-in CTA. Tap opens the same sheet; a long-press /
+                hover reveals the title text "Can't make this shift?".
+                Hidden once the shift is in-progress (no point
+                offering the action then). */}
+            {!isResume && onUnableToAttend && (
+              <button
+                type="button"
+                onClick={() => onUnableToAttend(next)}
+                aria-label="Can't make this shift?"
+                title="Can't make this shift?"
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 99,
+                  background: "transparent",
+                  border: `1px solid ${MC.line}`,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                }}
+              >
+                <Glyph
+                  name="warn"
+                  size={13}
+                  color={MC.warn}
+                  strokeWidth={2.2}
+                />
+              </button>
+            )}
           </div>
 
           {/* Customer */}
@@ -1025,27 +1086,45 @@ function UpNextCard({
               >
                 {/* Two-button row: Directions + Start/Stop travelling.
                     Hidden once the shift is in-progress — the rep is
-                    already on-site so there's nothing to travel TO and
-                    nothing to get directions FOR. Used to render even
-                    during the active shift, which made the card look
-                    busy and offered an action that did nothing useful. */}
+                    already on-site so there's nothing to travel TO.
+                    Directions opens the device's map app pre-filled
+                    with the customer's site address; Start travelling
+                    does the same AND starts the in-app travel timer +
+                    fires the shift.travel_started audit event. */}
                 {!isResume && (
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
                       type="button"
-                      onClick={() => setDirectionsOpen(!directionsOpen)}
+                      onClick={() => {
+                        const url = buildDirectionsUrl(next);
+                        if (url) {
+                          // Don't fire a travel event for a pure
+                          // "look at the route" tap — the rep might
+                          // just be checking the address. Start
+                          // travelling has its own button below.
+                          window.open(url, "_blank", "noopener,noreferrer");
+                        } else {
+                          alert(
+                            "No address on this site yet — ask your manager to set one on the customer record."
+                          );
+                        }
+                      }}
+                      disabled={!hasDestination(next)}
                       style={{
                         ...secondaryBtnStyle,
                         flex: 1,
-                        background: directionsOpen ? MC.brandTint : MC.card,
-                        borderColor: directionsOpen ? MC.brand : `${MC.brand}33`,
+                        opacity: hasDestination(next) ? 1 : 0.5,
                       }}
-                      aria-pressed={directionsOpen}
+                      title={
+                        hasDestination(next)
+                          ? "Opens directions in your phone's map app"
+                          : "No address on this site yet"
+                      }
                     >
                       <Glyph
                         name="target"
                         size={16}
-                        color={directionsOpen ? MC.brandInk : MC.brandDeep}
+                        color={MC.brandDeep}
                         strokeWidth={2.2}
                       />
                       Directions
@@ -1062,8 +1141,28 @@ function UpNextCard({
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setTravellingSince(Date.now())}
-                        style={{ ...secondaryBtnStyle, flex: 1.4 }}
+                        onClick={() => {
+                          // Start the in-app timer first so the audit
+                          // event fires + the next shift's state
+                          // flips to "travelling" before we hand off
+                          // to the OS map app.
+                          setTravellingSince(Date.now());
+                          const url = buildDirectionsUrl(next);
+                          if (url) {
+                            window.open(url, "_blank", "noopener,noreferrer");
+                          }
+                        }}
+                        disabled={!hasDestination(next)}
+                        style={{
+                          ...secondaryBtnStyle,
+                          flex: 1.4,
+                          opacity: hasDestination(next) ? 1 : 0.5,
+                        }}
+                        title={
+                          hasDestination(next)
+                            ? "Starts the travel timer and opens directions in your map app"
+                            : "No address on this site yet"
+                        }
                       >
                         <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
                         Start travelling
@@ -1104,48 +1203,13 @@ function UpNextCard({
                   inline with reasons when those exceptions actually
                   fire, so the up-front warning was redundant. */}
 
-              {/* "Can't make this shift?" — friction-by-design.
-                  Small muted text-link with a warn glyph, deliberately
-                  low-key so it doesn't compete with Check-in or yell
-                  alarm-red at the rep. Same affordance and tone as
-                  the /shifts row so the rep learns it once. */}
-              {!isResume && onUnableToAttend && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    // eslint-disable-next-line no-console
-                    console.warn("[unable] home: button tapped", {
-                      realId: next.realId,
-                      name: next.name,
-                      state: next.state,
-                    });
-                    onUnableToAttend(next);
-                  }}
-                  style={{
-                    marginTop: 6,
-                    width: "100%",
-                    background: "transparent",
-                    border: "none",
-                    color: MC.mute,
-                    fontFamily: MC.font,
-                    fontSize: 12,
-                    fontWeight: 500,
-                    letterSpacing: -0.1,
-                    padding: "8px 0 2px",
-                    cursor: "pointer",
-                    textAlign: "center",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 5,
-                  }}
-                >
-                  <Glyph name="warn" size={11} color={MC.warn} strokeWidth={2.2} />
-                  <span style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>
-                    Can&apos;t make this shift?
-                  </span>
-                </button>
-              )}
+              {/* The underlined "Can't make this shift?" link that
+                  used to live here moved to a small icon-only button
+                  in the top-right corner of the card (see header
+                  row above). Managers fed back the text link was too
+                  prominent sitting right under the primary Check-in
+                  CTA; an icon corner-button is discoverable without
+                  competing for attention. */}
             </>
           )}
         </div>
@@ -1198,12 +1262,19 @@ function WelcomeStrip({
   todayHeader,
   orgName,
   orgLogoUrl,
+  nowLabel,
 }: {
   firstName: string;
   greeting: string;
   todayHeader: string;
   orgName: string;
   orgLogoUrl: string;
+  /** Current wall-clock time as "HH:MM AM/PM". Appended to the
+   *  small-caps top line so the rep can glance at the home page and
+   *  see what time it is now. Different from "Last sync" (which got
+   *  moved to the side-menu footer) — this is just "what time is it
+   *  right now", which managers said they wanted visible. */
+  nowLabel?: string;
 }) {
   const { setOpen } = useMenu();
   return (
@@ -1283,6 +1354,12 @@ function WelcomeStrip({
             }}
           >
             {orgName || "Morpheus"} · {todayHeader}
+            {nowLabel ? (
+              <>
+                {" · "}
+                <span style={{ color: "rgba(255,255,255,.95)" }}>{nowLabel}</span>
+              </>
+            ) : null}
           </div>
           <div
             style={{

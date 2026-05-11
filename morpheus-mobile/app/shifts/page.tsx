@@ -264,6 +264,20 @@ export default function ShiftsListPage() {
   // "Wed, May 7" — sits below the title so the rep always knows what
   // day this list is for, even days into a long shift week where
   // they might lose track.
+  // Progress indicator — "3 of 4 done · 1 live · 0 left" style. Computed
+  // from `mine` (shifts assigned to this rep today). Managers asked for
+  // a status-at-a-glance summary on this list page so a rep can see
+  // where they are in the day without doing the maths themselves.
+  const dayTotal = mine.length;
+  const dayDone = mine.filter((s) => s.state === "complete").length;
+  const dayLive = mine.filter((s) =>
+    ["in-progress", "on-break", "travelling", "late"].includes(s.state)
+  ).length;
+  const dayLeft = mine.filter((s) =>
+    ["scheduled", "unable_to_attend"].includes(s.state)
+  ).length;
+  const dayProgressPct = dayTotal > 0 ? (dayDone / dayTotal) * 100 : 0;
+
   const dateLabel = new Date().toLocaleDateString(undefined, {
     weekday: "long",
     month: "long",
@@ -317,6 +331,78 @@ export default function ShiftsListPage() {
           >
             {dateLabel}
           </div>
+          {/* Day-progress strip — small fill bar + plain-English
+              breakdown ("3 of 4 done · 1 live"). Only renders when
+              the rep has any shifts today; the unassigned/requested
+              sections below carry the empty-state copy when not. */}
+          {dayTotal > 0 && (
+            <div style={{ marginTop: 6 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontFamily: MC.font,
+                  fontSize: 11,
+                  color: MC.mute,
+                  fontWeight: 500,
+                  letterSpacing: 0,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span style={{ color: MC.ink2, fontWeight: 600 }}>
+                  {dayDone} of {dayTotal} done
+                </span>
+                {dayLive > 0 && (
+                  <>
+                    <span style={{ opacity: 0.4 }}>·</span>
+                    <span style={{ color: MC.brandDeep, fontWeight: 600 }}>
+                      {dayLive} live
+                    </span>
+                  </>
+                )}
+                {dayLeft > 0 && dayDone + dayLive < dayTotal && (
+                  <>
+                    <span style={{ opacity: 0.4 }}>·</span>
+                    <span>{dayLeft} left</span>
+                  </>
+                )}
+              </div>
+              {/* Tiny fill bar so the rep can see at a glance how
+                  far they've got through the day. Brand-tinted for
+                  in-progress, ok-green for complete; track stays
+                  light grey for the "remaining" portion. */}
+              <div
+                style={{
+                  marginTop: 5,
+                  width: "100%",
+                  maxWidth: 240,
+                  height: 4,
+                  borderRadius: 99,
+                  background: MC.line,
+                  overflow: "hidden",
+                  display: "flex",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${dayProgressPct}%`,
+                    background: MC.ok,
+                    transition: "width .35s cubic-bezier(.22,1,.36,1)",
+                  }}
+                />
+                {dayLive > 0 && (
+                  <div
+                    style={{
+                      width: `${(dayLive / dayTotal) * 100}%`,
+                      background: MC.brand,
+                      transition: "width .35s cubic-bezier(.22,1,.36,1)",
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <button
           type="button"

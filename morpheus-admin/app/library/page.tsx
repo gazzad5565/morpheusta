@@ -15,6 +15,7 @@ import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
+import { LoadingBar } from "@/components/ui/LoadingBar";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
 import {
@@ -206,6 +207,7 @@ export default function LibraryPage() {
         </div>
       }
     >
+      {!loaded && <LoadingBar />}
       <div
         style={{
           padding: 20,

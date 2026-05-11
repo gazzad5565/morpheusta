@@ -414,8 +414,7 @@ function ShiftRowView({
   const state = STATE_MAP[stateKey] || STATE_MAP.scheduled;
   const checkIn = formatCheckIn(row.check_in_at);
 
-  // Make the row a link to the shift detail page. The trailing "more"
-  // button stops propagation so it doesn't trigger navigation.
+  // Make the row a link to the shift detail page.
   return (
     <a
       href={shiftHref(row)}
