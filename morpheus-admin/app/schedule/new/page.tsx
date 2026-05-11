@@ -17,7 +17,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
-import { AGlyph } from "@/components/ui/AGlyph";
+import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { Combobox } from "@/components/ui/Combobox";
 import { inputStyle } from "@/components/ui/Filters";
 import { AC } from "@/lib/tokens";
@@ -54,12 +54,31 @@ function hhmmToMin(t: string): number {
   return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
 }
 
-/** Add one hour to "HH:MM" — clamps to 23:59 (no day rollover). */
-function addHourHHMM(t: string): string {
+/** Add N minutes to "HH:MM" — clamps to 23:59 (no day rollover). */
+function addMinutesHHMM(t: string, mins: number): string {
   if (!isValidHHMM(t)) return "10:00";
-  const [h, m] = t.split(":").map((n) => parseInt(n, 10));
-  const h2 = Math.min(23, h + 1);
-  return `${String(h2).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  const total = Math.min(23 * 60 + 59, hhmmToMin(t) + mins);
+  const h2 = Math.floor(total / 60);
+  const m2 = total % 60;
+  return `${String(h2).padStart(2, "0")}:${String(m2).padStart(2, "0")}`;
+}
+
+/**
+ * Current local time rounded UP to the next 30-min slot. Used as the
+ * default start time when opening /schedule/new from scratch — way
+ * more useful than a hardcoded "09:00" when the manager is
+ * scheduling something for "right now-ish". If it's already past
+ * 22:30 we cap at 22:30 (the TimeSelect's last visible slot is 22:00
+ * so we leave room for the +30 min end-time auto-fill).
+ */
+function nextHalfHourSlot(): string {
+  const d = new Date();
+  const minsNow = d.getHours() * 60 + d.getMinutes();
+  const snapped = Math.ceil(minsNow / 30) * 30;
+  const clamped = Math.min(22 * 60 + 30, snapped);
+  const h = Math.floor(clamped / 60);
+  const m = clamped % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -106,14 +125,38 @@ function NewShiftPage() {
   // previous form's "leave it blank" behaviour.
   const [repScope, setRepScope] = useState<RepScope>(null);
   const [shiftDate, setShiftDate] = useState<string>(fromDate || todayISO());
+  // Default start = next 30-min slot from now. Hardcoded "09:00" was
+  // unhelpful when a manager taps + to schedule a shift starting in
+  // the next hour. URL ?start= still wins for the "click empty cell
+  // in the calendar" pre-fill path.
   const [startTime, setStartTime] = useState<string>(
-    isValidHHMM(fromStart) ? fromStart : "09:00"
+    isValidHHMM(fromStart) ? fromStart : nextHalfHourSlot()
   );
+  // End defaults to start + 30 min (was +1 h). The wrapped setter
+  // below keeps them linked: change start → end snaps to start + 30.
   const [endTime, setEndTime] = useState<string>(
     isValidHHMM(fromEnd)
       ? fromEnd
-      : addHourHHMM(isValidHHMM(fromStart) ? fromStart : "09:00")
+      : addMinutesHHMM(
+          isValidHHMM(fromStart) ? fromStart : nextHalfHourSlot(),
+          30
+        )
   );
+
+  /**
+   * Wrapped start-time setter: also push the end forward to start +
+   * 30 min. Picking 1:00 PM as start auto-snaps end to 1:30 PM. The
+   * manager can still drag end out manually after that — this wrapper
+   * only fires on start changes, not on end changes, so any custom
+   * end duration the manager sets gets preserved until they touch
+   * start again. KISS over "preserve original duration when start
+   * shifts" — that's harder to reason about and less useful in
+   * practice (most shifts get re-anchored to a fresh duration).
+   */
+  const onStartChange = (next: string) => {
+    setStartTime(next);
+    setEndTime(addMinutesHHMM(next, 30));
+  };
   // Recurrence
   const [repeatMode, setRepeatMode] = useState<"none" | "weekly">("none");
   const [weekdays, setWeekdays] = useState<Set<number>>(new Set());
@@ -552,7 +595,7 @@ function NewShiftPage() {
 
           {/* ─── Step 1 — Who & where ───────────────────────────────── */}
           <Step number={1} title="Who's going where?" sub="Pick at least one customer. Reps can be assigned now or left claimable.">
-            <Field label="Customer(s)" required>
+            <Field label="Customers" required prominent glyph="customer">
               <CustomerScopePicker
                 customers={customers}
                 loading={loading}
@@ -592,7 +635,9 @@ function NewShiftPage() {
             />
 
             <Field
-              label="Rep(s)"
+              label="Reps"
+              prominent
+              glyph="reps"
               hint="Pick one to assign, several to spawn one shift per rep, or leave Unassigned."
             >
               <RepScopePicker
@@ -621,7 +666,7 @@ function NewShiftPage() {
                 />
               </Field>
               <Field label="Start" required>
-                <TimeSelect value={startTime} onChange={setStartTime} />
+                <TimeSelect value={startTime} onChange={onStartChange} />
               </Field>
               <Field label="End" required>
                 <TimeSelect value={endTime} onChange={setEndTime} />
@@ -1067,28 +1112,79 @@ function Field({
   hint,
   required,
   children,
+  /** Bumps the label to a real heading size with an optional glyph
+   *  prefix. Used for the top-level Customer + Rep pickers in
+   *  /schedule/new so the manager can't confuse which picker is
+   *  which at a glance. Default false keeps the dense uppercase
+   *  micro-label everywhere else. */
+  prominent,
+  glyph,
 }: {
   label: string;
   hint?: string;
   required?: boolean;
   children: React.ReactNode;
+  prominent?: boolean;
+  glyph?: GlyphName;
 }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 11,
-          color: AC.mute,
-          fontWeight: 700,
-          letterSpacing: 0.3,
-          textTransform: "uppercase",
-          marginBottom: 6,
-        }}
-      >
-        {label}
-        {required && <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>}
-      </div>
+    <div style={{ marginBottom: prominent ? 12 : 16 }}>
+      {prominent ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 8,
+          }}
+        >
+          {glyph && (
+            <span
+              aria-hidden
+              style={{
+                display: "inline-flex",
+                width: 26,
+                height: 26,
+                borderRadius: 8,
+                background: AC.brandSoft,
+                color: AC.brandDeep,
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <AGlyph name={glyph} size={14} color={AC.brandDeep} />
+            </span>
+          )}
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 15,
+              fontWeight: 700,
+              color: AC.ink,
+              letterSpacing: -0.2,
+            }}
+          >
+            {label}
+            {required && <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>}
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11,
+            color: AC.mute,
+            fontWeight: 700,
+            letterSpacing: 0.3,
+            textTransform: "uppercase",
+            marginBottom: 6,
+          }}
+        >
+          {label}
+          {required && <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>}
+        </div>
+      )}
       {children}
       {hint && (
         <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, marginTop: 4 }}>
