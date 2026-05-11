@@ -54,3 +54,20 @@ export async function getOrganisationLogoUrl(): Promise<string> {
   const v = await readSetting<string>("organisation_logo_url", "");
   return typeof v === "string" ? v : "";
 }
+
+/**
+ * Exception toggles — org-wide on/off for the two kinds of check-in
+ * exception the mobile app surfaces. Both default ON. When OFF, the
+ * mobile check-in page hides the corresponding exception card and
+ * skips the dedicated event log. Per-customer overrides on the
+ * customers table take precedence (handled at the call site).
+ */
+export async function getLocationExceptionsEnabled(): Promise<boolean> {
+  const v = await readSetting<boolean>("location_exceptions_enabled", true);
+  return v === false ? false : true;
+}
+
+export async function getTimingExceptionsEnabled(): Promise<boolean> {
+  const v = await readSetting<boolean>("timing_exceptions_enabled", true);
+  return v === false ? false : true;
+}

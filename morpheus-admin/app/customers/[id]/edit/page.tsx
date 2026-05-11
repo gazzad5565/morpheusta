@@ -58,6 +58,15 @@ export default function EditCustomerPage() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [geofenceM, setGeofenceM] = useState<number>(100);
+  // Per-customer exception overrides. null = inherit org default;
+  // true/false = explicit per-customer flip. Driven by the
+  // ExceptionInherit3State picker below the geofence slider.
+  const [locExceptionsOverride, setLocExceptionsOverride] = useState<
+    boolean | null
+  >(null);
+  const [timeExceptionsOverride, setTimeExceptionsOverride] = useState<
+    boolean | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -85,6 +94,8 @@ export default function EditCustomerPage() {
           setCoords({ lat: c.latitude, lng: c.longitude });
         }
         setGeofenceM(c.geofence ?? 100);
+        setLocExceptionsOverride(c.locationExceptionsEnabled ?? null);
+        setTimeExceptionsOverride(c.timingExceptionsEnabled ?? null);
       }
       setLoading(false);
     })();
@@ -156,6 +167,8 @@ export default function EditCustomerPage() {
       latitude,
       longitude,
       geofence_radius_m: geofenceM,
+      location_exceptions_enabled: locExceptionsOverride,
+      timing_exceptions_enabled: timeExceptionsOverride,
     });
     setBusy(false);
     if (!result.ok) {
@@ -318,6 +331,32 @@ export default function EditCustomerPage() {
             </div>
           </Field>
 
+          {/* Per-customer exception overrides — tri-state. "Inherit"
+              is the default and uses whatever the org's
+              /settings/check-in-rules toggle says; On / Off override
+              for this customer specifically. Sits below the geofence
+              slider because the location override controls whether
+              the geofence is even consulted at check-in time. */}
+          <Field
+            label="Off-site exceptions for this customer"
+            hint="Override the org-wide setting. Inherit uses whatever is set on Settings → Check-in rules."
+          >
+            <ExceptionOverridePicker
+              value={locExceptionsOverride}
+              onChange={setLocExceptionsOverride}
+            />
+          </Field>
+
+          <Field
+            label="Late / early exceptions for this customer"
+            hint="Override the org-wide setting. Inherit uses whatever is set on Settings → Check-in rules."
+          >
+            <ExceptionOverridePicker
+              value={timeExceptionsOverride}
+              onChange={setTimeExceptionsOverride}
+            />
+          </Field>
+
           {note && (
             <div
               style={{
@@ -404,6 +443,56 @@ export default function EditCustomerPage() {
         </Card>
       </div>
     </AdminShell>
+  );
+}
+
+/**
+ * Tri-state picker: Inherit (null) | On (true) | Off (false).
+ *
+ * Used for the per-customer exception overrides. "Inherit" is the
+ * default and means "use whatever Settings → Check-in rules says";
+ * On / Off force the override regardless of the org default. Pill
+ * group rather than a select because three options at this scale
+ * read better as side-by-side buttons.
+ */
+function ExceptionOverridePicker({
+  value,
+  onChange,
+}: {
+  value: boolean | null;
+  onChange: (v: boolean | null) => void;
+}) {
+  const options: Array<{ key: string; label: string; v: boolean | null }> = [
+    { key: "inherit", label: "Inherit org default", v: null },
+    { key: "on", label: "Always show", v: true },
+    { key: "off", label: "Never show", v: false },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {options.map((opt) => {
+        const active = value === opt.v;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onChange(opt.v)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 999,
+              border: `1px solid ${active ? AC.ink : AC.line}`,
+              background: active ? AC.ink : "#fff",
+              color: active ? "#fff" : AC.ink2,
+              fontFamily: AC.font,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

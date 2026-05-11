@@ -30,6 +30,12 @@ export interface Customer {
   latitude?: number | null;
   longitude?: number | null;
   geofence_radius_m?: number | null;
+  /** Per-customer override for off-site/geofence exceptions.
+   *  null = inherit org-wide app_settings.location_exceptions_enabled. */
+  location_exceptions_enabled?: boolean | null;
+  /** Per-customer override for late/early timing exceptions.
+   *  null = inherit org-wide app_settings.timing_exceptions_enabled. */
+  timing_exceptions_enabled?: boolean | null;
 }
 
 export interface Task {

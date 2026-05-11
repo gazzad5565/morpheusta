@@ -25,6 +25,12 @@ export interface Customer {
   latitude?: number;
   longitude?: number;
   active?: boolean;
+  /** Per-customer override for off-site/geofence exceptions.
+   *  null = inherit org-wide app_settings.location_exceptions_enabled. */
+  locationExceptionsEnabled?: boolean | null;
+  /** Per-customer override for late/early timing exceptions.
+   *  null = inherit org-wide app_settings.timing_exceptions_enabled. */
+  timingExceptionsEnabled?: boolean | null;
 }
 
 /**

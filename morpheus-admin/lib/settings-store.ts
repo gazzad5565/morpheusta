@@ -244,6 +244,39 @@ export async function setShiftRequestAutoApprove(
   return writeSetting("shift_request_auto_approve", !!on);
 }
 
+// ─── Exception toggles ─────────────────────────────────────────────────
+//
+// Two org-wide booleans that gate whether the mobile check-in flow
+// surfaces exception cards. Both default ON — flipping them off
+// silences the corresponding exception type across every customer.
+// Per-customer overrides live on the customers table and take
+// precedence (NULL there = inherit these org defaults).
+
+export async function getLocationExceptionsEnabled(): Promise<boolean> {
+  const v = await readSetting<boolean>("location_exceptions_enabled", true);
+  // Coerce undefined / non-boolean to the default-ON behaviour so a
+  // brand-new install with no row in app_settings still gates the
+  // off-site card on.
+  return v === false ? false : true;
+}
+
+export async function setLocationExceptionsEnabled(
+  on: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting("location_exceptions_enabled", !!on);
+}
+
+export async function getTimingExceptionsEnabled(): Promise<boolean> {
+  const v = await readSetting<boolean>("timing_exceptions_enabled", true);
+  return v === false ? false : true;
+}
+
+export async function setTimingExceptionsEnabled(
+  on: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting("timing_exceptions_enabled", !!on);
+}
+
 /** One-shot fetch of every org text field for a settings form. */
 export async function getOrganisationDetails(): Promise<{
   address: string;

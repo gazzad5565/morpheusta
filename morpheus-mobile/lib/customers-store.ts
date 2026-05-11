@@ -22,6 +22,8 @@ interface DbRow {
   latitude: number | null;
   longitude: number | null;
   geofence_radius_m: number | null;
+  location_exceptions_enabled: boolean | null;
+  timing_exceptions_enabled: boolean | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -36,6 +38,8 @@ function rowToCustomer(row: DbRow): Customer {
     latitude: row.latitude,
     longitude: row.longitude,
     geofence_radius_m: row.geofence_radius_m,
+    location_exceptions_enabled: row.location_exceptions_enabled,
+    timing_exceptions_enabled: row.timing_exceptions_enabled,
   };
 }
 

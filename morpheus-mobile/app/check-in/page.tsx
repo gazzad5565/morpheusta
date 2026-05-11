@@ -9,7 +9,12 @@ import { CheckingInOverlay, type CheckInPhase } from "@/components/CheckingInOve
 import { Glyph, type GlyphName } from "@/components/Glyph";
 import { getShiftById, checkInToShift, type ShiftWithMeta } from "@/lib/shifts-store";
 import { getCustomerById } from "@/lib/customers-store";
-import { getLateGraceMinutes, getEarlyGraceMinutes } from "@/lib/settings-store";
+import {
+  getLateGraceMinutes,
+  getEarlyGraceMinutes,
+  getLocationExceptionsEnabled,
+  getTimingExceptionsEnabled,
+} from "@/lib/settings-store";
 import { logEvent } from "@/lib/events-store";
 import type { Customer } from "@/lib/mock-data";
 
@@ -98,6 +103,11 @@ function CheckInPage() {
   // symmetric concepts: don't clock in too soon, don't clock out too soon.
   // One setting drives both.
   const [earlyGraceMinutes, setEarlyGraceMinutes] = useState<number>(15);
+  // Org-wide on/off for each exception type. Customer-level overrides
+  // are applied separately (`effectiveLocationOn` / `effectiveTimingOn`
+  // below) so a NULL customer override falls back to the org default.
+  const [orgLocationOn, setOrgLocationOn] = useState<boolean>(true);
+  const [orgTimingOn, setOrgTimingOn] = useState<boolean>(true);
 
   // Geolocation state
   const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
@@ -115,7 +125,9 @@ function CheckInPage() {
       getShiftById(shiftId),
       getLateGraceMinutes(),
       getEarlyGraceMinutes(),
-    ]).then(async ([s, grace, earlyGrace]) => {
+      getLocationExceptionsEnabled(),
+      getTimingExceptionsEnabled(),
+    ]).then(async ([s, grace, earlyGrace, locOn, timeOn]) => {
       if (cancelled) return;
       if (!s) {
         setShiftError("Shift not found.");
@@ -124,7 +136,10 @@ function CheckInPage() {
       setShift(s);
       setGraceMinutes(grace);
       setEarlyGraceMinutes(earlyGrace);
-      // Pull the customer to know its lat/lng + geofence radius.
+      setOrgLocationOn(locOn);
+      setOrgTimingOn(timeOn);
+      // Pull the customer to know its lat/lng + geofence radius +
+      // any per-customer exception override.
       const c = await getCustomerById(s.id);
       if (cancelled) return;
       setCustomer(c);
@@ -159,6 +174,24 @@ function CheckInPage() {
     );
   }, []);
 
+  // ─── Effective exception toggles ─────────────────────────────────────
+  // Customer-level override wins when set (true/false); NULL on the
+  // customer falls back to the org-wide setting. The check-in page
+  // uses these to decide whether the exception cards even render +
+  // whether to log the dedicated event types.
+  const locationExceptionsOn = useMemo(() => {
+    const c = customer?.location_exceptions_enabled;
+    if (c === true) return true;
+    if (c === false) return false;
+    return orgLocationOn;
+  }, [customer, orgLocationOn]);
+  const timingExceptionsOn = useMemo(() => {
+    const c = customer?.timing_exceptions_enabled;
+    if (c === true) return true;
+    if (c === false) return false;
+    return orgTimingOn;
+  }, [customer, orgTimingOn]);
+
   // ─── Exception detection ─────────────────────────────────────────────
   // Off-site: rep's GPS distance to the customer > the customer's
   //   geofence radius (default 100m). If we can't read GPS or the
@@ -166,6 +199,10 @@ function CheckInPage() {
   //   reason so the admin sees the gap.
   const offsiteInfo = useMemo(() => {
     if (!shift) return null;
+    // Org / customer disabled this exception type → never trigger,
+    // never even render the card. Returning null short-circuits the
+    // downstream "triggered" boolean below.
+    if (!locationExceptionsOn) return null;
     // Prefer the site's own coords + geofence; fall back to the legacy
     // customer-level fields for shifts that pre-date sites. Default
     // radius stays 100m if neither side carries one.
@@ -208,10 +245,12 @@ function CheckInPage() {
       radiusM: radius,
       reason: `Within geofence (${formatDistance(distanceM)} of site).`,
     };
-  }, [shift, customer, position, positionLoading, positionError]);
+  }, [shift, customer, position, positionLoading, positionError, locationExceptionsOn]);
 
   const timingInfo = useMemo(() => {
     if (!shift) return null;
+    // Org / customer disabled timing exceptions → never trigger.
+    if (!timingExceptionsOn) return null;
     const startStr = shift.start;
     // Parse "8:00 AM" → today's Date with that time.
     const m = startStr.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/);
@@ -265,7 +304,7 @@ function CheckInPage() {
       startLabel: startStr,
       graceMinutes,
     };
-  }, [shift, graceMinutes, earlyGraceMinutes]);
+  }, [shift, graceMinutes, earlyGraceMinutes, timingExceptionsOn]);
 
   // Backwards-compat alias: existing render code reads `lateInfo`.
   // Map only the late-or-not states onto the old shape.

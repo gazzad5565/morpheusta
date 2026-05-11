@@ -24,6 +24,8 @@ interface DbRow {
   longitude: number | null;
   active: boolean | null;
   geofence_radius_m: number | null;
+  location_exceptions_enabled: boolean | null;
+  timing_exceptions_enabled: boolean | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -42,6 +44,8 @@ function rowToCustomer(row: DbRow): Customer {
     latitude: row.latitude ?? undefined,
     longitude: row.longitude ?? undefined,
     active: row.active ?? true,
+    locationExceptionsEnabled: row.location_exceptions_enabled,
+    timingExceptionsEnabled: row.timing_exceptions_enabled,
   };
 }
 
@@ -149,6 +153,9 @@ export interface CustomerPatch {
   latitude?: number | null;
   longitude?: number | null;
   geofence_radius_m?: number;
+  /** null = inherit org default · true/false = override. */
+  location_exceptions_enabled?: boolean | null;
+  timing_exceptions_enabled?: boolean | null;
 }
 
 export async function updateCustomer(

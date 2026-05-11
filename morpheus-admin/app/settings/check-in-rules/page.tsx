@@ -24,6 +24,10 @@ import {
   setDefaultGeofenceRadius,
   getAutoCheckoutTime,
   setAutoCheckoutTime,
+  getLocationExceptionsEnabled,
+  setLocationExceptionsEnabled,
+  getTimingExceptionsEnabled,
+  setTimingExceptionsEnabled,
 } from "@/lib/settings-store";
 
 export default function CheckInRulesPage() {
@@ -31,6 +35,8 @@ export default function CheckInRulesPage() {
   const [earlyMin, setEarlyMin] = useState<string>("15");
   const [defaultRadius, setDefaultRadius] = useState<string>("100");
   const [autoCheckoutTime, setAutoCheckoutTimeState] = useState<string>("23:59");
+  const [locationOn, setLocationOn] = useState<boolean>(true);
+  const [timingOn, setTimingOn] = useState<boolean>(true);
   const [loaded, setLoaded] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -41,14 +47,53 @@ export default function CheckInRulesPage() {
       getEarlyGraceMinutes(),
       getDefaultGeofenceRadius(),
       getAutoCheckoutTime(),
-    ]).then(([late, early, radius, autoTime]) => {
+      getLocationExceptionsEnabled(),
+      getTimingExceptionsEnabled(),
+    ]).then(([late, early, radius, autoTime, locOn, timeOn]) => {
       setLateMin(String(late));
       setEarlyMin(String(early));
       setDefaultRadius(String(radius));
       setAutoCheckoutTimeState(autoTime);
+      setLocationOn(locOn);
+      setTimingOn(timeOn);
       setLoaded(true);
     });
   }, []);
+
+  // Org-wide toggle handlers. Optimistic update — flip the UI first
+  // so the switch animates immediately, then revert on failure.
+  const toggleLocation = async (next: boolean) => {
+    setLocationOn(next);
+    setSavingKey("locOn");
+    const r = await setLocationExceptionsEnabled(next);
+    setSavingKey(null);
+    if (!r.ok) {
+      setLocationOn(!next);
+      setMessage(r.error || "Couldn't save.");
+      return;
+    }
+    setMessage(
+      next
+        ? "Location exceptions enabled — off-site check-ins will surface a reason card."
+        : "Location exceptions disabled — off-site check-ins no longer prompt for a reason."
+    );
+  };
+  const toggleTiming = async (next: boolean) => {
+    setTimingOn(next);
+    setSavingKey("timeOn");
+    const r = await setTimingExceptionsEnabled(next);
+    setSavingKey(null);
+    if (!r.ok) {
+      setTimingOn(!next);
+      setMessage(r.error || "Couldn't save.");
+      return;
+    }
+    setMessage(
+      next
+        ? "Timing exceptions enabled — late and early check-ins will surface a reason card."
+        : "Timing exceptions disabled — late and early check-ins no longer prompt for a reason."
+    );
+  };
 
   const saveLate = async () => {
     setMessage(null);
@@ -95,6 +140,60 @@ export default function CheckInRulesPage() {
       section="check-in-rules"
       description="Thresholds that gate when the mobile app shows an exception card on check-in / check-out. Below each threshold no exception UI appears and the rep can proceed straight away."
     >
+      {/* Exception toggles — quietest, biggest-blast-radius setting,
+          so they sit at the very top. Each toggle is a per-org master
+          switch; per-customer overrides on the customer's Address tab
+          take precedence when set. Flipping either OFF here silences
+          the corresponding exception card across the entire mobile
+          app for every customer that hasn't explicitly opted-in. */}
+      <Card padding={20} style={{ marginBottom: 14 }}>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 13,
+            fontWeight: 700,
+            color: AC.ink,
+            letterSpacing: -0.1,
+            marginBottom: 4,
+          }}
+        >
+          Show exception cards on check-in
+        </div>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 12,
+            color: AC.mute,
+            marginBottom: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          When ON, reps checking in off-site or outside the timing
+          window have to pick a reason before they can proceed (and the
+          event is logged for the audit trail). When OFF, the check-in
+          is silent — useful for orgs that trust their reps and don't
+          want the friction. Per-customer overrides live on each
+          customer&apos;s edit page.
+        </div>
+        <ToggleRow
+          title="Location exceptions"
+          subtitle="Trigger when the rep's GPS is further than the customer's geofence radius from the site."
+          on={locationOn}
+          saving={savingKey === "locOn"}
+          disabled={!loaded}
+          onChange={toggleLocation}
+        />
+        <div style={{ height: 1, background: AC.lineDim, margin: "10px 0" }} />
+        <ToggleRow
+          title="Timing exceptions"
+          subtitle="Trigger for late check-ins (past start + grace) and early check-ins (before start − grace)."
+          on={timingOn}
+          saving={savingKey === "timeOn"}
+          disabled={!loaded}
+          onChange={toggleTiming}
+        />
+      </Card>
+
       <Card padding={20}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
           <NumberSetting
@@ -312,5 +411,103 @@ function NumberSetting({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * ToggleRow — pill-style on/off switch with title + subtitle. Used for
+ * the two exception toggles at the top of the page; designed to be
+ * keyboard-accessible (the outer element is a button so Space and
+ * Enter both flip the state) and to render the saving state as a
+ * faded knob mid-transition.
+ */
+function ToggleRow({
+  title,
+  subtitle,
+  on,
+  saving,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  subtitle: string;
+  on: boolean;
+  saving: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const isOff = !disabled && !on;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => !disabled && !saving && onChange(!on)}
+      disabled={disabled || saving}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        width: "100%",
+        padding: "8px 4px",
+        border: "none",
+        background: "transparent",
+        cursor: disabled || saving ? "not-allowed" : "pointer",
+        textAlign: "left",
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 13.5,
+            fontWeight: 600,
+            color: AC.ink,
+            letterSpacing: -0.1,
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11.5,
+            color: AC.mute,
+            marginTop: 3,
+            lineHeight: 1.4,
+          }}
+        >
+          {subtitle}
+        </div>
+      </div>
+      <div
+        aria-hidden
+        style={{
+          width: 42,
+          height: 24,
+          borderRadius: 99,
+          background: on ? AC.brand : isOff ? "#cbd5e1" : AC.line,
+          position: "relative",
+          transition: "background .2s ease",
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            background: "#fff",
+            position: "absolute",
+            top: 3,
+            left: on ? 21 : 3,
+            transition: "left .2s ease",
+            boxShadow: "0 1px 2px rgba(0,0,0,.18)",
+            opacity: saving ? 0.6 : 1,
+          }}
+        />
+      </div>
+    </button>
   );
 }
