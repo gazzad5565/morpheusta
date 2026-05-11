@@ -1,7 +1,7 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`6deb0d3`** (May 11, 2026 — late afternoon). Long session — **35 commits** through the day. Morning batch covered two major features (cancellation/unable-to-attend + the polish/identity/exception passes — see "Today's session" below). Afternoon was a manager-testing pass through everything that shipped, fixing friction as it surfaced (greeting truncation, calendar card consistency, loading overlays end-to-end, drop-down audit, form button consistency, /schedule/manage cleanup, side-menu polish, mobile profile self-edit, dead "Reset upcoming schedule" section removed, Live Feed counter now shows real total). All commits on origin/main; both apps auto-deployed via Vercel.
+> Latest commit: **`b2a9e30`** (May 11, 2026 — engineering pass). Long session — **37 commits** through the day. Morning + afternoon shipped two feature passes + a manager-testing friction pass (see "Today's session" below). Evening was an engineering review: 4 hot-path indexes added, 1 realtime channel-collision fix, 2 missing realtime subscriptions (`/reps` and `/customers`), 14 duplicate utility functions collapsed into `lib/format.ts`, 1 unbounded query capped. The audit also surfaced larger items that need a dedicated session each (Phase 4 RLS, `listProfiles` page-level cache, 5 big-file extractions) — those are documented in the new **Engineering review · 2026-05-11** section below for the senior-engineer review.
 > 1. **Cancellation / "Can't make this shift" feature** (8 commits) — rep can flag an assigned shift they can't make from anywhere, manager sees it in Live Ops "Needs action", four resolutions (Reassign / Reopen as unassigned / Keep · rep stays on / Cancel · do not refill), banners + pills + audit trail end-to-end. Two new attention overlay columns on shifts.
 > 2. **Polish, identity, and exception-toggle pass** (10 commits) — rep notes per shift, banner watcher for shift assignments, "awesome" check-in overlay + shimmering skeletons, /schedule/manage row actions cleanup, mobile chrome cleanup (address on cards, menu icon inline, map attribution collapsed), house glyph for customer markers + face/photo for rep markers everywhere, rep profile photo upload (mobile → admin → maps), and org-wide + per-customer exception toggles for location and timing check-in cards.
 > Five migrations to run in Supabase before all of this is fully live — see "Migrations to run for May 11" below. Working tree clean.
@@ -107,7 +107,7 @@ If you switch computers (or hand this project to a developer), this section is t
 
 ### Where things stand right now (handover for the next chat)
 
-**Last commit:** `6deb0d3` — "Admin forms: consistent buttons + labels across every entity" (May 11, 2026 — late afternoon; 35 commits through the day across two phases: morning feature work + afternoon manager-testing pass / friction fixes)
+**Last commit:** `b2a9e30` — "Engineering pass — DB indexes, realtime gaps, duplicate utilities" (May 11, 2026 — evening; 37 commits through the day across three phases: morning feature work + afternoon friction fixes + evening engineering review / stabilisation)
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
@@ -398,8 +398,9 @@ Five new files in `db/migrations/` — run in order in the Supabase SQL editor b
 3. `2026_05_11_shifts_notes.sql` — adds `rep_notes text` to shifts (note feature)
 4. `2026_05_11_profile_avatars.sql` — adds `avatar_url text` to profiles (rep photo upload)
 5. `2026_05_11_exception_toggles.sql` — adds `location_exceptions_enabled` + `timing_exceptions_enabled` boolean overrides to customers
+6. `2026_05_11_perf_indexes.sql` — engineering pass; adds four hot-path indexes (`shift_events.shift_id` partial, `profiles.role`, `rep_locations.rep_id`, `customer_sites.active`)
 
-All five are idempotent and wrapped in `BEGIN; … COMMIT;` so failures roll back cleanly. The org-wide pair for the exception toggles is written into `app_settings` lazily on first admin UI save — no migration needed for them.
+All six are idempotent and wrapped in `BEGIN; … COMMIT;` so failures roll back cleanly. The org-wide pair for the exception toggles is written into `app_settings` lazily on first admin UI save — no migration needed for them.
 
 Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`). Smoke-tested key routes return 200 on a local prod-mode boot.
 
@@ -697,6 +698,144 @@ Schema lives on the shared Supabase project, code lives on GitHub. Just clone + 
 | `2026_05_08_customer_sites_head_office.sql` | **NEW** — renames auto-seeded `Main` rows to `Head office` |
 | `2026_05_08_customer_sites_contact.sql` | **NEW** — adds `contact_name` / `contact_phone` / `contact_email` / `notes` columns |
 
+### Engineering review · 2026-05-11 (handoff for the senior engineer)
+
+A focused engineering pass landed late on May 11 (`b2a9e30`) ahead of
+senior-engineer review. Some items were shipped, the rest are
+documented here with concrete starting points so the senior engineer
+can pick them up cold.
+
+#### What landed in the engineering pass (commit `b2a9e30`)
+
+- **Four missing hot-path indexes** in `db/migrations/2026_05_11_perf_indexes.sql`:
+  `shift_events.shift_id` (partial NOT NULL), `profiles.role`,
+  `rep_locations.rep_id`, `customer_sites.active`. Idempotent +
+  transactional; safe to re-run.
+- **Realtime channel-name collision fixed** in
+  `lib/rep-locations-store.ts` — `subscribeRepLocations` was using a
+  hardcoded `"rep_locations_live"` channel name so two simultaneous
+  subscribers silently shared one channel. Now uses
+  `Date.now()`+counter suffix like every other subscriber in the codebase.
+- **Realtime subscriptions added** for `/reps` and `/customers` list
+  pages. Both were mount-only fetches; a concurrent admin's edits
+  showed stale data until a manual refresh. New `subscribeProfiles()`
+  and `subscribeCustomers()` helpers in their respective stores.
+- **Duplicate utilities deduplicated.** 9 copies of `deriveInitials`,
+  3 copies of `formatTimeRange`, and 2 copies of `timeToMin`/`minToTime`
+  collapsed into shared exports in `lib/format.ts`. `schedule/page.tsx`'s
+  `deriveInitials` was dead code, removed entirely.
+- **Bounded query** for `getCheckoutTimesForShifts` in
+  `lib/events-store.ts` — was relying on PostgREST's 1000-row default
+  ceiling; now caps at `max(50, shiftIds.length × 4)` so a buggy
+  shift with many checkout events can't crowd out the others.
+
+#### Documented findings for the senior-engineer review
+
+The audit surfaced a handful of items that need a dedicated session
+each, with risk of regression too high to do under time pressure.
+Listed with file paths + suggested approaches so they can be picked
+up cold:
+
+**Architecture / scaling**
+
+1. **`listProfiles()` is called from ~5 components independently per
+   page render** on the Live Ops home (KpiStrip + ShiftsList +
+   LiveFeedPanel + TopBar typeahead + …). Each component fetches the
+   full profile list. The fix is a page-level context (or a swr-style
+   cache) that fetches once and shares — but it's a multi-file
+   plumbing change with real regression risk. Worth doing the moment
+   the user count climbs past ~50 reps.
+2. **DB row shapes leak into UI code.** Components reference
+   `shift.start_time`, `shift.shift_date`, `s.customer_id` directly,
+   so any DB-side rename ripples through the entire component tree.
+   The fix is a mapper layer at every `lib/*-store.ts` boundary that
+   returns a domain shape with camelCase fields. Already done
+   partially in `lib/shifts-store.ts` (mobile) which has
+   `ShiftWithMeta`. Apply the same pattern elsewhere.
+3. **`shifts.customer_id` may not have an enforced FK** to
+   `customers(id)`. The base shifts table is older than the
+   `db/migrations/` directory so the constraint isn't tracked here.
+   Check `\d+ public.shifts` in the Supabase SQL editor; if missing,
+   add a `FOREIGN KEY (customer_id) REFERENCES customers(id)` migration
+   alongside Phase 4 RLS.
+4. **Soft-delete inconsistency** across the schema:
+   - `customers`, `customer_sites` use `active boolean`
+   - `shifts` uses `state='cancelled'` (state machine)
+   - everything else hard-deletes
+   Pick a convention and apply it. The state-machine version on
+   shifts is the right choice for that table (audit trail); for
+   library_files and tasks consider adding `deleted_at timestamptz`
+   so the activity log isn't broken by cascade deletes.
+5. **`app_settings` table has no `created_at` column** — only
+   `updated_at`. Trivial migration, useful for future "when did the
+   org first configure X?" reports.
+
+**Big files that would benefit from extraction**
+
+The user-visible behaviour is correct, but the following modules are
+large enough that onboarding a new dev means reading a lot of inline
+code per page. None of these are urgent — extract sub-components
+opportunistically the next time a feature touches them. Listed
+biggest first:
+
+- `morpheus-admin/app/schedule/page.tsx` — **2,621 lines.** Calendar +
+  drag-drop + lane allocator + day-summary chip + day-detail panel +
+  edit popover. Suggested extraction:
+    `components/schedule/DaysCalendar.tsx` (the grid)
+    `components/schedule/DayColumn.tsx` (per-column logic)
+    `components/schedule/DraggableShiftCard.tsx` (the card)
+    `components/schedule/DaySummaryChip.tsx` + `DayDetailPanel.tsx`
+    `lib/schedule/lanes.ts` (assignLanes + cluster logic)
+- `morpheus-mobile/app/page.tsx` — **2,052 lines.** Dashboard +
+  UpNextCard + BreakOrTravelCard + WelcomeStrip + map embed. Suggested:
+    `components/dashboard/WelcomeStrip.tsx`
+    `components/dashboard/UpNextCard.tsx`
+    `components/dashboard/BreakOrTravelCard.tsx`
+- `morpheus-admin/app/schedule/new/page.tsx` — **1,643 lines.** The
+  cartesian-product form. The CustomerContextChips + TimeSelect
+  helpers can move out cleanly.
+- `morpheus-mobile/app/active/page.tsx` — **1,539 lines.** Task sheet +
+  shift notes + break/travel state — TaskSheet is already its own
+  component; `ShiftNotesCard` would extract cleanly.
+- `morpheus-admin/components/screens/live-ops/LiveFeedPanel.tsx` — **1,410 lines.**
+  Live feed + needs-action panel + reassign modal. Split the
+  reassign modal into its own file.
+
+**Security**
+
+- **Phase 4 RLS is still the top open item** (see item 3 below). All
+  tables currently `USING (true)` for authenticated users; the apps
+  enforce role at the UI but not at the DB. A motivated rep with
+  Supabase credentials could write any table.
+
+**Lower-priority quality items (left alone deliberately)**
+
+- 82 `console.log` / `console.warn` calls across stores. Most are
+  intentional error reports (`// eslint-disable-next-line no-console`)
+  but worth swapping for a `logger.warn(...)` abstraction that strips
+  in prod.
+- 11 empty `catch {}` blocks in the admin app. Most are graceful
+  degradations on optional storage / geocoding paths. Add inline
+  comments to each so the senior engineer can verify intent.
+- 15 files write `window.localStorage` directly — worth a
+  `lib/storage.ts` typed wrapper.
+- No `<ErrorBoundary>` at the layout level on either app.
+
+**What was NOT touched (with reasons)**
+
+- **Big file refactors above.** They're listed not because they're
+  broken but because they're large. Refactoring 2.6k lines of
+  drag-drop calendar code under time pressure is the fastest way to
+  introduce regressions; deferred to the senior engineer or to a
+  feature-driven extraction.
+- **`listProfiles` page-level cache.** Would touch 5+ files and
+  every existing test/QA hook to thread context. Senior engineer
+  pick.
+- **Phase 4 RLS.** Already #1 on the deferred list. Needs a single
+  coordinated migration + staging-Supabase test pass, not a quick fix.
+
+---
+
 **Top of the deferred list — pick any one and run with it next session:**
 
 1. ~~**Cancellation / unable-to-attend flow**~~ ✅ SHIPPED May 11 — see "Today's session — what shipped (May 11)" above. Eight commits across Stage 2A + 2B; attention overlay model rather than state-machine expansion. Migrations `2026_05_11_shifts_attention.sql` + `_resolution.sql`.
@@ -711,8 +850,8 @@ Schema lives on the shared Supabase project, code lives on GitHub. Just clone + 
 10. **Tests.** Skeleton already in `qa/` (May 7). Run the Playwright suite against a non-prod Supabase project (needs you to create one + seed an admin/rep user) and start filling in the high-priority spec files from `qa/QA_PLAN.md`.
 
 **Smaller cleanups that didn't make the cut today:**
-- 8 `deriveInitials` definitions still scattered across pages — dedupe to `initialsFromNameOrEmail` from `lib/format.ts` next time you touch each file. Same for 3 `formatTimeRange` copies. Functionally equivalent; just maintenance.
-- 5 page files >900 LOC (`customers/[id]/page.tsx`, `mobile/active/page.tsx`, `mobile/check-in/page.tsx`, `schedule/page.tsx`, `settings/managers/page.tsx`). They build fine but onboarding a new dev means reading a lot of inline code per page. Extract sub-components opportunistically when adding features.
+- ~~9 `deriveInitials` + 3 `formatTimeRange` + 2 `timeToMin/minToTime` duplicates~~ ✅ **Deduplicated in `b2a9e30`** (engineering pass) — all now use shared exports from `lib/format.ts`.
+- 5 page files >900 LOC (`customers/[id]/page.tsx`, `mobile/active/page.tsx`, `mobile/check-in/page.tsx`, `schedule/page.tsx`, `settings/managers/page.tsx`). They build fine but onboarding a new dev means reading a lot of inline code per page. Extract sub-components opportunistically when adding features. **See "Engineering review · 2026-05-11" above for the specific extraction plan per file.**
 - `mock-data.ts` is now misleadingly named in both apps — only contains type definitions + (admin) `NAV_ITEMS`. Rename to `nav.ts` (admin) and merge mobile's into a shared types file.
 - No `<ErrorBoundary>` at the layout level. A page that throws crashes the whole shell to Next's overlay. Adding one would give a graceful "Something went wrong" card.
 
