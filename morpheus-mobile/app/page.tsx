@@ -997,33 +997,38 @@ function UpNextCard({
                 </div>
               )}
 
-              {/* "I can't make this shift" — friction-by-design red
-                  text-link, only on scheduled shifts where attention
-                  isn't already raised. Same affordance as the
-                  /shifts row so the rep learns it once. */}
+              {/* "Can't make this shift?" — friction-by-design.
+                  Small muted text-link with a warn glyph, deliberately
+                  low-key so it doesn't compete with Check-in or yell
+                  alarm-red at the rep. Same affordance and tone as
+                  the /shifts row so the rep learns it once. */}
               {!isResume && onUnableToAttend && (
                 <button
                   type="button"
                   onClick={() => onUnableToAttend(next)}
                   style={{
-                    marginTop: 8,
+                    marginTop: 6,
                     width: "100%",
                     background: "transparent",
                     border: "none",
-                    color: MC.danger,
+                    color: MC.mute,
                     fontFamily: MC.font,
-                    fontSize: 12.5,
-                    fontWeight: 600,
+                    fontSize: 12,
+                    fontWeight: 500,
                     letterSpacing: -0.1,
-                    padding: "6px 0 2px",
+                    padding: "8px 0 2px",
                     cursor: "pointer",
                     textAlign: "center",
-                    textDecoration: "underline",
-                    textUnderlineOffset: 3,
-                    opacity: 0.85,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 5,
                   }}
                 >
-                  I can&apos;t make this shift
+                  <Glyph name="warn" size={11} color={MC.warn} strokeWidth={2.2} />
+                  <span style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>
+                    Can&apos;t make this shift?
+                  </span>
                 </button>
               )}
             </>

@@ -187,8 +187,11 @@ export default function ShiftsListPage() {
     const r = await raiseUnableToAttend(realId, reason, note);
     setUnableBusyFor(null);
     if (!r.ok) {
-      alert(r.error || "Couldn't notify your manager. Try again?");
-      throw new Error(r.error || "Failed");
+      // Throw — the UnableToAttendSheet catches and renders the
+      // message inline. Avoiding a separate alert() so we don't
+      // double-display (the sheet's error block is the source of
+      // truth).
+      throw new Error(r.error || "Couldn't notify your manager. Try again?");
     }
     setUnableSheetFor(null);
     reload();
@@ -1186,36 +1189,40 @@ function ShiftRow({
             </div>
           )}
 
-          {/* "I can't make this shift" — friction-by-design text link
-              that opens the confirmation sheet. Only renders for
-              scheduled (mine) shifts where attention isn't already
-              raised. Once raised the row shows the amber Awaiting
-              banner above with a Withdraw button instead. */}
-          {state === "scheduled" &&
+          {/* "Can't make this shift?" — friction-by-design.
+              Muted text-link with a small warn glyph so it doesn't
+              shout. Only renders for un-checked-in shifts (scheduled,
+              travelling, late) without an active attention flag. Same
+              tone as the home up-next card so the rep learns it once. */}
+          {(state === "scheduled" || state === "travelling" || state === "late") &&
             !shift.attention &&
             !!onUnableToAttend && (
               <button
                 type="button"
                 onClick={onUnableToAttend}
                 style={{
-                  marginTop: 12,
+                  marginTop: 10,
                   width: "100%",
                   background: "transparent",
                   border: "none",
-                  color: MC.danger,
+                  color: MC.mute,
                   fontFamily: MC.font,
-                  fontSize: 12.5,
-                  fontWeight: 600,
+                  fontSize: 12,
+                  fontWeight: 500,
                   letterSpacing: -0.1,
                   padding: "8px 0 2px",
                   cursor: "pointer",
                   textAlign: "center",
-                  textDecoration: "underline",
-                  textUnderlineOffset: 3,
-                  opacity: 0.85,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 5,
                 }}
               >
-                I can&apos;t make this shift
+                <Glyph name="warn" size={11} color={MC.warn} strokeWidth={2.2} />
+                <span style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>
+                  Can&apos;t make this shift?
+                </span>
               </button>
             )}
         </div>

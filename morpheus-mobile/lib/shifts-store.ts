@@ -741,15 +741,21 @@ export function resolvedAttentionFeedback(shift: {
 // the lifecycle: raise + withdraw.
 //
 // Guards:
-//   - Only `state='scheduled'` shifts can have attention raised.
-//     Once a rep checks in, the right path is the existing
-//     check-out-early flow, not this one.
+//   - State must be one of `scheduled` / `travelling` / `late` —
+//     all pre-check-in states. Once a rep checks in (in-progress,
+//     on-break) the right path is the existing check-out-early flow.
+//     Travelling and Late are allowed because a rep can decide
+//     mid-route they can't make it.
 //   - Only the assigned rep can raise on their own shift. The DB
 //     write is permissive for any authenticated user (Phase-pre-4
 //     RLS) so we enforce ownership in the SQL filter itself, which
 //     is enough: a rep can only mutate a row where rep_id = their id.
 //   - Idempotent: raising twice in a row is a no-op; the second call
 //     is filtered out by the `attention IS NULL` guard.
+//   - Read-back verification: the UPDATE returns the row via .select()
+//     so we can confirm the change actually persisted. Silent no-ops
+//     (filter mismatch, RLS rejection, etc) get surfaced as errors
+//     instead of looking like success.
 
 export type UnableReason =
   | "sick"
@@ -788,8 +794,17 @@ export async function raiseUnableToAttend(
 
   if (!beforeRow) return { ok: false, error: "Shift not found" };
   if (beforeRow.rep_id !== userId) return { ok: false, error: "Not your shift" };
-  if (beforeRow.state !== "scheduled") {
-    return { ok: false, error: "Only scheduled shifts can be flagged" };
+  // Pre-check-in states: scheduled, travelling, late. Anything after
+  // check-in (in-progress, on-break) means the rep is already on the
+  // job — the right path there is check-out-early, not unable-to-attend.
+  // complete / cancelled are terminal so they're excluded too.
+  const ALLOWED_STATES = new Set(["scheduled", "travelling", "late"]);
+  if (!ALLOWED_STATES.has(beforeRow.state || "")) {
+    return {
+      ok: false,
+      error:
+        "This shift has already started. Use check-out if you need to leave early.",
+    };
   }
   if (beforeRow.attention) {
     // Already flagged — idempotent no-op, the UI shouldn't normally
@@ -797,7 +812,7 @@ export async function raiseUnableToAttend(
     return { ok: true };
   }
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("shifts")
     .update({
       attention: "unable_to_attend",
@@ -807,9 +822,20 @@ export async function raiseUnableToAttend(
     })
     .eq("id", shiftId)
     .eq("rep_id", userId)
-    .eq("state", "scheduled")
-    .is("attention", null);
+    .in("state", ["scheduled", "travelling", "late"])
+    .is("attention", null)
+    .select("id, attention");
   if (error) return { ok: false, error: error.message };
+  // Read-back: if 0 rows came back, the filter matched nothing — most
+  // commonly a race with another writer (state flipped, attention
+  // already set). Surface it instead of returning silent success.
+  if (!updated || updated.length === 0) {
+    return {
+      ok: false,
+      error:
+        "Couldn't save — the shift may have changed since this screen loaded. Pull to refresh and try again.",
+    };
+  }
 
   await logEvent({
     event_type: "shift.rep_unable_to_attend",
@@ -863,7 +889,7 @@ export async function withdrawUnableToAttend(
   // 'withdrawn' so any UI that wants to render a follow-up status
   // can do so; we don't set resolved_at because that's reserved for
   // manager-side actions in the audit trail.
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("shifts")
     .update({
       attention: null,
@@ -874,8 +900,16 @@ export async function withdrawUnableToAttend(
     })
     .eq("id", shiftId)
     .eq("rep_id", userId)
-    .is("attention_resolved_at", null);
+    .is("attention_resolved_at", null)
+    .select("id, attention");
   if (error) return { ok: false, error: error.message };
+  if (!updated || updated.length === 0) {
+    return {
+      ok: false,
+      error:
+        "Couldn't withdraw — your manager may already have actioned it. Pull to refresh.",
+    };
+  }
 
   await logEvent({
     event_type: "shift.rep_unable_withdrawn",
