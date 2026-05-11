@@ -22,13 +22,18 @@ interface Item {
 
 const ITEMS: Item[] = [
   { id: "shifts",    label: "Today",          icon: "clock", color: MC.brand,  href: "/" },
-  { id: "route",     label: "Plan my day",    icon: "target", color: "#1FA971", href: "/route" },
   { id: "addshift",  label: "Request shift",  icon: "pin",   color: MC.brand,  href: "/add-shift" },
   { id: "library",   label: "Library",        icon: "book",  color: "#5b3da5", href: "/library" },
   { id: "support",   label: "Support",        icon: "mic",   color: "#9c4a2c", href: "/support" },
   { id: "profile",   label: "Profile",        icon: "leave", color: MC.mute,   href: "/profile" },
   { id: "logout",    label: "Log out",        icon: "leave", color: MC.danger, href: "/login" },
 ];
+// "Plan my day" intentionally NOT in the side menu — it's surfaced
+// where it's actually useful (home Up Next pill + /shifts header
+// pill, both gated on the rep having 2+ stops today). Putting it in
+// the global menu would add an always-visible item that's a no-op
+// for ~60% of the rep's days, and the user explicitly asked to keep
+// the menu tight.
 
 const SHIFTS_PATHS = ["/", "/shifts", "/check-in", "/active", "/check-out", "/summary"];
 
