@@ -747,12 +747,35 @@ May 6 (already in cloud):
 
 Top of the queue (in priority order):
 
-1. **Run the May 7 + May 11 migrations** in Supabase Editor — full list is under "Migrations applied today (cloud status)" above. The May 11 batch has seven files; nothing's destructive but the features won't work until they run. Most urgent for new prod traffic: `2026_05_11_customers_logo.sql` (without it, admin logo upload throws "column does not exist"); `2026_05_11_shifts_attention.sql` + `_resolution.sql` (without them, "Can't make this shift" UI silently fails).
-2. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
-3. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-4. **Cinematic check-out animation** — user reported it's "missing". The `/summary` page code is intact; need to reproduce the rep's flow end-to-end and confirm whether it's actually firing.
-5. **Capacitor wrap** if background GPS is the priority.
-6. **Custom report builder** if reporting is the priority.
+1. **🆕 Calendar — allow adding a second shift to an already-occupied
+   slot (May 12 ask).** Right now on the admin calendar's weekly view,
+   clicking a time slot that already has a shift opens the existing
+   shift's quick-info popover (View / Edit / Delete via `c028b0a` /
+   `e16a08f`). There's no path to add a SECOND shift in that same
+   slot. Concrete case the user hit: a rep needed a shift for a
+   different customer at the same time as an existing shift — two
+   parallel shifts, same time, different customer (or different rep).
+   The user's wording: "I should be allowed to create another shift
+   from that time slot … those other options are making it too
+   complicated."
+   - Suggested approach: in the existing quick-info popover (the
+     `createPortal` modal centred on click), add an "Add another
+     shift at this time" action alongside View / Edit / Delete.
+     Pre-fills `/schedule/new` with the clicked day + time, same
+     pattern as click-on-empty-slot (`2f9c7f3`, `6282384`).
+   - Keep the existing View / Edit / Delete intact — the user said
+     "those other options are making it too complicated" but in
+     context I think they meant the empty-slot vs occupied-slot
+     paths are inconsistent, not that View/Edit/Delete should go.
+     Confirm with the user before deleting any of them.
+   - File: `morpheus-admin/components/screens/calendar/` (the quick-
+     info popover component).
+2. **Run the May 7 + May 11 migrations** in Supabase Editor — full list is under "Migrations applied today (cloud status)" above. The May 11 batch has seven files; nothing's destructive but the features won't work until they run. Most urgent for new prod traffic: `2026_05_11_customers_logo.sql` (without it, admin logo upload throws "column does not exist"); `2026_05_11_shifts_attention.sql` + `_resolution.sql` (without them, "Can't make this shift" UI silently fails).
+3. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
+4. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
+5. **Cinematic check-out animation** — user reported it's "missing". The `/summary` page code is intact; need to reproduce the rep's flow end-to-end and confirm whether it's actually firing.
+6. **Capacitor wrap** if background GPS is the priority.
+7. **Custom report builder** if reporting is the priority.
 
 Open the `/reports` hub to see what works visually, the Timesheet report to see how the events log + new `check_out_at` column come together for payroll, and `/schedule/new` to see the multi-rep × multi-customer × recurrence pattern.
 
