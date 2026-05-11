@@ -157,12 +157,22 @@ const STATE_BODY_TINT: Record<string, string> = {
   late: "rgba(213, 63, 80, 0.18)",
   complete: "rgba(31, 169, 113, 0.10)",
 };
+/**
+ * Status pill mapping covering every shift.state value the DB can hold.
+ * Every state has an entry so the day-detail panel and shift cards
+ * render a pill consistently — managers explicitly asked to see "the
+ * full status of each shift, e.g. cancelled". Scheduled stays muted
+ * (it's the default; making it loud would just add noise) but is
+ * present so the pill always renders.
+ */
 const STATE_DOT: Record<string, { color: string; label: string }> = {
+  scheduled: { color: "#5B6470", label: "Scheduled" },
   "in-progress": { color: "#1FA971", label: "Live" },
   travelling: { color: "#F5A700", label: "Travelling" },
   "on-break": { color: "#5b3da5", label: "On break" },
   late: { color: "#d53f50", label: "Late" },
   complete: { color: "#1FA971", label: "Done" },
+  cancelled: { color: "#d53f50", label: "Cancelled" },
 };
 
 /**
@@ -706,6 +716,16 @@ export default function SchedulePage() {
             byDay={byDay}
             repNameMap={repNameMap}
             customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
+            // When the rep filter is locked onto a specific person,
+            // we know there can't be overlapping shifts (a rep can't
+            // be in two places at once + we enforce a conflict check
+            // at schedule time). Pass that through so DayColumn can
+            // skip the busy-day "N shifts · VIEW ALL" chip and let
+            // every shift render in the slot grid — managers want to
+            // scan for gaps in the day, which the chip hides.
+            singleRepFiltered={
+              repFilter !== "All" && repFilter !== UNASSIGNED_KEY
+            }
             onMove={applyShiftMove}
           />
         </Card>
@@ -853,6 +873,7 @@ function DaysCalendar({
   byDay,
   repNameMap,
   customerScopeForAdd,
+  singleRepFiltered,
   onMove,
 }: {
   days: Date[];
@@ -860,6 +881,11 @@ function DaysCalendar({
   byDay: Map<string, ShiftRow[]>;
   repNameMap: Record<string, string>;
   customerScopeForAdd: string | null;
+  /** True when the toolbar's rep filter is pinned to a specific rep
+   *  (not "All" and not "Unassigned"). Used to disable the busy-day
+   *  summary chip — a single rep can't overlap themselves, so the
+   *  lane grid will always fit without cluster collapsing. */
+  singleRepFiltered: boolean;
   onMove: (
     id: string,
     patch: {
@@ -914,6 +940,7 @@ function DaysCalendar({
             shifts={list}
             repNameMap={repNameMap}
             customerScopeForAdd={customerScopeForAdd}
+            singleRepFiltered={singleRepFiltered}
             drag={drag}
             hover={hover && hover.dayISO === iso ? hover : null}
             onBeginDrag={beginDrag}
@@ -1315,6 +1342,7 @@ function DayColumn({
   shifts,
   repNameMap,
   customerScopeForAdd,
+  singleRepFiltered,
   drag,
   hover,
   onBeginDrag,
@@ -1327,6 +1355,10 @@ function DayColumn({
   shifts: ShiftRow[];
   repNameMap: Record<string, string>;
   customerScopeForAdd: string | null;
+  /** Inherited from DaysCalendar — when true we render the lane grid
+   *  regardless of count, so a manager scanning one rep's day can see
+   *  the actual gaps between their shifts. */
+  singleRepFiltered: boolean;
   drag: { shift: ShiftRow; pickupOffsetMin: number } | null;
   hover: { dayISO: string; startMin: number; endMin: number } | null;
   onBeginDrag: (shift: ShiftRow, pickupOffsetMin: number) => void;
@@ -1441,8 +1473,15 @@ function DayColumn({
                                   with the full list + edit/delete /
                                   drag-to-move from there. Keeps very
                                   busy days legible without trying to
-                                  cram 8+ slivers into one column. */}
-      {shifts.length <= DAY_SHIFT_LIMIT ? (
+                                  cram 8+ slivers into one column.
+
+          Exception: when the rep filter is pinned to one specific
+          rep, we always use the lane layout. A single rep's shifts
+          can't overlap (conflict-checked at schedule time + a person
+          can't be in two places at once), so the count chip would
+          just hide the very thing the manager filtered to see — gaps
+          between that rep's shifts. */}
+      {singleRepFiltered || shifts.length <= DAY_SHIFT_LIMIT ? (
         <DayColumnContents
           shifts={shifts}
           repNameMap={repNameMap}
