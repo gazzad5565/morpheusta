@@ -831,6 +831,15 @@ export async function raiseUnableToAttend(
     return { ok: true };
   }
 
+  // Critical: also clear attention_resolved_at / _by / _resolution.
+  // If a previous round on this same shift was actioned by a manager
+  // (acknowledge, etc), those columns are still populated from that
+  // resolution. Without clearing them on re-raise the row ends up in
+  // a half-resolved state — attention='unable_to_attend' AND
+  // attention_resolved_at=<old timestamp> — which the Live Ops queue
+  // (`attention_resolved_at IS NULL`) and the rep's Awaiting banner
+  // both filter out. Result: nothing visibly happens on either side
+  // even though the DB write succeeded.
   const { data: updated, error } = await supabase
     .from("shifts")
     .update({
@@ -838,6 +847,9 @@ export async function raiseUnableToAttend(
       attention_reason: reason,
       attention_note: note?.trim() || null,
       attention_raised_at: new Date().toISOString(),
+      attention_resolved_at: null,
+      attention_resolved_by: null,
+      attention_resolution: null,
     })
     .eq("id", shiftId)
     .eq("rep_id", userId)
