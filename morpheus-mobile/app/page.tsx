@@ -1091,85 +1091,125 @@ function UpNextCard({
                     with the customer's site address; Start travelling
                     does the same AND starts the in-app travel timer +
                     fires the shift.travel_started audit event. */}
-                {!isResume && (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = buildDirectionsUrl(next);
-                        if (url) {
-                          // Don't fire a travel event for a pure
-                          // "look at the route" tap — the rep might
-                          // just be checking the address. Start
-                          // travelling has its own button below.
-                          window.open(url, "_blank", "noopener,noreferrer");
-                        } else {
-                          alert(
-                            "No address on this site yet — ask your manager to set one on the customer record."
-                          );
-                        }
-                      }}
-                      disabled={!hasDestination(next)}
-                      style={{
-                        ...secondaryBtnStyle,
-                        flex: 1,
-                        opacity: hasDestination(next) ? 1 : 0.5,
-                      }}
-                      title={
-                        hasDestination(next)
-                          ? "Opens directions in your phone's map app"
-                          : "No address on this site yet"
-                      }
-                    >
-                      <Glyph
-                        name="target"
-                        size={16}
-                        color={MC.brandDeep}
-                        strokeWidth={2.2}
-                      />
-                      Directions
-                    </button>
-                    {travellingSince ? (
-                      <button
-                        type="button"
-                        onClick={() => setTravellingSince(null)}
-                        style={{ ...secondaryBtnStyle, flex: 1.4 }}
-                      >
-                        <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
-                        Stop · {formatTime(travellingSince)}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          // Start the in-app timer first so the audit
-                          // event fires + the next shift's state
-                          // flips to "travelling" before we hand off
-                          // to the OS map app.
-                          setTravellingSince(Date.now());
-                          const url = buildDirectionsUrl(next);
-                          if (url) {
-                            window.open(url, "_blank", "noopener,noreferrer");
+                {!isResume && (() => {
+                  // Pull the disabled state up so both buttons share
+                  // it cleanly. The disabled visual was previously
+                  // just opacity:0.5 — managers fed back it was too
+                  // subtle ("I couldn't tell it was disabled at a
+                  // glance"). Now we swap the background to a muted
+                  // tint, dim every inner colour, and keep
+                  // cursor:not-allowed so taps don't even feel like
+                  // they registered.
+                  const enabled = hasDestination(next);
+                  const disabledStyle: React.CSSProperties = enabled
+                    ? {}
+                    : {
+                        background: MC.bg,
+                        borderColor: MC.line,
+                        color: MC.hint,
+                        cursor: "not-allowed",
+                        opacity: 1,
+                      };
+                  const iconColor = enabled ? MC.brandDeep : MC.hint;
+                  return (
+                    <>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!enabled) return;
+                            const url = buildDirectionsUrl(next);
+                            if (url) {
+                              window.open(url, "_blank", "noopener,noreferrer");
+                            }
+                          }}
+                          disabled={!enabled}
+                          style={{
+                            ...secondaryBtnStyle,
+                            flex: 1,
+                            ...disabledStyle,
+                          }}
+                          title={
+                            enabled
+                              ? "Opens directions in your phone's map app"
+                              : "No address on this site yet"
                           }
-                        }}
-                        disabled={!hasDestination(next)}
-                        style={{
-                          ...secondaryBtnStyle,
-                          flex: 1.4,
-                          opacity: hasDestination(next) ? 1 : 0.5,
-                        }}
-                        title={
-                          hasDestination(next)
-                            ? "Starts the travel timer and opens directions in your map app"
-                            : "No address on this site yet"
-                        }
-                      >
-                        <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
-                        Start travelling
-                      </button>
-                    )}
-                  </div>
-                )}
+                        >
+                          <Glyph
+                            name="target"
+                            size={16}
+                            color={iconColor}
+                            strokeWidth={2.2}
+                          />
+                          Directions
+                        </button>
+                        {travellingSince ? (
+                          <button
+                            type="button"
+                            onClick={() => setTravellingSince(null)}
+                            style={{ ...secondaryBtnStyle, flex: 1.4 }}
+                          >
+                            <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
+                            Stop · {formatTime(travellingSince)}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!enabled) return;
+                              // Start the in-app timer first so the audit
+                              // event fires + the next shift's state
+                              // flips to "travelling" before we hand off
+                              // to the OS map app.
+                              setTravellingSince(Date.now());
+                              const url = buildDirectionsUrl(next);
+                              if (url) {
+                                window.open(url, "_blank", "noopener,noreferrer");
+                              }
+                            }}
+                            disabled={!enabled}
+                            style={{
+                              ...secondaryBtnStyle,
+                              flex: 1.4,
+                              ...disabledStyle,
+                            }}
+                            title={
+                              enabled
+                                ? "Starts the travel timer and opens directions in your map app"
+                                : "No address on this site yet"
+                            }
+                          >
+                            <Glyph name="pin" size={16} color={iconColor} strokeWidth={2.2} />
+                            Start travelling
+                          </button>
+                        )}
+                      </div>
+                      {/* Inline hint when both buttons are disabled —
+                          replaces the alert() that fired only on tap;
+                          a passive line is more discoverable + less
+                          jarring. */}
+                      {!enabled && (
+                        <div
+                          style={{
+                            marginTop: 6,
+                            fontFamily: MC.font,
+                            fontSize: 11.5,
+                            color: MC.hint,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <Glyph name="info" size={12} color={MC.hint} strokeWidth={2} />
+                          <span>
+                            No address on this site yet — ask your manager
+                            to add one.
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 {isResume ? (
                   <PrimaryButton
                     icon="arrow-r"
@@ -1337,29 +1377,49 @@ function WelcomeStrip({
           )}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Top small-caps line carries org · date. Last-sync used to
-              hang here too but managers wanted the welcome hero clean —
-              the heartbeat indicator moved to the side menu footer. */}
+          {/* Top small-caps line — org + date on the LEFT (truncate
+              on overflow), current time pinned on the RIGHT in its
+              own flex item so it stays visible even when the org
+              name is long. Previously the whole line was one
+              white-space:nowrap + ellipsis container, so a long org
+              name would chop the date AND the time off the right
+              edge before the rep ever saw them. */}
           <div
             style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 8,
               fontFamily: MC.font,
               fontSize: 10.5,
               fontWeight: 600,
               letterSpacing: 1.2,
               textTransform: "uppercase",
               color: "rgba(255,255,255,.75)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
             }}
           >
-            {orgName || "Morpheus"} · {todayHeader}
-            {nowLabel ? (
-              <>
-                {" · "}
-                <span style={{ color: "rgba(255,255,255,.95)" }}>{nowLabel}</span>
-              </>
-            ) : null}
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              title={`${orgName || "Morpheus"} · ${todayHeader}`}
+            >
+              {orgName || "Morpheus"} · {todayHeader}
+            </span>
+            {nowLabel && (
+              <span
+                style={{
+                  color: "rgba(255,255,255,.95)",
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {nowLabel}
+              </span>
+            )}
           </div>
           <div
             style={{

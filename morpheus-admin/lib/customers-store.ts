@@ -170,6 +170,59 @@ export async function updateCustomer(
     notifySaveError(error.message, "customer");
     return { ok: false, error: error.message };
   }
+
+  // Sync the address change down to the head-office site row.
+  //
+  // Background: every customer auto-creates a "Head office" site
+  // on create (see createCustomer above). The customer-detail page
+  // reads the address from `customer_sites`, not from `customers`,
+  // because the multi-site rollout (May 8) treats sites as the
+  // primary location entity. If we update customers.address without
+  // syncing the head-office site, the detail page keeps showing
+  // "No address yet — open Sites to add one" even though the
+  // managers just typed an address into the customer-edit form.
+  //
+  // Only sync when the patch actually touched address / lat / lng.
+  // The "head office" site is the oldest active site for this
+  // customer — robust against a manager renaming the auto-created
+  // "Head office" site to something else.
+  const touchesAddress =
+    patch.address !== undefined ||
+    patch.latitude !== undefined ||
+    patch.longitude !== undefined;
+  if (touchesAddress) {
+    const sitePatch: Record<string, unknown> = {};
+    if (patch.address !== undefined) sitePatch.address = patch.address;
+    if (patch.latitude !== undefined) sitePatch.latitude = patch.latitude;
+    if (patch.longitude !== undefined) sitePatch.longitude = patch.longitude;
+    // Find the oldest active site for this customer — that's the
+    // head office whether or not it's still literally named that.
+    const { data: site } = await supabase
+      .from("customer_sites")
+      .select("id")
+      .eq("customer_id", id)
+      .eq("active", true)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (site?.id) {
+      // Best-effort — don't fail the whole customer save if the
+      // site sync hits an RLS edge case; the manager can re-edit
+      // from the Sites tab. Log so the issue is visible.
+      const { error: siteErr } = await supabase
+        .from("customer_sites")
+        .update(sitePatch)
+        .eq("id", site.id);
+      if (siteErr) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[customers] head-office site sync failed:",
+          siteErr.message
+        );
+      }
+    }
+  }
+
   notifySaved("customer");
   return { ok: true };
 }
