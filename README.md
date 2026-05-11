@@ -1,10 +1,13 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`b2a9e30`** (May 11, 2026 — engineering pass). Long session — **37 commits** through the day. Morning + afternoon shipped two feature passes + a manager-testing friction pass (see "Today's session" below). Evening was an engineering review: 4 hot-path indexes added, 1 realtime channel-collision fix, 2 missing realtime subscriptions (`/reps` and `/customers`), 14 duplicate utility functions collapsed into `lib/format.ts`, 1 unbounded query capped. The audit also surfaced larger items that need a dedicated session each (Phase 4 RLS, `listProfiles` page-level cache, 5 big-file extractions) — those are documented in the new **Engineering review · 2026-05-11** section below for the senior-engineer review.
-> 1. **Cancellation / "Can't make this shift" feature** (8 commits) — rep can flag an assigned shift they can't make from anywhere, manager sees it in Live Ops "Needs action", four resolutions (Reassign / Reopen as unassigned / Keep · rep stays on / Cancel · do not refill), banners + pills + audit trail end-to-end. Two new attention overlay columns on shifts.
-> 2. **Polish, identity, and exception-toggle pass** (10 commits) — rep notes per shift, banner watcher for shift assignments, "awesome" check-in overlay + shimmering skeletons, /schedule/manage row actions cleanup, mobile chrome cleanup (address on cards, menu icon inline, map attribution collapsed), house glyph for customer markers + face/photo for rep markers everywhere, rep profile photo upload (mobile → admin → maps), and org-wide + per-customer exception toggles for location and timing check-in cards.
-> Five migrations to run in Supabase before all of this is fully live — see "Migrations to run for May 11" below. Working tree clean.
+> Latest commit: **`e529b6f`** (May 11, 2026 — late evening). Long, multi-phase day — **40+ commits** total. Three feature passes (cancellation, polish + identity + exception toggles, engineering review), then a fourth late push for the big deferred items (**traffic-aware Plan-my-day routing** + **per-customer logo uploads**), then a fifth tail of UX fixes from manager testing (success-page skip, "Wrapping up…" wording on check-out tap, dynamic Up Next picker, dead Directions button removal, customer edit page reorganised into Identity / Location / Check-in exceptions sections, and the Plan-my-day card collapsed into slim right-aligned pills under Up Next + on /shifts).
+> 1. **Cancellation / "Can't make this shift" feature** (8 commits) — rep can flag an assigned shift they can't make from anywhere, manager sees it in Live Ops "Needs action", four resolutions (Reassign / Reopen as unassigned / Keep · rep stays on / Cancel · do not refill), banners + pills + audit trail end-to-end.
+> 2. **Polish, identity, and exception-toggle pass** (10 commits) — rep notes per shift, banner watcher for shift assignments, "awesome" check-in overlay + shimmering skeletons, /schedule/manage row actions cleanup, mobile chrome cleanup, house glyph for customer markers + face/photo for rep markers everywhere, rep profile photo upload, and org-wide + per-customer exception toggles.
+> 3. **Plan my day · /route (mobile)** — server-side `/api/route/plan` with Google Routes (TRAFFIC_AWARE) when `GOOGLE_ROUTES_API_KEY` is set, mock fallback otherwise; client wrapper with 5-min cache + GPS fallback; `/route` page with provider chip, Optimize toggle, ETA + Leave-by pills, per-leg Open in Maps + whole-day Open in Maps. Entry pills on home (under Up Next) and /shifts header, only when 2+ stops.
+> 4. **Per-customer logo upload** — admin `/customers/[id]/edit` gets an Identity-section logo upload (client-side compressed to ~96×96 letterboxed JPEG, 5-15KB base64 in a new `customers.logo_url text` column). `CustomerSwatch` (admin) + `CustomerTile` (mobile) auto-branch on `logoUrl` so the logo shows everywhere — shift rows, /active hero, /check-in / -out, /add-shift picker, /route badges, map markers — without per-call-site changes.
+> 5. **UX fixes from manager testing** — `/check-in/success` page deleted (routes straight to `/active`); "Wrapping up…" overlay on the /active → /check-out tap (was "Opening…"); Up Next picker now matches any non-terminal state (was missing 'travelling', 'on-break', 'late' → reps saw a lying "No shift assigned today" card); dead Directions buttons removed from /shifts row expansions; customer edit page reorganised into Identity / Location / Check-in exceptions Cards instead of one giant fields dump.
+> Seven migrations to run in Supabase before everything is fully live — see "Migrations to run for May 11" below. `GOOGLE_ROUTES_API_KEY` is optional but recommended in prod — see "Optional env vars". Working tree clean.
 > Repo: https://github.com/gazzad5565/morpheusta · Live: https://morpheus-admin.vercel.app + https://morpheusta-khaki-omega.vercel.app · DB: Supabase project `otweltzwwhrvhtvaqsci`
 > **Don't ask the user for context — read this whole file first.** Section "Where things stand right now" (around line 100) is the canonical handover. The "Today's session — what shipped" sections list every commit by hash, newest day first. The "Top of the deferred list" tells you what to start on next.
 > If you make changes, update this file before you push. Phase 4 RLS is still the highest-priority open item; do not deploy to real users without it.
@@ -530,6 +533,70 @@ Admin housekeeping pass
 Working tree clean. All commits on origin/main; both apps
 auto-deployed via Vercel.
 
+#### Evening UX fixes + Plan-my-day pill (May 11 evening — `73e29f9`..`e529b6f`)
+
+Four commits after the engineering pass, driven by another round of
+manager testing.
+
+- **`73e29f9`** — the big late push. Plan-my-day routing end-to-end
+  (mobile `/route` page, server `/api/route/plan` with Google Routes
+  v2 TRAFFIC_AWARE + mock fallback, client wrapper with 5-min cache,
+  GPS fallback to first stop, per-leg + whole-day Open in Maps).
+  Per-customer logo upload (migration `2026_05_11_customers_logo.sql`,
+  admin /customers/[id]/edit field with client-side letterboxed JPEG
+  compression to ~5-15KB base64, CustomerSwatch + CustomerTile both
+  auto-branch on `logoUrl` so the logo shows everywhere — shift rows,
+  /active hero, /check-in / -out, /add-shift picker, /route badges).
+  UX fixes: `/check-in/success` page deleted (routes straight to
+  `/active` — the success-page "Start activities" tap was friction
+  on top of an overlay that already confirms the check-in); new
+  `"leaving"` CheckMode on `CheckingInOverlay` for the /active →
+  /check-out tap (was confusingly saying "Opening…" while the rep
+  was leaving the store — now "Wrapping up…"); Up Next picker on
+  dashboard fixed (was only matching `in-progress` / `scheduled`, so
+  reps with their remaining shift in `travelling`, `on-break`, or
+  `late` saw "No shift assigned today" even though work was clearly
+  left — now matches any non-terminal state with sensible priority
+  order); dead Directions buttons removed from /shifts row
+  expansions (had no onClick, did literally nothing — the dashboard
+  Up Next card carries the real Directions preview, /route page has
+  per-leg deep-links).
+- **`a2bdf20`** — customer edit page reorganised. Was one giant Card
+  with twelve fields jammed together including the per-customer
+  exception override pickers, which made the exceptions look like
+  standalone settings rather than overrides on top of the org
+  defaults at `/settings/check-in-rules`. Now four clearly-labelled
+  sections in the left column: **Identity** (name, code, initials,
+  colour, logo) · **Location** (region, address, geofence) ·
+  **Check-in exceptions** (override pickers with an inline explainer
+  paragraph making the hierarchy explicit) · **Action row** outside
+  the cards (Delete left, Cancel + Save right).
+- **`e529b6f`** — Plan-my-day card collapsed to slim pills. The
+  initial drop had added a chunky full-width "Plan my day" card
+  between the dashboard map and the Up Next card; that pushed Up
+  Next down and competed visually with the "No shift assigned
+  today" / "All shifts done" block the user actually liked. Now it
+  lives as two small right-aligned okTint pills — one directly under
+  Up Next on home, one in the header row next to Request on
+  /shifts — only when the rep has 2+ stops today (single-stop days
+  are already covered by Up Next's own Directions / Resume CTAs).
+
+Plus one fix from earlier in this same session that's worth calling
+out separately: **`73e29f9` also fixes the dashboard's `allDone`
+check** to treat both `complete` and `cancelled` as terminal, so the
+"All shifts done — nice work" celebration fires even if a manager
+cancelled one of the day's shifts.
+
+Migration added today: `2026_05_11_customers_logo.sql` (single
+`ADD COLUMN IF NOT EXISTS logo_url text` on `customers`, idempotent).
+Optional env: `GOOGLE_ROUTES_API_KEY` (server-side, mobile project,
+NOT NEXT_PUBLIC_) — without it Plan my day uses the mock provider.
+See "Optional env vars" further down for full setup.
+
+Both apps build clean (`npm run build`). Mobile + admin TypeScript
+clean (`npx tsc --noEmit`). Working tree clean, all commits on
+origin/main, both Vercel projects auto-deployed.
+
 ### Today's session — what shipped (May 8, 2026)
 
 The whole day was one feature shipped end-to-end: **multi-site customers**.
@@ -649,6 +716,19 @@ Big day. Roughly in order:
 
 ### Migrations applied today (cloud status)
 
+May 11 — **all need running** in Supabase SQL Editor before the
+corresponding features work in prod. Each is wrapped in
+`BEGIN; … COMMIT;` and uses `ADD COLUMN IF NOT EXISTS` /
+`CREATE INDEX IF NOT EXISTS`, so they're safe to re-run:
+
+- `2026_05_11_shifts_attention.sql` — cancellation overlay
+- `2026_05_11_shifts_attention_resolution.sql` — rep-feedback pill
+- `2026_05_11_shifts_notes.sql` — `shifts.rep_notes text`
+- `2026_05_11_profile_avatars.sql` — `profiles.avatar_url text`
+- `2026_05_11_exception_toggles.sql` — per-customer overrides
+- `2026_05_11_perf_indexes.sql` — engineering pass (4 hot-path indexes)
+- `2026_05_11_customers_logo.sql` — `customers.logo_url text`
+
 May 7:
 
 - `2026_05_07_custom_fields_organisation.sql` — applied? **needs running** in Supabase SQL Editor
@@ -667,10 +747,10 @@ May 6 (already in cloud):
 
 Top of the queue (in priority order):
 
-1. **Run the May 7 migrations** in Supabase if they aren't already — until then `/schedule/manage` series-edit is no-op-safe but the `series_id` column doesn't exist; org-level custom fields will be rejected by the CHECK constraint.
-2. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-3. **Cinematic check-out animation** — user reported it's "missing". The `/summary` page code is intact; need to reproduce the rep's flow end-to-end and confirm whether it's actually firing.
-4. **Travelling auto-end on check-in** — when a rep checks into a shift, the existing `setTravellingSince(null)` setter should auto-fire so the previous "Travelling" state doesn't linger.
+1. **Run the May 7 + May 11 migrations** in Supabase Editor — full list is under "Migrations applied today (cloud status)" above. The May 11 batch has seven files; nothing's destructive but the features won't work until they run. Most urgent for new prod traffic: `2026_05_11_customers_logo.sql` (without it, admin logo upload throws "column does not exist"); `2026_05_11_shifts_attention.sql` + `_resolution.sql` (without them, "Can't make this shift" UI silently fails).
+2. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
+3. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
+4. **Cinematic check-out animation** — user reported it's "missing". The `/summary` page code is intact; need to reproduce the rep's flow end-to-end and confirm whether it's actually firing.
 5. **Capacitor wrap** if background GPS is the priority.
 6. **Custom report builder** if reporting is the priority.
 
