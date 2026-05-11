@@ -2030,6 +2030,20 @@ function DraggableShiftCard({
     SLOT_PX - 2,
     (endMin - startMin) * PX_PER_MIN - 2
   );
+  // Density tiers — short shifts (30-90 min) can't fit 3 rows of
+  // text + a state pill cleanly. Each tier hides one more row so
+  // text stops bleeding out of the card.
+  //
+  //   ≥ 60px   → full layout: rep · customer · time + state pill
+  //   44–59px  → drop the rep row; show customer · time + state
+  //   < 44px   → drop the time row too; just customer + corner dot
+  //
+  // 60px is roughly an 80-min shift; 44px is just over an hour.
+  // Anything tighter than that is visually a sliver and trying to
+  // cram three rows into it produces the half-clipped text the
+  // manager was seeing on filtered 1-hour shifts.
+  const showRepRow = height >= 60;
+  const showTimeRow = height >= 44;
   // Side-by-side layout for overlapping shifts. Each lane gets an even
   // share of the column width with a 2px gap on either side so cards
   // never visually merge.
@@ -2121,6 +2135,7 @@ function DraggableShiftCard({
         zIndex: isDraggable ? 2 : 1,
       }}
     >
+      {showRepRow && (
       <div
         style={{
           fontFamily: AC.font,
@@ -2155,6 +2170,7 @@ function DraggableShiftCard({
           {repLabel}
         </span>
       </div>
+      )}
 
       {/* Corner state dot — always visible, even on cards too short
           to render the time row at the bottom. Lets a manager spot
@@ -2193,7 +2209,7 @@ function DraggableShiftCard({
       >
         {customerName}
       </div>
-      {height >= 44 && (
+      {showTimeRow && (
         <div
           style={{
             fontFamily: AC.font,
