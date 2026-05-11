@@ -242,11 +242,18 @@ export async function addRequestedShift(
     customerName: shift.name,
     requestedAt: Date.now(),
   });
+  // Local event bus — tells PendingRequestPill (and any other
+  // listener) to refresh immediately without waiting for the
+  // Supabase realtime INSERT to round-trip. Previously the pill
+  // arrived 1-3 s late on every submit because it only learned
+  // about the new row via realtime / poll.
+  notifyRequestsChanged();
 }
 
 export async function removeRequestedShift(id: string): Promise<void> {
   if (!isSupabaseConfigured() || !supabase) {
     lsWrite(lsRead().filter((s) => s.id !== id));
+    notifyRequestsChanged();
     return;
   }
   // RLS restricts the delete to the current user's row only — even though
@@ -259,6 +266,23 @@ export async function removeRequestedShift(id: string): Promise<void> {
   if (error) {
     // eslint-disable-next-line no-console
     console.warn("[shift-store] remove error:", error.message);
+  }
+  notifyRequestsChanged();
+}
+
+/**
+ * Public helper so the resolution watcher (and anything else that
+ * KNOWS a request just changed state from outside this module —
+ * e.g. an admin approval / decline that fired a banner) can poke
+ * subscribers like PendingRequestPill to refresh immediately
+ * rather than wait for realtime + poll fallbacks.
+ */
+export function notifyRequestsChanged(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent("morpheus.requests.changed"));
+  } catch {
+    /* fallback: nothing — pill still has realtime + 15s poll */
   }
 }
 

@@ -37,6 +37,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   listRequestedShifts,
   listRecentRequestedCustomerIds,
+  notifyRequestsChanged,
 } from "@/lib/shift-store";
 import { MC } from "@/lib/tokens";
 import { Glyph } from "@/components/Glyph";
@@ -326,6 +327,12 @@ export function RequestResolutionWatcher() {
             evt.message?.replace(/^(Approved|Declined) request for /i, "")?.trim() ||
             "your request";
 
+          // Wake the PendingRequestPill (and anything else watching)
+          // immediately. The Supabase realtime DELETE on
+          // requested_shifts can lag the resolution event by a few
+          // seconds; this synchronous nudge makes the pill
+          // disappear the moment the banner appears.
+          notifyRequestsChanged();
           setBanners((prev) => [
             ...prev,
             {

@@ -61,22 +61,35 @@ export function PendingRequestPill() {
     };
     void refresh();
 
-    // Realtime + visibility refetch + 60s poll. Subscribe to BOTH
-    // requested_shifts AND shifts so the pill clears the moment the
-    // approval-side INSERT lands, even if the requested_shifts DELETE
-    // event hasn't propagated yet.
+    // Realtime + visibility refetch + custom-event bus + poll. The
+    // realtime + poll pair was the original story but managers
+    // reported lag in BOTH directions — pill appearing late after
+    // submit, lingering after the manager approved. Two fixes:
+    //
+    //   1. Local custom-event bus ("morpheus.requests.changed").
+    //      addRequestedShift / removeRequestedShift dispatch it
+    //      synchronously on success, and RequestResolutionWatcher
+    //      dispatches it the moment a resolution banner fires.
+    //      The pill picks the event up in the same tick — no
+    //      waiting for the realtime round-trip.
+    //   2. Poll tightened from 60 s → 15 s as a defence-in-depth
+    //      fallback. Cheap query (one rep's own rows), so the
+    //      extra frequency is negligible.
     const unsubRequests = subscribeRequestedShifts(refresh);
     const unsubShifts = subscribeShifts(refresh);
     const onVis = () => {
       if (document.visibilityState === "visible") void refresh();
     };
     document.addEventListener("visibilitychange", onVis);
-    const poll = window.setInterval(refresh, 60_000);
+    const onLocalChange = () => void refresh();
+    window.addEventListener("morpheus.requests.changed", onLocalChange);
+    const poll = window.setInterval(refresh, 15_000);
     return () => {
       cancelled = true;
       unsubRequests();
       unsubShifts();
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("morpheus.requests.changed", onLocalChange);
       window.clearInterval(poll);
     };
   }, []);
