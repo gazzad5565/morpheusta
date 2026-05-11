@@ -1,7 +1,10 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`9b501d1`** (May 8, 2026). Today's session shipped the entire **multi-site customer** feature in one vertical slice: schema + migration + admin Sites tab + scheduling integration + mobile site display + site-aware geofence + head-office Overview card + per-site contacts (tap-to-call, email, access notes). Three follow-up migrations to run in Supabase before this is fully live — see "Migrations to run for May 8" below. Working tree clean.
+> Latest commit: **`86dc436`** (May 11, 2026). Big session — 18 commits across two main themes:
+> 1. **Cancellation / "Can't make this shift" feature** (8 commits) — rep can flag an assigned shift they can't make from anywhere, manager sees it in Live Ops "Needs action", four resolutions (Reassign / Reopen as unassigned / Keep · rep stays on / Cancel · do not refill), banners + pills + audit trail end-to-end. Two new attention overlay columns on shifts.
+> 2. **Polish, identity, and exception-toggle pass** (10 commits) — rep notes per shift, banner watcher for shift assignments, "awesome" check-in overlay + shimmering skeletons, /schedule/manage row actions cleanup, mobile chrome cleanup (address on cards, menu icon inline, map attribution collapsed), house glyph for customer markers + face/photo for rep markers everywhere, rep profile photo upload (mobile → admin → maps), and org-wide + per-customer exception toggles for location and timing check-in cards.
+> Five migrations to run in Supabase before all of this is fully live — see "Migrations to run for May 11" below. Working tree clean.
 > Repo: https://github.com/gazzad5565/morpheusta · Live: https://morpheus-admin.vercel.app + https://morpheusta-khaki-omega.vercel.app · DB: Supabase project `otweltzwwhrvhtvaqsci`
 > **Don't ask the user for context — read this whole file first.** Section "Where things stand right now" (around line 100) is the canonical handover. The "Today's session — what shipped" sections list every commit by hash, newest day first. The "Top of the deferred list" tells you what to start on next.
 > If you make changes, update this file before you push. Phase 4 RLS is still the highest-priority open item; do not deploy to real users without it.
@@ -104,11 +107,53 @@ If you switch computers (or hand this project to a developer), this section is t
 
 ### Where things stand right now (handover for the next chat)
 
-**Last commit:** `9b501d1` — "Sites — per-site contact: name, phone, email, access notes" (May 8, 2026; multi-site customer feature shipped end-to-end)
+**Last commit:** `86dc436` — "Exception toggles — org-wide + per-customer overrides" (May 11, 2026; cancellation feature + polish/identity/exception-toggle pass shipped end-to-end across 18 commits)
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
-**Working end-to-end on real data — both apps build clean, all 31 admin routes + 15 mobile routes return 200, no mock fallbacks left in the rep flow.**
+**Working end-to-end on real data — both apps build clean, all admin + mobile routes return 200, no mock fallbacks left in the rep flow.**
+
+#### Cancellation / "Can't make this shift" (May 11 — new today)
+
+- **Attention overlay model.** Rather than expanding the shifts state machine, we layer `shifts.attention` ("unable_to_attend") + `attention_reason` + `attention_note` + `attention_raised_at` / `_resolved_at` / `_resolved_by` / `_resolution` columns. State stays `scheduled` so cancellation interleaves cleanly with everything else (check-in, drag-drop, series edits). Schema: `db/migrations/2026_05_11_shifts_attention.sql` + `_resolution.sql`.
+- **Rep raises** — `/shifts` row, home up-next card, and `/active` all expose "Can't make this shift" when the row is `scheduled` and owned by the rep. Opens `UnableToAttendSheet` with 6 reasons + free-text note. Withdraw button is offered until the manager actions it.
+- **Manager sees it in Live Ops** — pulsing red "Needs action" pill on the sidebar, calendar pill on the affected shift, attention banner on `/shifts/[id]`. Four resolution buttons:
+  - **Reassign** — opens a rep picker with on-the-fly conflict check; on save clears the attention and reassigns + logs `shift.attention_reassigned`.
+  - **Reopen as unassigned** — nulls `rep_id`, clears attention; row becomes claimable. Logs `_reopened`.
+  - **Keep · rep stays on** — softer of the four (originally labelled "Acknowledge"; renamed after testing showed managers expected it to mean "rep is off the hook"). Logs `_acknowledged`.
+  - **Cancel · do not refill** — soft-cancels the shift outright. Logs `_cancelled`.
+- **Resolution feedback pill** — after the manager actions it, the rep sees a brief banner on `/shifts` (and the home card) explaining the outcome ("Manager confirmed — you're still on this shift" / "Reassigned to someone else" / etc) for ~4 hours via the `attention_resolution` column + `resolvedAttentionFeedback()` helper.
+- **Re-raise edge case** — when a rep raises "Can't make it" on a shift that was previously resolved, we clear the stale resolution fields so the manager sees the new flag cleanly. Caught in testing — see `e723c68`.
+
+#### Identity + photos (May 11 — new today)
+
+- **Customer = house glyph, rep = face glyph / photo.** All four MapLibre maps (mobile DashboardMap, admin CustomersMap / CustomerAddressMap / live-ops MapPanelClient) now read at a glance: rounded-square + house = site, circle + face/photo = rep. Same visual grammar across both apps.
+- **Rep profile photo upload.** Mobile `/profile` got a tappable avatar tile with a camera badge. Tap → file picker (with selfie capture on phones) → image is compressed client-side to a 96×96 JPEG (~10–15 KB) → saved as a base64 data URL on `profiles.avatar_url`. Schema: `db/migrations/2026_05_11_profile_avatars.sql`. Photo then appears on:
+  - Mobile DashboardMap "you are here" marker
+  - Admin `/reps` grid and table (`RepAvatar` picks photo over initials when present)
+  - Admin `/reps/[id]` detail card
+  - Admin live-ops map rep markers + the popup header
+- **Why base64 not Storage:** at this size (~15 KB per row), a text column in `profiles` is fine and works the moment the migration runs — no bucket / policy setup. Easy to migrate to Storage later.
+
+#### Exception toggles (May 11 — new today)
+
+- **Org-wide on/off** for two kinds of check-in exception, both default ON: location (off-site / geofence) and timing (late + early). Live in `app_settings` under keys `location_exceptions_enabled` and `timing_exceptions_enabled`. Configured in **`/settings/check-in-rules`** with pill-style switches at the top of the page.
+- **Per-customer override** (tri-state: Inherit / Always show / Never show) on `/customers/[id]/edit`. NULL on the customer row = inherit the org default; explicit TRUE/FALSE wins. Schema: `db/migrations/2026_05_11_exception_toggles.sql` adds two nullable boolean columns to `customers`.
+- **Wired into mobile check-in.** A useMemo computes effective on/off per type (customer override falls back to org default); the existing exception detection blocks return null when disabled, which propagates as `offsiteTriggered=false` / `lateTriggered=false` so the cards never render and the dedicated event-log entries never fire.
+
+#### Polish pass (May 11 — new today)
+
+- **Shift notes per shift.** New `shifts.rep_notes text` column (migration `2026_05_11_shifts_notes.sql`). Rep can write freeform notes from `/active`, auto-saved on blur with "Saving… / Saved ✓" feedback. Admin sees them read-only on `/shifts/[id]`.
+- **Shift-assignment notification.** `ShiftAssignmentWatcher` mounted at the mobile layout level: subscribes to `shifts` INSERT + UPDATE realtime, banners when `rep_id = me` AND the shift hasn't been seen before. Two copy variants ("New shift assigned" / "Shift reassigned to you"). Mirrors `RequestResolutionWatcher` shape; seen-set in localStorage keeps cold-start quiet.
+- **Awesome check-in loading.** `CheckingInOverlay` replaces the previous "button text just changes" feedback with a full-screen brand-tinted overlay: pulsing rings, animated progress bar, 3-step stepper ("Saving · Logging · Ready"), and a green-tick dwell frame before routing to `/check-in/success`.
+- **Awesome shifts-list skeletons.** Shimmering rows that match the real `ShiftRow` silhouette (customer tile + headline + sub-line + chevron), staggered 100ms each. Also fixes a silent bug: `mc-skel` keyframe was referenced but never defined.
+- **Mobile dashboard chrome cleanup.** Black `AppHeader` band gone from the home page — hamburger menu is now inline on the welcome card right edge (same line as "Good afternoon, Gary"). Saves ~52px. Small "Last sync · …" folded under the card.
+- **Site address on shift cards.** Small grey pin line under the time row, both on `/shifts` and home page next-up. Ellipses on overflow + tooltip with full string.
+- **Always-on dashboard map.** Map renders from first paint regardless of shifts; pins layer in as shifts load. No more "popping in" reflow when the rep cold-starts the app.
+- **Map attribution collapsed by default.** All four MapLibre maps start with the OSM attribution closed. The (i) toggle still expands it. Tiles weren't actually being respected as compact on wider screens; we now actively remove the `maplibregl-compact-show` class on map load.
+- **/schedule/manage row actions cleanup.** Previous 4-button layout (View · Edit future · Cancel future · "All") was cramped + ambiguous. Now: `[View] [Edit future] [⋮]`, with both cancel actions tucked into the kebab dropdown with full-context labels ("Cancel upcoming N shifts" / "Cancel entire series · N shifts") and explainer sublabels.
+- **Admin /shifts/[id] live activity card.** While the shift is in-progress or on-break, the detail page shows a live "checked in at X · now Y · elapsed Zm" card with a pulsing dot, plus the rep's currently-running task ("started X ago"). 30s refresh tied to a refresh effect.
+- **/schedule/new** — bigger Customer/Rep section headings, smart time defaults (start = next 30-min slot from now, end = start + 30 min). The "Tasks" chip was removed entirely from the customer context strip — managers don't price scheduling decisions on task count, and the chip was just noise. Address chip stays for single-customer scope.
 
 #### Customers + sites (May 8 — new today)
 
@@ -259,6 +304,104 @@ Done as one push, in narrative order:
 - **Stale comment in `/schedule/manage` reset prompt** corrected to match the new "every state" wipe behavior.
 
 Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`).
+
+### Today's session — what shipped (May 11, 2026)
+
+The longest session to date — eighteen commits across two themes that
+both ended up touching most of the app. First half of the day was the
+**cancellation / "I can't make this shift" feature** end-to-end (rep
+flag → manager Needs-action queue → four resolutions → audit trail).
+Second half was a sweeping **polish + identity + exception-toggle
+pass** — rep photos, house/face icons on maps, mobile chrome
+cleanup, exception toggles, notes per shift, banner notifications,
+nicer loading states, /schedule/manage row-actions rebuild.
+
+Eighteen commits in order:
+
+#### Cancellation feature (8 commits, `7229cc4`..`e723c68`)
+
+- **Stage 2A — schema + rep flow (`7229cc4`)** — `db/migrations/2026_05_11_shifts_attention.sql` adds the attention overlay columns to `shifts`. New `UnableToAttendSheet` with 6 reasons + free-text note. `/shifts` rows expose "I can't make this shift" + Withdraw when applicable. `lib/shifts-store.ts` (mobile) gains `raiseUnableToAttend` / `withdrawUnableToAttend` and the attention fields on `ShiftWithMeta`.
+- **Stage 2A.1 — same affordance on the home up-next card (`e64362e`)** so the rep doesn't have to drill into `/shifts` to use it. Same sheet, same store fn.
+- **Stage 2B — manager Needs action + 4 resolutions (`2629f06`)** — Live Ops "Needs action" tab shows attention-raised shifts at the top; `/shifts/[id]` shows an attention banner with `[Reassign] [Reopen as unassigned] [Acknowledge] [Cancel · don't refill]`. Each resolution writes a dedicated `shift.attention_*` event for audit.
+- **Sidebar badge + calendar pill + shift-detail banner (`6279bc4`)** — flashing red sidebar pill propagates "N pending" across every admin page; calendar cards carry an inline pill; shift detail surfaces the rep's reason + note.
+- **Stage 2B.1 — resolution feedback, conflict check, edit escape hatch (`64c7c3d`)** — Reassign now does a conflict check on the picked rep + shows clean error inline; resolution writes (`attention_resolution` column from `_resolution.sql` migration) drive a brief rep-side feedback pill; "Edit…" link on the banner lets the manager amend without resolving.
+- **Stage 2B.2 — softer label, relaxed states, silent-fail guard (`ca487eb`)** — "Acknowledge" renamed to **"Keep · rep stays on"** after testing showed managers mis-read it as "rep is off the hook". Read-back verification on the UPDATE catches silent no-ops (the RLS rule was too tight; now the `.select()` after `.update()` flags it). Mobile flow accepts a wider set of source states so cancelling after a state flip still works.
+- **Stage 2B.3 + 2B.4 — diagnostic logging on the raise path (`0f77859`, `72b4ba0`)** — added `[unable]` `console.warn` traces at each step so the user could pinpoint where their home-page raise died silently. Closed the bug; logs left in (cheap, quiet).
+- **Stage 2B.5 — re-raise must clear stale resolution fields (`e723c68`)** — re-raising "Can't make it" on a previously-actioned row was sticking in a half-resolved state. Fix: `raiseUnableToAttend` now clears `attention_resolved_at / _resolved_by / _resolution` alongside setting the new `attention` flag.
+
+#### /schedule/new polish (`54ba1c7`)
+
+- Customer and Rep section headings bumped from 11.5px caps to 13px+700 (the eye should land on the picker, not the label above it).
+- Smart time defaults — start = next 30-min slot from now (so opening the form at 14:07 prefills 14:30), end = start + 30 min. Old hard-coded `09:00 / 17:00` defaults were a constant micro-friction.
+
+#### Always-on dashboard map + admin live shift card (`592bdde`)
+
+- Mobile `DashboardMap`: removed the `placed.length === 0` gate. Map mounts on first render regardless of shifts; pins layer in. No more cold-start reflow.
+- Admin `/shifts/[id]`: new `LiveActivityCard` appears for in-progress/on-break shifts. Shows checked-in time + live clock + elapsed + the rep's currently-running task with a "started X ago" line, pulsing dot, 30s refresh.
+- New helper `getActiveTaskForShift(shiftId)` queries `shift_events` for the latest `task_started` whose task hasn't been completed.
+
+#### Notes feature end-to-end (`f96bfcb`)
+
+- `db/migrations/2026_05_11_shifts_notes.sql` adds `shifts.rep_notes text`.
+- Mobile: `lib/shifts-store.ts` gains `saveShiftNotes(shiftId, notes)` with auth-gated filter (`rep_id = userId`). `/active` renders `ShiftNotesCard` between Breaks and AppFooter — textarea, auto-save on blur, "Saving… / Saved ✓" inline feedback.
+- Admin: `/shifts/[id]` shows the rep's notes in a read-only "Notes from rep" card in the right column when present.
+
+#### Notification watcher for shift assignments (`1baaf9d`)
+
+- New `ShiftAssignmentWatcher` mounted in `app/layout.tsx` alongside `RequestResolutionWatcher`. Subscribes to `shifts` INSERT + UPDATE on realtime; banners when `rep_id = me` AND `shift.id` isn't in the localStorage seen-set.
+- Two copy variants: "New shift assigned" (INSERT) / "Shift reassigned to you" (UPDATE). Seen-set is seeded on mount with `listMyShiftsToday()` so existing shifts don't toast on cold start. Auto-dismiss 9s; stale shifts (`shift_date < today`) silently marked seen so back-dated edits don't toast.
+
+#### Awesome loading states (`27e7b90`)
+
+- New `CheckingInOverlay` component for the mobile check-in flow. Full-screen brand-tinted overlay with pulsing rings, animated progress bar, 3-step stepper ("Saving · Logging · Ready"). Parent-owned `CheckInPhase` ("submitting" | "logging" | "done") drives the visual; lands on "done" for ~550ms before routing to `/check-in/success` so the celebration registers.
+- `/shifts` skeletons rebuilt: previously a single flat grey box, now a stack of 3 (mine) / 2 (unassigned) shimmering rows matching the real `ShiftRow` silhouette (customer tile + 2 stub lines + chevron), staggered 100ms each.
+- Bug fix: `mc-skel` keyframe referenced by the `Skeleton` primitive was never defined in `globals.css` — the old skeleton was just a static stripe. Keyframe is now in place along with new `mc-ring-pulse` and `mc-rise` for the overlay.
+
+#### /schedule/manage row actions cleanup (`8b18df0`)
+
+- Previous 4-button layout (`[View] [Edit future] [Cancel future] [All]`) was wrapping to two lines + the bare "All" button left managers guessing.
+- Now: `[View] [Edit future] [⋮]` on one line. The `⋮` opens a small dropdown menu with the two cancel actions fully spelled out:
+  - "Cancel upcoming N shifts" — "From today onward · running and complete shifts kept"
+  - "Cancel entire series · N shifts" — "Only state='scheduled' rows are deleted · audit trail kept"
+- Menu closes on outside click, escape, or after an item fires. Column template moved to a shared `SERIES_GRID` constant; header gained an "Actions" label.
+
+#### Polish: chrome, address line, quieter maps (`b514454`)
+
+- **Tasks chip removed** from `/schedule/new` customer-context strip. Address chip stays for single-customer scope.
+- **Site address on shift cards** — small grey pin line under the time row, both on `/shifts` rows and the home next-up card. Truncates on overflow; tooltip carries the full string.
+- **Mobile home menu icon moved inline.** Black `AppHeader` band removed entirely from the dashboard. The welcome strip now owns the hamburger button on its right edge (same glassy style as the org-logo tile on the left), folded "Last sync" line under the card, safe-area inset moved onto the welcome card itself.
+- **Map attribution collapsed by default** across all four MapLibre maps (mobile DashboardMap, admin CustomerAddressMap / CustomersMap / live-ops MapPanelClient). The (i) toggle stays for anyone who wants to expand it.
+
+#### Identity pass — house vs face + rep photos (`42054a8`)
+
+- New `house` and `face` glyphs added to both `Glyph` (mobile) and `AGlyph` (admin) so they're available for non-map UI too.
+- All four map customer markers rebuilt: small white house glyph on the customer's brand colour, rounded-square shape. Reads instantly as "a building / site". Rep markers stay circular pills for visual contrast — same colour-coding as before, but with the rep's photo (when uploaded) or a generic face glyph instead of initials text.
+- Mobile `/profile` got an avatar uploader: tappable tile with a small camera badge, hidden `<input type="file">`, `capture="user"` so phones offer the selfie cam. `compressAvatar(file)` does square crop + downscale to 96×96 + JPEG quality 0.82 → typically ~10–15 KB encoded. `updateMyAvatar(dataUrl)` writes to `profiles.avatar_url`. Inline "Saving photo… / error / Remove" status row under the email.
+- The photo plumbs everywhere: mobile DashboardMap user marker, admin `/reps` grid + table (`RepAvatar` chooses photo over initials when present), `/reps/[id]` detail card, admin live-ops map rep markers + popup header.
+- `lib/rep-locations-store.ts` extended to read `profiles.avatar_url` alongside the existing name/initials; `RepLocation` interface gains `avatarUrl: string | null`.
+- Schema: `db/migrations/2026_05_11_profile_avatars.sql` adds a single `avatar_url text` column to `profiles`. NULL falls back to the face glyph everywhere.
+
+#### Exception toggles — org-wide + per-customer (`86dc436`)
+
+- `db/migrations/2026_05_11_exception_toggles.sql` adds `location_exceptions_enabled` and `timing_exceptions_enabled` nullable boolean columns to `customers`. NULL = inherit org default. Both columns have `COMMENT ON` describing the inherit semantics.
+- Org-wide pair lives in `app_settings` under keys `location_exceptions_enabled` and `timing_exceptions_enabled`. Both default ON so existing installs behave exactly the same as before.
+- Admin UI on `/settings/check-in-rules`: new card at the top of the page with two pill-style toggle switches + explainer subtitles. `ToggleRow` component is reusable; pressed-state visuals + optimistic updates with rollback on error.
+- Per-customer override on `/customers/[id]/edit`: tri-state pill group (Inherit org default / Always show / Never show) for each exception type. Stored as `null | true | false` on the customer row.
+- Mobile check-in page (`/check-in`): two new `useMemo`s compute `locationExceptionsOn` and `timingExceptionsOn` from the customer override (when set) falling back to the org default; the existing `offsiteInfo` / `timingInfo` blocks short-circuit to `null` when off, propagating to `triggered=false` everywhere downstream. Cards never render and dedicated event-log entries never fire when disabled.
+
+#### Migrations to run for May 11
+
+Five new files in `db/migrations/` — run in order in the Supabase SQL editor before the May 11 features hit prod:
+
+1. `2026_05_11_shifts_attention.sql` — cancellation overlay columns (`attention`, `attention_reason`, `attention_note`, `attention_raised_at`, `attention_resolved_at`, `attention_resolved_by`) + indexes
+2. `2026_05_11_shifts_attention_resolution.sql` — adds `attention_resolution` column for the rep-side feedback pill
+3. `2026_05_11_shifts_notes.sql` — adds `rep_notes text` to shifts (note feature)
+4. `2026_05_11_profile_avatars.sql` — adds `avatar_url text` to profiles (rep photo upload)
+5. `2026_05_11_exception_toggles.sql` — adds `location_exceptions_enabled` + `timing_exceptions_enabled` boolean overrides to customers
+
+All five are idempotent and wrapped in `BEGIN; … COMMIT;` so failures roll back cleanly. The org-wide pair for the exception toggles is written into `app_settings` lazily on first admin UI save — no migration needed for them.
+
+Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`). Smoke-tested key routes return 200 on a local prod-mode boot.
 
 ### Today's session — what shipped (May 8, 2026)
 
@@ -460,9 +603,9 @@ Schema lives on the shared Supabase project, code lives on GitHub. Just clone + 
 
 **Top of the deferred list — pick any one and run with it next session:**
 
-1. **Cancellation / unable-to-attend flow** ⚠️ NEXT FEATURE. Already designed in the May 8 plan: shifts gain an `attention` overlay column (null | 'unable_to_attend' | 'no_show' | …); rep gets an "I can't make it" link on `/active` and `/shifts` rows that opens a reason picker; Live Ops gets a "Needs action" tab with Reassign / Release / Acknowledge / Cancel buttons; full audit via `shift_events`. ~3 commits, no new external dependencies. Picks up where the Sites push left off.
-2. **Real routing + traffic** ⚠️ THE BIG ONE. Server-proxied Google Routes API for ETAs + optimization. Mobile `/route` page with deep links to Google Maps for actual nav. Risk pills per leg ("Leave by 13:50"). Site-aware (already works post-May-8 since shifts have site coords). Cap spending with per-rep daily quotas. ~$10/month at full scale. 3 commits to ship the foundation; Google API key wired later as a flip-on.
-3. **Phase 4 RLS — security debt** ⚠️ HIGHEST PRIORITY before opening to real users. Every table is currently `TO authenticated USING (true)`. Reps and managers have the same DB write powers; the apps gate by role at the UI but the DB doesn't. A motivated rep could `curl` Supabase directly and modify customers / shifts / tasks / library files / app_settings / profiles. The path: write a single coordinated migration that uses an `is_manager()` SECURITY DEFINER helper and rewrites every table's policies. `customer_sites` already follows the permissive Phase-pre-4 pattern so it'll tighten alongside everything else. Test in a staging Supabase first. Note: `profiles` UPDATE was deliberately opened for promote/demote — narrow that too.
+1. ~~**Cancellation / unable-to-attend flow**~~ ✅ SHIPPED May 11 — see "Today's session — what shipped (May 11)" above. Eight commits across Stage 2A + 2B; attention overlay model rather than state-machine expansion. Migrations `2026_05_11_shifts_attention.sql` + `_resolution.sql`.
+2. **Real routing + traffic** ⚠️ THE BIG ONE (now top of the actually-deferred list). Server-proxied Google Routes API for ETAs + optimization. Mobile `/route` page with deep links to Google Maps for actual nav. Risk pills per leg ("Leave by 13:50"). Site-aware (already works post-May-8 since shifts have site coords). Cap spending with per-rep daily quotas. ~$10/month at full scale. 3 commits to ship the foundation; Google API key wired later as a flip-on.
+3. **Phase 4 RLS — security debt** ⚠️ HIGHEST PRIORITY before opening to real users. Every table is currently `TO authenticated USING (true)`. Reps and managers have the same DB write powers; the apps gate by role at the UI but the DB doesn't. A motivated rep could `curl` Supabase directly and modify customers / shifts / tasks / library files / app_settings / profiles. The path: write a single coordinated migration that uses an `is_manager()` SECURITY DEFINER helper and rewrites every table's policies. `customer_sites` already follows the permissive Phase-pre-4 pattern so it'll tighten alongside everything else. Test in a staging Supabase first. Note: `profiles` UPDATE was deliberately opened for promote/demote AND avatar uploads (May 11) — narrow that too.
 4. **Capacitor wrap** for proper background GPS + push notifications. Browsers don't expose persistent background geolocation, so the rep app can only track location while `/active` is foregrounded. Wrapping the existing React app in Capacitor (1-2 weeks) gives: real background location, push notifications, App Store / Play Store presence. The codebase doesn't change much — replace `navigator.geolocation` calls with `@capacitor/geolocation` (same API), plus shell config + permission requests.
 5. **Custom report builder.** The 3 fixed reports (Operations / Rep performance / Timesheet) are good but the user wanted "users can build their own". Picture: a builder UI where a manager picks metrics, dimensions, filters, and a chart type, then saves. Multi-week project — needs builder UI + query AST + saved-report storage + per-user permissions on saves.
 6. **Background sweep (`pg_cron`).** Today `sweepStaleShifts()` only runs when an admin opens the Live Ops home or focuses the tab. If no admin opens for several days, stale shifts and orphan rep_locations rows accumulate. Either a Vercel Cron route hitting `/api/sweep` or a Postgres `pg_cron` job (cleaner). 1-hour task.
@@ -1100,6 +1243,18 @@ morpheus-admin/components/screens/live-ops/MapPanel.tsx       ← entry, picks s
 morpheus-admin/components/screens/live-ops/MapPanelClient.tsx ← MapLibre map + customer pins + live rep dots
 morpheus-admin/components/screens/live-ops/    ← KpiStrip, ShiftsList (real data)
 morpheus-admin/components/shell/AdminShell.tsx ← desktop chrome (sidebar + topbar)
+
+# May 11 additions
+morpheus-mobile/components/UnableToAttendSheet.tsx   ← rep-side "Can't make this shift" reasons sheet
+morpheus-mobile/components/ShiftAssignmentWatcher.tsx ← realtime banner when admin assigns/reassigns a shift
+morpheus-mobile/components/CheckingInOverlay.tsx     ← full-screen overlay during /check-in submit (3-phase stepper)
+morpheus-mobile/lib/profiles-store.ts                ← gained compressAvatar() + updateMyAvatar() helpers
+morpheus-mobile/lib/settings-store.ts                ← gained getLocationExceptionsEnabled() + getTimingExceptionsEnabled()
+morpheus-admin/lib/task-completions-store.ts         ← gained getActiveTaskForShift() for the live shift card
+morpheus-admin/app/settings/check-in-rules/page.tsx  ← gained the two exception-toggle pill switches + ToggleRow
+morpheus-admin/app/customers/[id]/edit/page.tsx      ← gained tri-state per-customer exception overrides + ExceptionOverridePicker
+morpheus-admin/app/schedule/manage/page.tsx          ← row actions rebuilt — [View] [Edit future] [⋮ overflow]
+morpheus-admin/lib/rep-locations-store.ts            ← RepLocation gained avatarUrl for live-ops map markers
 ```
 
 ---
