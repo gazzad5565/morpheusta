@@ -833,6 +833,27 @@ biggest first:
   pick.
 - **Phase 4 RLS.** Already #1 on the deferred list. Needs a single
   coordinated migration + staging-Supabase test pass, not a quick fix.
+- **Resizable table columns** on `/reps`, `/customers`, `/tasks`,
+  `/library`. Currently the four list tables use a fixed
+  `gridTemplateColumns` string per page. Making them drag-resizable
+  cleanly needs:
+  • per-column width state with a stable key per table (e.g.
+    `morpheus.reps_table_widths.v1`)
+  • a `<ResizableHeader>` primitive in `components/ui/` exposing a
+    drag handle on the right edge of every non-last column
+  • pointer-down/move/up handlers honouring touch vs mouse, min/max
+    widths per column, and the sort-button shouldn't trigger drag
+  • a small `useColumnWidths(tableKey, defaults)` hook that returns
+    a memoised `gridTemplateColumns` string + a renderHandle helper
+  Roughly a half-day of focused work + per-page replacement. I
+  considered shipping a pilot on `/reps` only but the inconsistency
+  (one table resizable, three not) would feel worse than uniformly
+  fixed-width while waiting for the proper feature.
+
+  My recommendation: use `@tanstack/react-table` for this. It
+  handles resize, sort, filter, virtualization in one consistent
+  API, and four list pages × four concerns means the table library
+  pays for itself on the first table.
 
 ---
 

@@ -34,14 +34,27 @@
 
 import { useEffect, useState, useRef } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { listRequestedShifts } from "@/lib/shift-store";
+import {
+  listRequestedShifts,
+  listRecentRequestedCustomerIds,
+} from "@/lib/shift-store";
 import { MC } from "@/lib/tokens";
 import { Glyph } from "@/components/Glyph";
 
 const SEEN_LS_KEY = "morpheus.seen_resolution_events.v1";
-const SEEN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+// Sentinel — first-ever launch silently seeds the seen-set so a
+// brand-new rep doesn't get banners for resolution events that
+// happened before they ever opened the app. Mirrors the same
+// pattern ShiftAssignmentWatcher uses.
+const SEEN_INIT_LS_KEY = "morpheus.seen_resolution_events.initialized.v1";
+const SEEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d — wider than before to span weekends
 const RECENT_GRACE_MS = 5 * 60 * 1000; // 5 min after pending row deletes
 const BANNER_AUTO_DISMISS_MS = 8000;
+// How far back the cold-start sweep looks for unseen resolution
+// events. Matches the recent-requested-customers TTL on the rep
+// side so we don't miss events on customers the rep requested
+// almost two weeks ago and is only now checking the app.
+const COLD_START_LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 
 interface ResolutionBanner {
   id: string; // event id
@@ -110,6 +123,89 @@ export function RequestResolutionWatcher() {
       if (cancelled) return;
       const now = Date.now();
       for (const r of rows) trackedRef.current.set(r.id, now);
+
+      // Cold-start sweep — catch resolution events that fired while
+      // the rep was offline. We query shift_events for recent
+      // resolution events on the customer_ids the rep has requested
+      // locally (persisted via lib/shift-store::writeRecentRequest).
+      // First-ever launch is detected by the SEEN_INIT_LS_KEY
+      // sentinel and silently seeds the seen-set instead.
+      const isFirstEver =
+        typeof window !== "undefined" &&
+        window.localStorage.getItem(SEEN_INIT_LS_KEY) !== "1";
+
+      const recent = listRecentRequestedCustomerIds();
+      const customerIds = recent.map((r) => r.customerId);
+      const customerNameById = new Map(
+        recent.map((r) => [r.customerId, r.customerName])
+      );
+      if (customerIds.length === 0) {
+        // Mark initialized even when we have nothing to look at,
+        // so the next launch with real recent requests behaves like
+        // a "returning" rep rather than another first-ever silent
+        // seed.
+        if (isFirstEver && typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem(SEEN_INIT_LS_KEY, "1");
+          } catch {
+            /* quota / disabled */
+          }
+        }
+      } else {
+        const since = new Date(Date.now() - COLD_START_LOOKBACK_MS).toISOString();
+        const { data: events, error } = await supabase!
+          .from("shift_events")
+          .select("id, event_type, customer_id, message, created_at")
+          .in("customer_id", customerIds)
+          .in("event_type", ["request.scheduled", "request.declined"])
+          .gte("created_at", since)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        if (cancelled) return;
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.warn("[resolution-watcher] cold-start query:", error.message);
+        } else if (events) {
+          const newBanners: ResolutionBanner[] = [];
+          for (const e of events) {
+            if (!e.id || seenRef.current[e.id]) continue;
+            // Mark seen whether we banner or not — we don't want to
+            // banner the same resolution twice across reloads.
+            seenRef.current[e.id] = Date.now();
+            if (isFirstEver) continue;
+            const customerId = (e.customer_id as string | null) ?? "";
+            const customerName =
+              customerNameById.get(customerId) ||
+              (e.message as string | null) ||
+              "Your request";
+            const kind: "approved" | "declined" =
+              e.event_type === "request.declined" ? "declined" : "approved";
+            newBanners.push({
+              id: e.id as string,
+              kind,
+              customerName,
+              message:
+                kind === "approved"
+                  ? `Your request was approved — ${customerName} is on your shifts.`
+                  : `Your request for ${customerName} was declined.`,
+              ts: Date.now(),
+            });
+          }
+          writeSeen(seenRef.current);
+          if (newBanners.length > 0) {
+            // Reverse so oldest-resolved appears first in the stack.
+            newBanners.reverse();
+            setBanners((prev) => [...prev, ...newBanners]);
+          }
+        }
+        if (isFirstEver && typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem(SEEN_INIT_LS_KEY, "1");
+          } catch {
+            /* quota / disabled */
+          }
+        }
+      }
     };
     void init();
 

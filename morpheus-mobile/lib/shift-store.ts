@@ -21,6 +21,65 @@ import type { Shift } from "./mock-data";
 
 const KEY = "morpheus.requested-shifts.v1";
 
+/**
+ * Track every customer the rep has requested in the last 14 days,
+ * persisted to localStorage. Used by RequestResolutionWatcher to
+ * cold-start: when the rep opens the app after being offline, we
+ * query shift_events for resolution events on these customer_ids
+ * and banner any the rep hasn't seen yet (request.scheduled /
+ * request.declined). Without this set, resolution events have no
+ * way to filter "is this for me" because the event row only carries
+ * customer_id, not rep_id.
+ */
+const RECENT_REQ_LS_KEY = "morpheus.recent_requested_customers.v1";
+const RECENT_REQ_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14d
+
+interface RecentRequestEntry {
+  customerId: string;
+  customerName: string;
+  requestedAt: number;
+}
+
+function readRecentRequests(): RecentRequestEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(RECENT_REQ_LS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as RecentRequestEntry[];
+    if (!Array.isArray(parsed)) return [];
+    const cutoff = Date.now() - RECENT_REQ_TTL_MS;
+    return parsed.filter((e) => e && e.requestedAt > cutoff);
+  } catch {
+    return [];
+  }
+}
+
+function writeRecentRequest(entry: RecentRequestEntry): void {
+  if (typeof window === "undefined") return;
+  try {
+    const cur = readRecentRequests();
+    // Dedup by customerId — re-requesting the same customer bumps
+    // the timestamp rather than adding a duplicate row.
+    const filtered = cur.filter((e) => e.customerId !== entry.customerId);
+    filtered.push(entry);
+    window.localStorage.setItem(
+      RECENT_REQ_LS_KEY,
+      JSON.stringify(filtered)
+    );
+  } catch {
+    /* quota / disabled */
+  }
+}
+
+/** Public read for the watcher. */
+export function listRecentRequestedCustomerIds(): {
+  customerId: string;
+  customerName: string;
+  requestedAt: number;
+}[] {
+  return readRecentRequests();
+}
+
 export interface RequestedShift extends Shift {
   requestedAt: number;
 }
@@ -175,6 +234,13 @@ export async function addRequestedShift(
     event_type: "request.submitted",
     customer_id: shift.id,
     message: `Requested ${shift.name}`,
+  });
+  // Persist locally so the resolution watcher can match this on
+  // a future cold start — see comment near RECENT_REQ_LS_KEY above.
+  writeRecentRequest({
+    customerId: shift.id,
+    customerName: shift.name,
+    requestedAt: Date.now(),
   });
 }
 

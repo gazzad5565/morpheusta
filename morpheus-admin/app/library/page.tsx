@@ -33,6 +33,7 @@ import {
 } from "@/lib/settings-store";
 import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
 import { Combobox } from "@/components/ui/Combobox";
+import { SegTabs } from "@/components/ui/SegTabs";
 import type { Customer } from "@/lib/types";
 
 function fileGlyph(mime: string | null): GlyphName {
@@ -58,6 +59,22 @@ export default function LibraryPage() {
   // category filter rail update without a full page reload.
   const [categories, setCategories] = useState<string[]>([]);
   const [manageCatsOpen, setManageCatsOpen] = useState(false);
+  // Table | Grid view toggle — parity with /reps and /customers, with
+  // the chosen view persisted across navigation so managers don't
+  // reset to default on every nav.
+  const [view, setView] = useState<"Table" | "Grid">(() => {
+    if (typeof window === "undefined") return "Table";
+    const saved = window.localStorage.getItem("morpheus.library_view.v1");
+    return saved === "Grid" ? "Grid" : "Table";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("morpheus.library_view.v1", view);
+    } catch {
+      /* quota / disabled */
+    }
+  }, [view]);
 
   // Upload panel state
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -469,9 +486,23 @@ export default function LibraryPage() {
             >
               {filtered.length} of {files.length}
             </span>
+            <div style={{ flex: 1 }} />
+            <SegTabs
+              tabs={["Table", "Grid"]}
+              active={view}
+              onChange={(v) => setView(v as "Table" | "Grid")}
+            />
           </div>
 
-          {/* File table */}
+          {/* File list — Table or Grid view depending on the toggle. */}
+          {view === "Grid" ? (
+            <FileGrid
+              files={filtered}
+              loaded={loaded}
+              hasAnyFiles={files.length > 0}
+              onOpen={onOpen}
+            />
+          ) : (
           <Card padding={0}>
             <div
               style={{
@@ -638,6 +669,7 @@ export default function LibraryPage() {
               ))
             )}
           </Card>
+          )}
         </div>
       </div>
 
@@ -668,6 +700,136 @@ export default function LibraryPage() {
  * stale category shouldn't lose track of the files that were tagged
  * with it.
  */
+/**
+ * Grid view for the file list — parity with /reps and /customers
+ * Grid views. Each file renders as a tile with a large file-type
+ * glyph, name, customer scope, and category pill. Tile click does
+ * the same thing as the table row (signed-URL download).
+ */
+function FileGrid({
+  files,
+  loaded,
+  hasAnyFiles,
+  onOpen,
+}: {
+  files: LibraryFile[];
+  loaded: boolean;
+  hasAnyFiles: boolean;
+  onOpen: (f: LibraryFile) => void;
+}) {
+  if (!loaded) {
+    return (
+      <Card padding={0}>
+        <Empty text="Loading library…" />
+      </Card>
+    );
+  }
+  if (files.length === 0) {
+    return (
+      <Card padding={0}>
+        <Empty
+          text={hasAnyFiles ? "No files match this filter." : "No files uploaded yet."}
+          sub={hasAnyFiles ? undefined : "Click 'Upload file' to add one."}
+        />
+      </Card>
+    );
+  }
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+        gap: 12,
+      }}
+    >
+      {files.map((f) => (
+        <button
+          key={f.id}
+          type="button"
+          onClick={() => onOpen(f)}
+          style={{
+            background: "#fff",
+            border: `1px solid ${AC.line}`,
+            borderRadius: 12,
+            padding: 14,
+            cursor: "pointer",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            textAlign: "left",
+            minHeight: 140,
+            boxShadow: "0 1px 2px rgba(10,15,30,.03)",
+          }}
+        >
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 10,
+              background: AC.brandSoft,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <AGlyph name={fileGlyph(f.mimeType)} size={22} color={AC.brandDeep} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 13,
+                fontWeight: 700,
+                color: AC.ink,
+                letterSpacing: -0.15,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+              title={f.name}
+            >
+              {f.name}
+            </div>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 11,
+                color: AC.mute,
+                marginTop: 3,
+                display: "flex",
+                gap: 6,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              {f.category && (
+                <span
+                  style={{
+                    padding: "1px 6px",
+                    borderRadius: 99,
+                    background: AC.bg,
+                    color: AC.ink2,
+                    fontWeight: 600,
+                  }}
+                >
+                  {f.category}
+                </span>
+              )}
+              {f.sizeBytes != null && <span>{formatFileSize(f.sizeBytes)}</span>}
+              {f.sizeBytes != null && f.uploadedAt && <span style={{ opacity: 0.4 }}>·</span>}
+              <span>{shortDate(f.uploadedAt)}</span>
+            </div>
+          </div>
+          <div style={{ marginTop: "auto" }}>
+            <CustomerCell file={f} />
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ManageCategoriesSheet({
   current,
   onClose,

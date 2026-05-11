@@ -29,6 +29,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { Combobox } from "@/components/ui/Combobox";
+import { SegTabs } from "@/components/ui/SegTabs";
 import { LoadingBar } from "@/components/ui/LoadingBar";
 import { AC } from "@/lib/tokens";
 import {
@@ -54,6 +55,23 @@ function startOfWeekMonday(d: Date): Date {
 function addDays(d: Date, n: number): Date {
   const out = new Date(d);
   out.setDate(out.getDate() + n);
+  return out;
+}
+/** First of the month containing d, with time zeroed. */
+function startOfMonth(d: Date): Date {
+  const out = new Date(d.getFullYear(), d.getMonth(), 1);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+/** Last of the month containing d, with time zeroed. */
+function endOfMonth(d: Date): Date {
+  const out = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+function addMonths(d: Date, n: number): Date {
+  const out = new Date(d.getFullYear(), d.getMonth() + n, 1);
+  out.setHours(0, 0, 0, 0);
   return out;
 }
 function stateRank(s: ShiftRow): number {
@@ -375,6 +393,24 @@ export default function SchedulePage() {
     }
     return startOfWeekMonday(new Date());
   });
+  // Week / Month toggle. The week view is the existing slot-grid
+  // calendar; month view is a per-day cell layout (7 columns × ~5
+  // rows) for high-altitude scanning. Persisted to localStorage so
+  // a manager who prefers the month view doesn't reset back to week
+  // on every navigation.
+  const [viewMode, setViewMode] = useState<"week" | "month">(() => {
+    if (typeof window === "undefined") return "week";
+    const saved = window.localStorage.getItem("morpheus.schedule_view.v1");
+    return saved === "month" ? "month" : "week";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("morpheus.schedule_view.v1", viewMode);
+    } catch {
+      /* quota / disabled */
+    }
+  }, [viewMode]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
@@ -409,13 +445,27 @@ export default function SchedulePage() {
     };
   }, []);
 
-  // Re-fetch shifts whenever the visible week changes.
+  // Visible date range — depends on viewMode. Week pulls the 7-day
+  // window starting at weekStart; month pulls the whole month
+  // containing weekStart so the MonthView cells have data for every
+  // day in the grid.
+  const visibleRange = useMemo(() => {
+    if (viewMode === "month") {
+      const first = startOfMonth(weekStart);
+      const last = endOfMonth(weekStart);
+      return { startISO: isoDate(first), endISO: isoDate(last) };
+    }
+    return {
+      startISO: isoDate(weekStart),
+      endISO: isoDate(addDays(weekStart, 6)),
+    };
+  }, [weekStart, viewMode]);
+
+  // Re-fetch shifts whenever the visible range changes.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    const startISO = isoDate(weekStart);
-    const endISO = isoDate(addDays(weekStart, 6));
-    listShiftsInRange(startISO, endISO).then((rows) => {
+    listShiftsInRange(visibleRange.startISO, visibleRange.endISO).then((rows) => {
       if (cancelled) return;
       setShifts(rows);
       setLoading(false);
@@ -423,7 +473,7 @@ export default function SchedulePage() {
     return () => {
       cancelled = true;
     };
-  }, [weekStart]);
+  }, [visibleRange.startISO, visibleRange.endISO]);
 
   // Profile name map (id -> display name) — used by both views to
   // resolve rep_id on shift cards.
@@ -606,11 +656,29 @@ export default function SchedulePage() {
     });
   };
 
-  const goPrev = () => setWeekStart((w) => addDays(w, -7));
-  const goNext = () => setWeekStart((w) => addDays(w, 7));
-  const goThisWeek = () => setWeekStart(startOfWeekMonday(new Date()));
+  // Prev/Next/Today handlers — step by week in week view, by month
+  // in month view. The "Today" button collapses both into "show me
+  // the current period" semantics.
+  const goPrev = () =>
+    setWeekStart((w) =>
+      viewMode === "month" ? addMonths(w, -1) : addDays(w, -7)
+    );
+  const goNext = () =>
+    setWeekStart((w) =>
+      viewMode === "month" ? addMonths(w, 1) : addDays(w, 7)
+    );
+  const goToday = () => setWeekStart(startOfWeekMonday(new Date()));
 
-  const weekLabel = useMemo(() => {
+  // Title label — "Apr 28 – May 4, 2026" for week view, "May 2026"
+  // for month view. The month label is intentionally less specific
+  // because the whole month is on screen.
+  const periodLabel = useMemo(() => {
+    if (viewMode === "month") {
+      return weekStart.toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric",
+      });
+    }
     const end = addDays(weekStart, 6);
     const startMonth = weekStart.toLocaleDateString(undefined, { month: "short" });
     const endMonth = end.toLocaleDateString(undefined, { month: "short" });
@@ -618,7 +686,7 @@ export default function SchedulePage() {
       return `${startMonth} ${weekStart.getDate()} – ${end.getDate()}, ${end.getFullYear()}`;
     }
     return `${startMonth} ${weekStart.getDate()} – ${endMonth} ${end.getDate()}, ${end.getFullYear()}`;
-  }, [weekStart]);
+  }, [weekStart, viewMode]);
 
   return (
     <AdminShell
@@ -653,7 +721,7 @@ export default function SchedulePage() {
               letterSpacing: -0.4,
             }}
           >
-            Week planner
+            {viewMode === "month" ? "Month planner" : "Week planner"}
           </div>
           <span
             style={{
@@ -684,16 +752,25 @@ export default function SchedulePage() {
                 color: AC.ink,
                 padding: "0 4px",
                 letterSpacing: -0.2,
+                minWidth: 140,
+                textAlign: "center",
               }}
             >
-              {weekLabel}
+              {periodLabel}
             </div>
             <Btn size="sm" icon="chev-r" onClick={goNext}>
               {""}
             </Btn>
-            <Btn size="sm" onClick={goThisWeek}>
-              This week
+            <Btn size="sm" onClick={goToday}>
+              Today
             </Btn>
+            {/* Week / Month toggle — flips between the slot-grid week
+                view and the per-day-cell month view. */}
+            <SegTabs
+              tabs={["Week", "Month"]}
+              active={viewMode === "month" ? "Month" : "Week"}
+              onChange={(v) => setViewMode(v === "Month" ? "month" : "week")}
+            />
             <div style={{ flex: 1 }} />
             <Combobox
               value={repFilter}
@@ -725,32 +802,35 @@ export default function SchedulePage() {
 
         {moveBanner && <MoveBanner banner={moveBanner} />}
 
-        {/* Body — single time-axis Days view. The previous "Reps" view
-            (one row per rep × 7 day columns) was retired in favour of
-            the rep filter dropdown above: pick a rep there to see only
-            their shifts inside this calendar, or leave it on All to
-            see everyone in one stack. */}
-        <Card padding={0}>
-          <DaysHeaderWithGutter days={days} todayISO={todayISO} />
-          <DaysCalendar
-            days={days}
-            todayISO={todayISO}
-            byDay={byDay}
-            repNameMap={repNameMap}
-            customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
-            // When the rep filter is locked onto a specific person,
-            // we know there can't be overlapping shifts (a rep can't
-            // be in two places at once + we enforce a conflict check
-            // at schedule time). Pass that through so DayColumn can
-            // skip the busy-day "N shifts · VIEW ALL" chip and let
-            // every shift render in the slot grid — managers want to
-            // scan for gaps in the day, which the chip hides.
-            singleRepFiltered={
-              repFilter !== "All" && repFilter !== UNASSIGNED_KEY
-            }
-            onMove={applyShiftMove}
-          />
-        </Card>
+        {/* Body — Week or Month view depending on the toolbar toggle. */}
+        {viewMode === "month" ? (
+          <Card padding={0}>
+            <MonthView
+              monthAnchor={weekStart}
+              filtered={filteredShifts}
+              todayISO={todayISO}
+              onJumpToWeek={(d) => {
+                setWeekStart(startOfWeekMonday(d));
+                setViewMode("week");
+              }}
+            />
+          </Card>
+        ) : (
+          <Card padding={0}>
+            <DaysHeaderWithGutter days={days} todayISO={todayISO} />
+            <DaysCalendar
+              days={days}
+              todayISO={todayISO}
+              byDay={byDay}
+              repNameMap={repNameMap}
+              customerScopeForAdd={customerFilter === "All" ? null : customerFilter}
+              singleRepFiltered={
+                repFilter !== "All" && repFilter !== UNASSIGNED_KEY
+              }
+              onMove={applyShiftMove}
+            />
+          </Card>
+        )}
 
         <div
           style={{
@@ -764,6 +844,228 @@ export default function SchedulePage() {
         </div>
       </div>
     </AdminShell>
+  );
+}
+
+// ─── Month view ─────────────────────────────────────────────────────────
+
+/**
+ * High-altitude calendar view — 7 columns (Mon–Sun) × the rows needed
+ * to span the month, with the first row leading in days from the
+ * previous month and the last row trailing into the next month so
+ * the grid is always a clean rectangle.
+ *
+ * Each cell shows the day number top-left, an inline count chip for
+ * busy days, and up to 3 customer-coloured shift pills. Clicking
+ * anywhere in a cell jumps to the Week view for that day's week —
+ * the slot-grid is where actual scheduling work happens.
+ */
+function MonthView({
+  monthAnchor,
+  filtered,
+  todayISO,
+  onJumpToWeek,
+}: {
+  monthAnchor: Date;
+  filtered: ShiftRow[];
+  todayISO: string;
+  onJumpToWeek: (d: Date) => void;
+}) {
+  // Build the grid: start from the Monday of the week containing the
+  // 1st, walk forward until we've covered the last of the month +
+  // any trailing days to complete the final row. Always returns a
+  // multiple-of-7 array of Dates.
+  const cells = useMemo(() => {
+    const first = startOfMonth(monthAnchor);
+    const last = endOfMonth(monthAnchor);
+    const start = startOfWeekMonday(first);
+    const out: Date[] = [];
+    let cur = start;
+    // Add 6 weeks max to avoid an infinite loop on bad input;
+    // realistically 5 weeks covers every month except the rare 6-row.
+    while (cur <= last || out.length % 7 !== 0) {
+      out.push(cur);
+      cur = addDays(cur, 1);
+      if (out.length > 42) break;
+    }
+    return out;
+  }, [monthAnchor]);
+
+  // Bucket shifts by their shift_date (yyyy-mm-dd). Sorted by start
+  // time so the cell preview reads earliest → latest.
+  const byDay = useMemo(() => {
+    const m = new Map<string, ShiftRow[]>();
+    for (const s of filtered) {
+      if (!s.shift_date) continue;
+      const list = m.get(s.shift_date) || [];
+      list.push(s);
+      m.set(s.shift_date, list);
+    }
+    for (const list of m.values()) {
+      list.sort((a, b) =>
+        (a.start_time || "").localeCompare(b.start_time || "")
+      );
+    }
+    return m;
+  }, [filtered]);
+
+  const thisMonth = monthAnchor.getMonth();
+
+  return (
+    <div>
+      {/* Weekday header — Mon, Tue, … */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+          background: AC.bg,
+          borderBottom: `1px solid ${AC.line}`,
+          fontFamily: AC.font,
+          fontSize: 11,
+          fontWeight: 600,
+          color: AC.mute,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+        }}
+      >
+        {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
+          <div key={d} style={{ padding: "10px 12px" }}>
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* Day cells */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+        }}
+      >
+        {cells.map((d) => {
+          const iso = isoDate(d);
+          const isToday = iso === todayISO;
+          const inMonth = d.getMonth() === thisMonth;
+          const rows = byDay.get(iso) || [];
+          const visiblePreviewRows = rows.slice(0, 3);
+          const overflow = Math.max(0, rows.length - visiblePreviewRows.length);
+          return (
+            <button
+              key={iso}
+              type="button"
+              onClick={() => onJumpToWeek(d)}
+              title={`Jump to the week of ${d.toLocaleDateString(undefined, {
+                weekday: "long",
+                month: "short",
+                day: "numeric",
+              })}`}
+              style={{
+                minHeight: 108,
+                padding: "8px 10px",
+                border: "none",
+                borderRight: `1px solid ${AC.lineDim}`,
+                borderBottom: `1px solid ${AC.lineDim}`,
+                background: isToday ? AC.brandSoft : "#fff",
+                opacity: inMonth ? 1 : 0.4,
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                alignItems: "stretch",
+                textAlign: "left",
+                position: "relative",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 6,
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 13,
+                    fontWeight: isToday ? 800 : 600,
+                    color: isToday ? AC.brandInk : inMonth ? AC.ink : AC.mute,
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  {d.getDate()}
+                </span>
+                {rows.length > 0 && (
+                  <span
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: AC.mute,
+                      letterSpacing: 0.3,
+                      padding: "1px 5px",
+                      background: AC.bg,
+                      borderRadius: 99,
+                    }}
+                  >
+                    {rows.length}
+                  </span>
+                )}
+              </div>
+
+              {/* Shift preview pills — each row is a thin coloured
+                  strip with truncated customer name. Capped at 3 to
+                  keep the cell scannable; overflow chip below. */}
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                  minHeight: 0,
+                }}
+              >
+                {visiblePreviewRows.map((s) => (
+                  <div
+                    key={s.id}
+                    style={{
+                      background: STATE_BODY_TINT[s.state] || `${s.customers?.color || "#888"}1A`,
+                      borderLeft: `3px solid ${s.customers?.color || "#888"}`,
+                      borderRadius: 4,
+                      padding: "2px 6px",
+                      fontFamily: AC.font,
+                      fontSize: 10.5,
+                      fontWeight: 600,
+                      color: AC.ink,
+                      letterSpacing: -0.1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      opacity: s.state === "complete" ? 0.65 : 1,
+                      textDecoration: s.state === "complete" ? "line-through" : "none",
+                    }}
+                  >
+                    {s.customers?.name || "Unknown"}
+                  </div>
+                ))}
+                {overflow > 0 && (
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: AC.brandDeep,
+                      padding: "1px 6px",
+                    }}
+                  >
+                    +{overflow} more
+                  </div>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
