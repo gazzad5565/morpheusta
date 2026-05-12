@@ -502,11 +502,16 @@ export default function RoutePage() {
                 : `${formatDuration(totalSeconds)} · ${formatMeters(totalMeters)}`}
             </div>
           </div>
+          {/* Single re-check action. Was labelled "Refresh" — renamed
+              so the verb matches the action ("re-check route with
+              current traffic") and the duplicate "Re-check route"
+              button that used to live in the save area below is
+              gone. One button, one place. */}
           <button
             type="button"
             onClick={() => void reload()}
             disabled={loading}
-            aria-label="Refresh route"
+            aria-label="Re-check route with current traffic"
             style={{
               height: 34,
               padding: "0 12px",
@@ -525,7 +530,7 @@ export default function RoutePage() {
             }}
           >
             <Glyph name="refresh" size={13} color={MC.ink2} strokeWidth={2.2} />
-            Refresh
+            {loading ? "Checking…" : "Re-check"}
           </button>
         </div>
 
@@ -613,13 +618,11 @@ export default function RoutePage() {
                 ? "Re-check below for any better route with current traffic."
                 : "Re-order today's stops for the shortest drive"}
             </div>
-            {/* "Last optimized X min ago" — only shows when the rep
-                has a saved order today AND we have the savedAt
-                timestamp. Helps the rep judge whether to re-run
-                with current traffic (a 3-hour-old plan is more
-                worth re-checking than a 3-minute-old one). The
-                `now` state above ticks every minute so this label
-                refreshes without each child owning a timer. */}
+            {/* "Optimized order saved · X min ago" caption.
+                Renamed from "Last optimized…" so the line reads as
+                state ("this is the order in effect right now")
+                rather than just a timestamp. The minute-tick on the
+                page's `now` state keeps the relative label fresh. */}
             {savedOrder && savedAt && (
               <div
                 style={{
@@ -635,10 +638,10 @@ export default function RoutePage() {
                 <Glyph
                   name="check-circle"
                   size={10}
-                  color={MC.hint}
+                  color={MC.ok}
                   strokeWidth={2.2}
                 />
-                Last optimized{" "}
+                Optimized order saved ·{" "}
                 {(() => {
                   const ms = Math.max(0, Date.now() - savedAt);
                   const min = Math.round(ms / 60_000);
@@ -695,6 +698,11 @@ export default function RoutePage() {
             savedOrder.join("|") === currentOrder.join("|");
           const savedExists = !!savedOrder && savedOrder.length > 0;
           if (chronoSame && !savedExists) return null;
+          // When saved order matches what's on screen, the save area
+          // has nothing to do — the top "Re-check" button covers the
+          // "refresh with current traffic" affordance. Hiding this
+          // row entirely avoids two duplicate buttons on the page.
+          if (savedMatchesCurrent) return null;
           return (
             <div
               style={{
@@ -705,81 +713,46 @@ export default function RoutePage() {
                 flexWrap: "wrap",
               }}
             >
-              {savedMatchesCurrent ? (
-                // Saved order matches what's on screen → nothing to
-                // save. Surface a re-check affordance so the rep can
-                // refresh and see if traffic conditions have moved
-                // the optimum since they saved.
-                <button
-                  type="button"
-                  onClick={() => void reload()}
-                  disabled={loading}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "7px 12px",
-                    borderRadius: 999,
-                    background: "#fff",
-                    color: MC.ink2,
-                    border: `1px solid ${MC.line}`,
-                    fontFamily: MC.font,
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    letterSpacing: -0.1,
-                    cursor: loading ? "wait" : "pointer",
-                  }}
-                >
-                  <Glyph
-                    name="refresh"
-                    size={13}
-                    color={MC.ink2}
-                    strokeWidth={2.2}
-                  />
-                  {loading ? "Re-checking…" : "Re-check route"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    saveShiftOrder(currentOrder);
-                    // Don't loiter on /route after a save — the rep
-                    // wanted to plan their day, they planned it,
-                    // bounce them somewhere useful. /shifts is the
-                    // natural next destination because that's where
-                    // they'll see their list reordered to match.
-                    // Small delay so the success state on the
-                    // button is briefly visible before nav.
-                    window.setTimeout(() => {
-                      router.push("/shifts");
-                    }, 350);
-                  }}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "7px 12px",
-                    borderRadius: 999,
-                    background: MC.brand,
-                    color: "#fff",
-                    border: "none",
-                    fontFamily: MC.font,
-                    fontSize: 12.5,
-                    fontWeight: 700,
-                    letterSpacing: -0.1,
-                    cursor: "pointer",
-                    boxShadow: `0 2px 8px ${MC.brand}44`,
-                  }}
-                >
-                  <Glyph
-                    name="check"
-                    size={13}
-                    color="#fff"
-                    strokeWidth={2.4}
-                  />
-                  {savedExists ? "Update saved order" : "Save this order"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  saveShiftOrder(currentOrder);
+                  // Don't loiter on /route after a save — the rep
+                  // wanted to plan their day, they planned it,
+                  // bounce them somewhere useful. /shifts is the
+                  // natural next destination because that's where
+                  // they'll see their list reordered to match.
+                  // Small delay so the success state on the
+                  // button is briefly visible before nav.
+                  window.setTimeout(() => {
+                    router.push("/shifts");
+                  }, 350);
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "7px 12px",
+                  borderRadius: 999,
+                  background: MC.brand,
+                  color: "#fff",
+                  border: "none",
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  letterSpacing: -0.1,
+                  cursor: "pointer",
+                  boxShadow: `0 2px 8px ${MC.brand}44`,
+                }}
+              >
+                <Glyph
+                  name="check"
+                  size={13}
+                  color="#fff"
+                  strokeWidth={2.4}
+                />
+                {savedExists ? "Update saved order" : "Save this order"}
+              </button>
               <span
                 style={{
                   fontFamily: MC.font,
@@ -788,9 +761,8 @@ export default function RoutePage() {
                   lineHeight: 1.35,
                 }}
               >
-                {savedMatchesCurrent
-                  ? "Refresh with current traffic to see if a faster route is available."
-                  : "Reorders your shifts list to match — doesn't change customer scheduled times."}
+                Reorders your shifts list to match — doesn&apos;t
+                change customer scheduled times.
               </span>
             </div>
           );
@@ -877,13 +849,54 @@ export default function RoutePage() {
                 </div>
               );
             }
-            // Optimize ON + meaningful savings → loud green banner.
-            // Optimize OFF + savings available → softer "you could
-            // save N min" prompt with the toggle as the call-to-action.
+            // Banner copy needs to make the state crystal clear:
+            //   - Optimize OFF + savings available → "Could save N
+            //     min" prompt (brand tint — call to action).
+            //   - Optimize ON + saved order matches current view →
+            //     "✓ Active — saving N min" (green, present-tense).
+            //   - Optimize ON + saved order differs from current →
+            //     "New: save N more min — tap Update saved order"
+            //     (green, calls out the pending action).
+            //   - Optimize ON + no saved order yet → "Optimized
+            //     order saves N min" (green, prompts a Save).
+            // Computed inline because the banner sits above the
+            // save area where savedMatchesCurrent already lives but
+            // not in scope here.
             const optimizeOn = optimize;
+            const currentOrder =
+              result?.stopsInOrder.map((s) => s.realId) ?? [];
+            const savedMatchesCurrentBanner =
+              !!savedOrder &&
+              currentOrder.length > 0 &&
+              savedOrder.length === currentOrder.length &&
+              savedOrder.join("|") === currentOrder.join("|");
             const tone = optimizeOn
               ? { bg: MC.okTint, border: MC.ok, fg: "#0d6a45" }
               : { bg: MC.brandTint, border: MC.brand, fg: MC.brandDeep };
+            const savingsLabel =
+              savedMin > 0 ? `${savedMin} min` : "drive time";
+            const distSuffix =
+              savedKm > 0.5 ? ` · ${savedKm.toFixed(1)} km less` : "";
+            // Headline + subtitle per state.
+            const headline = optimizeOn
+              ? savedMatchesCurrentBanner
+                ? `✓ Active — saving ${savingsLabel}${distSuffix}`
+                : savedOrder
+                ? `New route — ${savingsLabel} faster${distSuffix}`
+                : `Optimized order saves ${savingsLabel}${distSuffix}`
+              : `Could save ${savingsLabel} by reordering`;
+            const subtitle = optimizeOn
+              ? savedMatchesCurrentBanner
+                ? "This is the order on your shifts list. Re-check anytime to see if traffic has shifted things."
+                : savedOrder
+                ? "Tap 'Update saved order' below to use this faster route."
+                : "Tap 'Save this order' below to lock it in."
+              : "Flip 'Optimize stop order' above to use the shorter route.";
+            // Icon: ✓ when applied, sparkle when there's something
+            // to act on (savings available, save needed).
+            const iconName = savedMatchesCurrentBanner
+              ? "check-circle"
+              : "sparkle";
             return (
               <div
                 style={{
@@ -900,7 +913,7 @@ export default function RoutePage() {
                 }}
               >
                 <Glyph
-                  name="sparkle"
+                  name={iconName}
                   size={14}
                   color={tone.fg}
                   strokeWidth={2.4}
@@ -914,11 +927,7 @@ export default function RoutePage() {
                       letterSpacing: -0.1,
                     }}
                   >
-                    {optimizeOn
-                      ? savedOrder
-                        ? `Saved order saves ${savedMin > 0 ? `${savedMin} min` : "drive time"}${savedKm > 0.5 ? ` · ${savedKm.toFixed(1)} km less` : ""}`
-                        : `Optimized order saves ${savedMin > 0 ? `${savedMin} min` : "drive time"}${savedKm > 0.5 ? ` · ${savedKm.toFixed(1)} km less` : ""}`
-                      : `Could save ${savedMin > 0 ? `${savedMin} min` : "drive time"} by reordering`}
+                    {headline}
                   </div>
                   <div
                     style={{
@@ -927,11 +936,7 @@ export default function RoutePage() {
                       marginTop: 2,
                     }}
                   >
-                    {optimizeOn
-                      ? savedOrder
-                        ? "Compared with visiting in scheduled-time order. Re-run with current traffic above if you want to update."
-                        : "Compared with visiting your stops in scheduled-time order."
-                      : "Flip 'Optimize stop order' above to use the shorter route."}
+                    {subtitle}
                   </div>
                 </div>
               </div>
