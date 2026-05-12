@@ -51,6 +51,58 @@ export interface DirectionsPreview {
   label: string;
   /** Full deep-link URL to launch turn-by-turn in the OS map app. */
   openUrl: string;
+  /** Optional Google-encoded polyline for the actual driving route.
+   *  When set, the map renders this as a road-following path instead
+   *  of the straight-line fallback. Set by the home page after the
+   *  planRoute call returns; pre-fill is null so the dashed straight
+   *  line shows immediately while the API call is in flight. */
+  polyline?: string | null;
+  /** Drive time + distance for the overlay subtitle. Both arrive
+   *  with the polyline (same planRoute response). */
+  driveSeconds?: number;
+  driveMeters?: number;
+  /** True when the polyline came from Google traffic-aware data,
+   *  false for the mock provider. Drives a small caption on the
+   *  overlay so the rep knows whether they're seeing live traffic. */
+  trafficAware?: boolean;
+}
+
+/**
+ * Decode a Google-encoded polyline into [lng, lat] pairs (the order
+ * MapLibre / GeoJSON expects). Standard algorithm — reads variable-
+ * length signed integers in 5-bit chunks, delta-encoded from the
+ * previous point, scaled by 1e-5.
+ *
+ * Inline implementation (~30 lines) to avoid an extra dependency.
+ */
+function decodePolyline(encoded: string): [number, number][] {
+  const points: [number, number][] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  while (index < encoded.length) {
+    let b = 0;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+    points.push([lng * 1e-5, lat * 1e-5]);
+  }
+  return points;
 }
 
 export function DashboardMap({
@@ -396,6 +448,28 @@ export function DashboardMap({
       return;
     }
 
+    // Pick the line geometry:
+    //   - If the preview carries a Google-encoded polyline, decode
+    //     and use that — the rep sees the actual road-following
+    //     route, not a misleading straight line through buildings.
+    //   - Otherwise (no polyline yet, planRoute still in flight or
+    //     denied GPS) fall back to a dashed straight line so the
+    //     tap is responsive while we wait for the real data.
+    const coords: [number, number][] = preview.polyline
+      ? decodePolyline(preview.polyline)
+      : [
+          [userPosition.lng, userPosition.lat],
+          [preview.lng, preview.lat],
+        ];
+    // Guard: decoded polyline empty → fall back to straight line.
+    const lineCoords =
+      coords.length >= 2
+        ? coords
+        : [
+            [userPosition.lng, userPosition.lat] as [number, number],
+            [preview.lng, preview.lat] as [number, number],
+          ];
+
     const route: GeoJSON.FeatureCollection<GeoJSON.LineString> = {
       type: "FeatureCollection",
       features: [
@@ -404,10 +478,7 @@ export function DashboardMap({
           properties: {},
           geometry: {
             type: "LineString",
-            coordinates: [
-              [userPosition.lng, userPosition.lat],
-              [preview.lng, preview.lat],
-            ],
+            coordinates: lineCoords,
           },
         },
       ],
@@ -415,6 +486,7 @@ export function DashboardMap({
     const existing = map.getSource(SRC) as
       | maplibregl.GeoJSONSource
       | undefined;
+    const hasRealRoute = !!preview.polyline && coords.length >= 2;
     if (existing) {
       existing.setData(route);
     } else {
@@ -426,22 +498,50 @@ export function DashboardMap({
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": MC.brandDeep,
-          "line-width": 3,
-          "line-dasharray": [2, 2],
+          // Real route → solid 4px; straight-line fallback → dashed
+          // 3px so the rep can visually tell "the proper route hasn't
+          // landed yet" vs "this is the actual driving path".
+          "line-width": hasRealRoute ? 4 : 3,
+          "line-dasharray": hasRealRoute
+            ? // No dashes for a real route. MapLibre needs SOME value;
+              // we set both stops equal to effectively disable dashing
+              // without re-declaring the layer.
+              [1, 0]
+            : [2, 2],
           "line-opacity": 0.85,
         },
       });
     }
-    // Re-fit so both endpoints are comfortably visible. Skipped
-    // when the destination and the rep are extremely close to avoid
-    // a jarring zoom-in on tiny distances.
+    // Re-paint the line-width / dash pattern when toggling between
+    // straight-line and real-route states. setPaintProperty is cheap
+    // and avoids a layer remove/add cycle that would flash.
+    try {
+      map.setPaintProperty(LYR, "line-width", hasRealRoute ? 4 : 3);
+      map.setPaintProperty(
+        LYR,
+        "line-dasharray",
+        hasRealRoute ? [1, 0] : [2, 2]
+      );
+    } catch {
+      /* layer not ready — first call already painted with the right
+       * settings via addLayer above. */
+    }
+
+    // Re-fit so the whole route is comfortably visible. With a real
+    // polyline we extend the bounds across every vertex (matters for
+    // long detours); with the straight-line fallback we only need
+    // the two endpoints. Skipped on tiny distances to avoid a jarring
+    // zoom-in.
     const dx = preview.lng - userPosition.lng;
     const dy = preview.lat - userPosition.lat;
     if (Math.hypot(dx, dy) > 0.0005) {
       const bounds = new maplibregl.LngLatBounds()
         .extend([userPosition.lng, userPosition.lat])
         .extend([preview.lng, preview.lat]);
-      map.fitBounds(bounds, { padding: 80, maxZoom: 13, duration: 500 });
+      if (hasRealRoute) {
+        for (const c of coords) bounds.extend(c);
+      }
+      map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 500 });
     }
 
     return () => {
@@ -524,6 +624,56 @@ export function DashboardMap({
                 >
                   {preview.label}
                 </div>
+                {/* Drive time + distance sub-line. Arrives a moment
+                    after the initial preview render (planRoute is
+                    async — fast on cache hit, ~1s on cold). Until
+                    then we show "Calculating route…" so the rep
+                    knows we're working on it. */}
+                {typeof preview.driveSeconds === "number" &&
+                preview.driveSeconds > 0 ? (
+                  <div
+                    style={{
+                      fontFamily: MC.font,
+                      fontSize: 11,
+                      color: MC.mute,
+                      marginTop: 2,
+                      letterSpacing: 0,
+                    }}
+                  >
+                    {(() => {
+                      const min = Math.max(
+                        1,
+                        Math.round(preview.driveSeconds / 60)
+                      );
+                      const km =
+                        typeof preview.driveMeters === "number"
+                          ? preview.driveMeters / 1000
+                          : null;
+                      const dist =
+                        km == null
+                          ? ""
+                          : km < 10
+                          ? ` · ${km.toFixed(1)} km`
+                          : ` · ${km.toFixed(0)} km`;
+                      const traffic = preview.trafficAware
+                        ? " · live traffic"
+                        : "";
+                      return `${min} min drive${dist}${traffic}`;
+                    })()}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      fontFamily: MC.font,
+                      fontSize: 11,
+                      color: MC.hint,
+                      marginTop: 2,
+                      letterSpacing: 0,
+                    }}
+                  >
+                    Calculating route…
+                  </div>
+                )}
               </div>
               <a
                 href={preview.openUrl}

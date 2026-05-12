@@ -34,6 +34,8 @@ import { resolvedAttentionFeedback } from "@/lib/shifts-store";
 import {
   openMapsLink,
   computeNextLeaveBy,
+  planRoute,
+  requestGeolocationOnce,
   type NextLeaveByInfo,
 } from "@/lib/route-planner";
 import {
@@ -645,13 +647,60 @@ export default function DashboardPage() {
         setTravellingSince={setTravellingSince}
         inProgressCount={inProgressCount}
         onPreviewDirections={(p) => {
+          // Two-phase preview so the rep gets instant feedback:
+          //   1. Set the preview NOW with no polyline — DashboardMap
+          //      shows a dashed straight-line placeholder + the
+          //      "Calculating route…" caption while we fetch.
+          //   2. Async: call planRoute for this single stop with the
+          //      rep's GPS as origin. When the response lands, merge
+          //      the encoded polyline + drive time + distance into
+          //      the existing preview state so the map upgrades the
+          //      dashed line to the real road-following route + the
+          //      caption flips to "12 min · 5.2 km".
+          // If GPS is denied, the dashed straight-line stays + the
+          // overlay shows the existing label; Open in Maps still
+          // works as the OS's turn-by-turn handoff.
           setDirectionsPreview(p);
-          // Bring the map into the rep's viewport — directions
-          // preview was easy to miss when the page had been scrolled
-          // past the map. Smooth scroll keeps the action obvious.
           if (typeof window !== "undefined") {
             window.scrollTo({ top: 0, behavior: "smooth" });
           }
+          // Fire planRoute in the background. Capture the preview's
+          // lat/lng so a fast follow-up tap on a different shift
+          // doesn't accidentally merge stale data — we re-check
+          // identity inside setDirectionsPreview before merging.
+          void (async () => {
+            const origin = await requestGeolocationOnce();
+            if (!origin) return; // no GPS → keep the straight-line fallback
+            try {
+              const planned = await planRoute(
+                origin,
+                [{ id: "preview", lat: p.lat, lng: p.lng, label: p.label }],
+                { optimize: false }
+              );
+              const leg = planned.legs[0];
+              if (!leg) return;
+              setDirectionsPreview((cur) => {
+                // Race-safe: only merge if the preview still points
+                // at the same destination. If the rep tapped a
+                // different shift's Directions in the meantime,
+                // we silently drop this stale response.
+                if (!cur || cur.lat !== p.lat || cur.lng !== p.lng) {
+                  return cur;
+                }
+                return {
+                  ...cur,
+                  polyline: leg.polyline ?? null,
+                  driveSeconds: leg.driveSeconds,
+                  driveMeters: leg.driveMeters,
+                  trafficAware: planned.trafficAware,
+                };
+              });
+            } catch {
+              /* planner failed — leave the dashed straight-line +
+               * the destination tile in place. The rep can still
+               * hit Open in Maps for real turn-by-turn. */
+            }
+          })();
         }}
         onUnableToAttend={(s) =>
           setUnableSheetFor({ realId: s.realId, name: s.name })
