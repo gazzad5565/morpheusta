@@ -261,51 +261,101 @@ export function DashboardMap({
     }
   }, [placed, loaded]);
 
-  // User location dot — best-effort, no auto-prompt loop.
+  // User location dot — best-effort, no auto-prompt.
+  //
+  // We DO NOT auto-prompt for geolocation when the dashboard mounts.
+  // Reps were reporting "every morning the app asks me for location"
+  // because Safari (especially in iOS PWA mode) downgrades the
+  // "Allow once" choice between sessions and re-prompts on every
+  // dashboard load.
+  //
+  // Strategy:
+  //   - If the permission has ALREADY been granted (rep picked
+  //     "Allow on Every Visit" previously), silently fetch the
+  //     position and drop the marker — no prompt fires.
+  //   - If state is 'prompt' or 'denied', skip geolocation entirely.
+  //     The "you are here" dot just won't appear until the rep
+  //     performs an action that explicitly needs it (Plan my day /
+  //     Start travelling / Check in). Those flows are user-initiated,
+  //     so Safari handles the prompt gracefully and remembers the
+  //     choice.
+  //   - Browsers without the Permissions API fall back to the
+  //     previous "call getCurrentPosition directly" behaviour so
+  //     older devices don't regress.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !loaded) return;
     if (typeof window === "undefined" || !navigator.geolocation) return;
     let cancelled = false;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        if (cancelled || !mapRef.current) return;
-        // Lift to state so the directions-preview effect below can
-        // draw a polyline between here and the destination.
-        setUserPosition({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
+
+    const dropMarker = (pos: GeolocationPosition) => {
+      if (cancelled || !mapRef.current) return;
+      // Lift to state so the directions-preview effect below can
+      // draw a polyline between here and the destination.
+      setUserPosition({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+      });
+      if (userMarkerRef.current) userMarkerRef.current.remove();
+      const el = document.createElement("div");
+      // User-location marker = circular avatar pill so it visually
+      // contrasts with the rounded-square house customer markers.
+      // Photo if uploaded, generic face glyph as the fallback.
+      el.style.cssText = `
+        width: 30px; height: 30px; border-radius: 99px;
+        background: ${MC.brand}; border: 3px solid #fff;
+        box-shadow: 0 0 0 4px ${MC.brand}33, 0 1px 4px rgba(0,0,0,0.25);
+        overflow: hidden;
+        display: flex; align-items: center; justify-content: center;
+      `;
+      el.title = "You are here";
+      if (myAvatarUrl) {
+        el.innerHTML = `<img src="${myAvatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />`;
+      } else {
+        el.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>`;
+      }
+      userMarkerRef.current = new maplibregl.Marker({ element: el })
+        .setLngLat([pos.coords.longitude, pos.coords.latitude])
+        .addTo(mapRef.current);
+    };
+
+    const fetchSilent = () => {
+      navigator.geolocation.getCurrentPosition(
+        dropMarker,
+        () => {
+          /* silent — no dot, no prompt UX */
+        },
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
+      );
+    };
+
+    // Branch on permission state.
+    type PermsAPI = {
+      query: (d: { name: PermissionName }) => Promise<{ state: PermissionState }>;
+    };
+    const perms = (
+      navigator as Navigator & { permissions?: PermsAPI }
+    ).permissions;
+    if (perms && typeof perms.query === "function") {
+      void perms
+        .query({ name: "geolocation" as PermissionName })
+        .then((res) => {
+          if (cancelled) return;
+          if (res.state === "granted") {
+            // Permission already remembered — silent fetch.
+            fetchSilent();
+          }
+          // 'prompt' or 'denied' → do nothing on dashboard mount.
+        })
+        .catch(() => {
+          /* Permissions API exists but query failed — silent fail. */
         });
-        if (userMarkerRef.current) userMarkerRef.current.remove();
-        const el = document.createElement("div");
-        // User-location marker = circular avatar pill so it visually
-        // contrasts with the rounded-square house customer markers.
-        // Photo if uploaded, generic face glyph as the fallback. The
-        // glowing brand-tint halo around it carries forward — that's
-        // the "you are here" signal regardless of which inner visual
-        // renders.
-        el.style.cssText = `
-          width: 30px; height: 30px; border-radius: 99px;
-          background: ${MC.brand}; border: 3px solid #fff;
-          box-shadow: 0 0 0 4px ${MC.brand}33, 0 1px 4px rgba(0,0,0,0.25);
-          overflow: hidden;
-          display: flex; align-items: center; justify-content: center;
-        `;
-        el.title = "You are here";
-        if (myAvatarUrl) {
-          el.innerHTML = `<img src="${myAvatarUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />`;
-        } else {
-          el.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>`;
-        }
-        userMarkerRef.current = new maplibregl.Marker({ element: el })
-          .setLngLat([pos.coords.longitude, pos.coords.latitude])
-          .addTo(mapRef.current);
-      },
-      () => {
-        // Permission denied / unavailable — silently skip.
-      },
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 30_000 }
-    );
+    } else {
+      // Old browser without Permissions API: fall back to the
+      // pre-existing "call directly" behaviour.
+      fetchSilent();
+    }
+
     return () => {
       cancelled = true;
     };
@@ -476,8 +526,12 @@ export function DashboardMap({
               </div>
               <a
                 href={preview.openUrl}
-                target="_blank"
                 rel="noopener noreferrer"
+                // No target="_blank" — see comment in /route/page.tsx.
+                // tl;dr: iOS PWA white-screens on return from Maps if
+                // we open the deeplink in a new browser context;
+                // letting the OS handle the URL as a universal link
+                // keeps the PWA in its previous state.
                 style={{
                   display: "inline-flex",
                   alignItems: "center",

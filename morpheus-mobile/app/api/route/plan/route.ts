@@ -44,6 +44,12 @@ interface PlanRequestBody {
    *  legs. Defaults to false — we trust the caller's ordering
    *  (typically chronological by scheduled start). */
   optimize?: boolean;
+  /** When false, force the mock provider even if GOOGLE_ROUTES_API_KEY
+   *  is set. Drives the "Live traffic" toggle on the mobile /route
+   *  page — reps who don't trust Google's ETAs (or want the
+   *  consistent straight-line estimates) can flip it off and the
+   *  server complies. Defaults to true (use Google when configured). */
+  traffic?: boolean;
 }
 
 export interface PlanLeg {
@@ -317,8 +323,15 @@ export async function POST(req: Request) {
   const stops = cleanStops.slice(0, 25);
   const ordered = body.optimize ? optimizeOrder(body.origin, stops) : stops;
 
+  // `traffic` is the client's opt-in to the Google provider. Default
+  // is true (preserve prior behaviour where the route was always
+  // Google when a key was configured). Setting it explicitly to
+  // false forces the mock path even when GOOGLE_ROUTES_API_KEY is
+  // available — used by the mobile /route page's "Live traffic"
+  // toggle to let reps fall back to the simpler estimates on demand.
+  const useTraffic = body.traffic !== false;
   const apiKey = process.env.GOOGLE_ROUTES_API_KEY;
-  const response = apiKey
+  const response = useTraffic && apiKey
     ? await planGoogle(body.origin, ordered, apiKey)
     : planMock(body.origin, ordered);
   // Override the order on the response with the actual visit

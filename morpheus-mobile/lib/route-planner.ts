@@ -69,12 +69,14 @@ let _cache: CacheEntry | null = null;
 function buildCacheKey(
   origin: LatLng,
   stops: PlannerStop[],
-  optimize: boolean
+  optimize: boolean,
+  traffic: boolean
 ): string {
   return [
     origin.lat.toFixed(5),
     origin.lng.toFixed(5),
     optimize ? "opt" : "fixed",
+    traffic ? "traffic" : "mock",
     stops.map((s) => `${s.id}@${s.lat.toFixed(5)},${s.lng.toFixed(5)}`).join("|"),
   ].join("::");
 }
@@ -86,21 +88,29 @@ export function clearRouteCache(): void {
 /**
  * Direct planner call — caller supplies origin + stops.
  * Most pages should use planMyDay instead.
+ *
+ * `traffic` toggles the provider preference:
+ *   - true (default)  → server uses Google Routes when GOOGLE_ROUTES_API_KEY
+ *                       is configured; falls back to mock otherwise.
+ *   - false           → server forces the mock provider even when Google
+ *                       is configured. Drives the "Live traffic" toggle
+ *                       on the /route page.
  */
 export async function planRoute(
   origin: LatLng,
   stops: PlannerStop[],
-  opts?: { optimize?: boolean }
+  opts?: { optimize?: boolean; traffic?: boolean }
 ): Promise<PlannedRoute> {
   const optimize = opts?.optimize ?? false;
-  const key = buildCacheKey(origin, stops, optimize);
+  const traffic = opts?.traffic ?? true;
+  const key = buildCacheKey(origin, stops, optimize, traffic);
   if (_cache && _cache.key === key && _cache.expiresAt > Date.now()) {
     return _cache.payload;
   }
   const res = await fetch("/api/route/plan", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ origin, stops, optimize }),
+    body: JSON.stringify({ origin, stops, optimize, traffic }),
   });
   if (!res.ok) {
     throw new Error(`Route plan failed: HTTP ${res.status}`);
@@ -158,6 +168,8 @@ export interface PlanMyDayResult {
  */
 export async function planMyDay(opts?: {
   optimize?: boolean;
+  /** Forwarded to planRoute / the API. See planRoute for semantics. */
+  traffic?: boolean;
 }): Promise<PlanMyDayResult> {
   const [allShifts, origin] = await Promise.all([
     listMyShiftsToday(),
@@ -213,6 +225,7 @@ export async function planMyDay(opts?: {
   }));
   const route = await planRoute(effectiveOrigin, stops, {
     optimize: opts?.optimize,
+    traffic: opts?.traffic,
   });
 
   // Re-order shifts to match the planner's chosen visit order.

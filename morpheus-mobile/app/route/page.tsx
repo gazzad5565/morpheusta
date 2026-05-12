@@ -133,9 +133,38 @@ function computeScheduleStatus(
   return { kind: "early", eta, scheduled, minsEarly: diffMin };
 }
 
+/** localStorage key for the rep's "Live traffic" toggle preference.
+ *  Persists across sessions so they don't have to flick it every
+ *  time they reopen the app. Default is true — the green Live-traffic
+ *  state is what most reps want once the API key is wired up. */
+const TRAFFIC_LS_KEY = "morpheus.route.useTraffic";
+
 export default function RoutePage() {
   const router = useRouter();
   const [optimize, setOptimize] = useState(false);
+  // Live-traffic toggle. Initialised from localStorage on mount (after
+  // hydration to avoid SSR/CSR mismatch), default true.
+  const [useTraffic, setUseTraffic] = useState(true);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(TRAFFIC_LS_KEY);
+      if (raw === "false") setUseTraffic(false);
+    } catch {
+      /* localStorage disabled — fall through to default */
+    }
+  }, []);
+  const setUseTrafficPersist = (v: boolean) => {
+    setUseTraffic(v);
+    try {
+      window.localStorage.setItem(TRAFFIC_LS_KEY, v ? "true" : "false");
+    } catch {
+      /* noop */
+    }
+    // Cache key already includes the traffic flag, so flipping it
+    // naturally invalidates the cached payload — but we clear
+    // anyway to keep things obvious.
+    clearRouteCache();
+  };
   const [result, setResult] = useState<PlanMyDayResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -153,7 +182,7 @@ export default function RoutePage() {
     setError(null);
     try {
       clearRouteCache(); // user explicitly asked for fresh
-      const r = await planMyDay({ optimize });
+      const r = await planMyDay({ optimize, traffic: useTraffic });
       setResult(r);
     } catch (e) {
       setError((e as Error).message || "Couldn't plan your day. Try again.");
@@ -162,14 +191,14 @@ export default function RoutePage() {
     }
   };
 
-  // Initial fetch + every time the optimize toggle flips.
+  // Initial fetch + every time the optimize or traffic toggle flips.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       try {
-        const r = await planMyDay({ optimize });
+        const r = await planMyDay({ optimize, traffic: useTraffic });
         if (!cancelled) setResult(r);
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
@@ -180,7 +209,7 @@ export default function RoutePage() {
     return () => {
       cancelled = true;
     };
-  }, [optimize]);
+  }, [optimize, useTraffic]);
 
   const route = result?.route;
   const stopsInOrder = result?.stopsInOrder ?? [];
@@ -270,14 +299,70 @@ export default function RoutePage() {
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-            {provider === "google" && trafficAware ? (
-              <StatusChip tone="ok" icon="sparkle">
-                Live traffic
-              </StatusChip>
-            ) : (
-              <StatusChip tone="neutral" icon="info">
-                Estimated
-              </StatusChip>
+            {/* Live traffic toggle. Tap flips between the Google
+                provider (traffic-aware ETAs) and the mock provider
+                (haversine × 1.4 × 30 km/h urban estimate). State is
+                persisted to localStorage so the rep's preference
+                sticks across sessions. The visual changes per state:
+                  - On  → green pill, sparkle glyph, "Live traffic"
+                  - Off → neutral pill, info glyph, "Estimated"
+                When Google isn't configured (no API key on server),
+                turning the toggle on still returns mock data — but
+                the pill's labelled state still reflects the
+                preference so re-enabling once the key lands works. */}
+            <button
+              type="button"
+              onClick={() => setUseTrafficPersist(!useTraffic)}
+              aria-pressed={useTraffic}
+              title={
+                useTraffic
+                  ? "Live traffic on — tap to switch to estimated"
+                  : "Estimated only — tap to use live traffic"
+              }
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "4px 9px",
+                borderRadius: 999,
+                background: useTraffic ? MC.okTint : "#EEF0F3",
+                color: useTraffic ? "#0d6a45" : MC.ink2,
+                border: `1px solid ${useTraffic ? MC.ok + "33" : MC.line}`,
+                fontFamily: MC.font,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+            >
+              <Glyph
+                name={useTraffic ? "sparkle" : "info"}
+                size={12}
+                color={useTraffic ? MC.ok : MC.ink2}
+                strokeWidth={2.2}
+              />
+              {useTraffic
+                ? provider === "google" && trafficAware
+                  ? "Live traffic"
+                  : "Live traffic"
+                : "Estimated"}
+            </button>
+            {/* When the toggle says "Live traffic" but the server is
+                actually serving mock (no API key configured), show a
+                tiny ⓘ hint so the rep doesn't think Google is broken. */}
+            {useTraffic && !(provider === "google" && trafficAware) && !loading && (
+              <span
+                title="Server is using the estimate provider. Ask your admin to add the Google Routes API key."
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 10.5,
+                  color: MC.hint,
+                  fontWeight: 500,
+                }}
+              >
+                using estimate
+              </span>
             )}
             <div
               style={{
@@ -436,11 +521,20 @@ export default function RoutePage() {
           />
         )}
 
-        {/* Open whole day in Maps */}
+        {/* Open whole day in Maps.
+            target="_blank" was removed because on iOS PWAs it
+            spawned a new browser context that broke when iOS tried
+            to switch to the Maps app and back — the rep saw a
+            white screen after returning from Maps and had to force-
+            close the PWA. Without target="_blank", iOS treats the
+            maps.google.com URL as a universal link, hands it off
+            cleanly to the Maps app, and the PWA stays in its
+            previous state when the rep switches back. Same fix
+            applied to the per-leg Open-in-Maps link below and the
+            DashboardMap "Open in Maps" overlay. */}
         {dayMapsUrl && legs.length >= 2 && (
           <a
             href={dayMapsUrl}
-            target="_blank"
             rel="noopener noreferrer"
             style={{
               marginTop: 14,
@@ -847,11 +941,12 @@ function LegList({
               )}
             </div>
 
-            {/* Per-leg Open in Maps */}
+            {/* Per-leg Open in Maps — no target="_blank" so iOS
+                universal-link handoff doesn't spawn a new browser
+                context and white-screen the PWA on return. */}
             {legMapsUrl && (
               <a
                 href={legMapsUrl}
-                target="_blank"
                 rel="noopener noreferrer"
                 style={{
                   height: 38,
