@@ -41,6 +41,13 @@ interface ShiftRow {
   attention_raised_at: string | null;
   attention_resolved_at: string | null;
   attention_resolution: string | null;
+  /** Claim-radius geofence in metres. Only meaningful when rep_id IS
+   *  NULL (the shift is claimable). NULL = no restriction. Set by
+   *  the admin /schedule/new form; filtered client-side in
+   *  listUnassignedShiftsToday so reps outside the radius don't see
+   *  shifts they can't realistically attend. See
+   *  2026_05_12_shifts_claim_radius.sql. */
+  claim_radius_m: number | null;
   customers: {
     id: string;
     name: string;
@@ -330,13 +337,30 @@ export async function getMyActiveShift(): Promise<
   return rowToShift(data as ShiftRow);
 }
 
-/** Unassigned shifts today — anyone authenticated can see + claim. */
+/** Unassigned shifts today — anyone authenticated can see + claim.
+ *
+ * Claim-radius filter: when a shift has `claim_radius_m` set, the
+ * admin wanted to scope the claim list to reps physically near the
+ * site. We honour that by computing the haversine distance between
+ * the rep's GPS (if available) and the site's coords, dropping
+ * shifts where the rep is further away than the radius.
+ *
+ * Lenient mode: if we don't HAVE a GPS fix for the rep (denied,
+ * unavailable, browser doesn't support, timed out) we keep the
+ * shift visible. The reasoning: a rep with denied location is
+ * already at a disadvantage; further hiding shifts from them would
+ * compound the problem. Managers who really want strict gating can
+ * set a smaller radius — but they should expect denied-GPS reps to
+ * still see those shifts.
+ */
 export async function listUnassignedShiftsToday(): Promise<
   Array<ShiftWithMeta>
 > {
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
     .from("shifts")
+    // claim_radius_m comes back as part of "*", no schema change to
+    // the .select() string required.
     .select("*, customers(id,name,initials,color,code,logo_url), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .is("rep_id", null)
     .eq("shift_date", todayISO())
@@ -349,7 +373,61 @@ export async function listUnassignedShiftsToday(): Promise<
     console.warn("[shifts] listUnassignedShiftsToday:", error.message);
     return [];
   }
-  return (data as ShiftRow[]).map(rowToShift);
+  const rows = (data as ShiftRow[]) || [];
+
+  // Fast path: no row has a claim radius set → skip the GPS call
+  // entirely (avoids triggering the permission prompt for nothing).
+  const anyRadiusSet = rows.some(
+    (r) => typeof r.claim_radius_m === "number" && r.claim_radius_m > 0
+  );
+  if (!anyRadiusSet) {
+    return rows.map(rowToShift);
+  }
+
+  // Get the rep's GPS once. Uses the shared permission-aware helper
+  // so this call is silent when permission is granted, returns null
+  // when denied (no prompt loop).
+  const { requestGeolocationOnce } = await import("./route-planner");
+  const repPos = await requestGeolocationOnce();
+
+  if (!repPos) {
+    // Lenient: no GPS → show all claimable shifts. See doc above.
+    return rows.map(rowToShift);
+  }
+
+  // Haversine distance in metres.
+  const haversineM = (
+    a: { lat: number; lng: number },
+    b: { lat: number; lng: number }
+  ): number => {
+    const R = 6_371_000;
+    const toRad = (x: number) => (x * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const s =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(a.lat)) *
+        Math.cos(toRad(b.lat)) *
+        Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  };
+
+  const filtered = rows.filter((r) => {
+    const radius = r.claim_radius_m ?? 0;
+    if (!radius || radius <= 0) return true; // no restriction
+    const lat = r.site?.latitude ?? null;
+    const lng = r.site?.longitude ?? null;
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      // Radius set but site has no coords on file. Show the shift —
+      // failing closed would silently hide it forever and there's
+      // no way for the rep to know why.
+      return true;
+    }
+    const distance = haversineM(repPos, { lat, lng });
+    return distance <= radius;
+  });
+
+  return filtered.map(rowToShift);
 }
 
 /** Claim an unassigned shift — sets rep_id to the current user. */

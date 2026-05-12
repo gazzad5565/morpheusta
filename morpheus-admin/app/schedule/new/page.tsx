@@ -125,6 +125,15 @@ function NewShiftPage() {
   // Default is null (single shift, claimable) which preserves the
   // previous form's "leave it blank" behaviour.
   const [repScope, setRepScope] = useState<RepScope>(null);
+
+  // Claim-radius for unassigned shifts. NULL = no restriction (the
+  // shift is visible to every rep — current default). Setting a
+  // value scopes the mobile "Unscheduled · available" list to reps
+  // within that many metres of the customer's site. Only surfaced
+  // in the UI when repScope === null (claimable mode). Stored on the
+  // row even when an assigned rep is chosen so a later "release"
+  // preserves the manager's intent — see migration notes.
+  const [claimRadiusM, setClaimRadiusM] = useState<number | null>(null);
   const [shiftDate, setShiftDate] = useState<string>(fromDate || todayISO());
   // Default start = next 30-min slot from now. Hardcoded "09:00" was
   // unhelpful when a manager taps + to schedule a shift starting in
@@ -549,6 +558,12 @@ function NewShiftPage() {
             tasks_total: tasksByCustomer.get(cid) ?? 0,
             rep_id: rid,
             series_id: seriesId,
+            // Claim radius only matters when the shift is unassigned.
+            // We still store it on the row in case the manager
+            // releases an assigned shift later — preserves the
+            // original "scope" intent without extra UI on the
+            // release flow.
+            claim_radius_m: claimRadiusM,
           });
           done += 1;
           setProgress({ done, total: totalShifts });
@@ -672,6 +687,74 @@ function NewShiftPage() {
                     specificSubLabel="Pick one or many"
                   />
                 </Field>
+
+                {/* Claim radius — only surfaces when the shift is
+                    going to ANY rep (repScope === null). Scopes the
+                    "Unscheduled · available" list on the mobile app
+                    to reps within X metres of the customer's site.
+                    Null / "Anywhere" preserves the existing
+                    behaviour (visible to all reps). */}
+                {repScope === null && (
+                  <Field
+                    label="Claim radius"
+                    hint="Limit who can see this in the rep app's Unscheduled list. Only matters while the shift is claimable."
+                  >
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {[
+                        { v: null, label: "Anywhere", sub: "All reps see it" },
+                        { v: 1000, label: "1 km", sub: "Same neighbourhood" },
+                        { v: 5000, label: "5 km", sub: "Same suburb" },
+                        { v: 15000, label: "15 km", sub: "Same city" },
+                        { v: 50000, label: "50 km", sub: "Same metro" },
+                      ].map((opt) => {
+                        const on = claimRadiusM === opt.v;
+                        return (
+                          <button
+                            key={String(opt.v ?? "any")}
+                            type="button"
+                            onClick={() => setClaimRadiusM(opt.v)}
+                            title={opt.sub}
+                            style={{
+                              padding: "7px 12px",
+                              borderRadius: 99,
+                              background: on ? AC.ink : "#fff",
+                              color: on ? "#fff" : AC.ink2,
+                              border: `1px solid ${on ? AC.ink : AC.line}`,
+                              fontFamily: AC.font,
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              letterSpacing: -0.1,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {claimRadiusM !== null && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontFamily: AC.font,
+                          fontSize: 11.5,
+                          color: AC.mute,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        Only reps within{" "}
+                        <b style={{ color: AC.ink2 }}>
+                          {claimRadiusM >= 1000
+                            ? `${(claimRadiusM / 1000).toFixed(0)} km`
+                            : `${claimRadiusM} m`}
+                        </b>{" "}
+                        of the customer's site will see this shift.
+                        Reps without location permission see it
+                        anyway (we don't penalise denied GPS).
+                      </div>
+                    )}
+                  </Field>
+                )}
               </>
             ) : (
               <NextStepHint label="Pick a customer to continue." />

@@ -137,6 +137,22 @@ export interface NewShift {
   tasks_total?: number;
   /** Optional. If null/undefined, the shift is claimable by any rep. */
   rep_id?: string | null;
+  /** Optional claim-radius geofence in metres.
+   *
+   * Only meaningful for unassigned shifts (rep_id == null). When set,
+   * the mobile app filters the rep's "Unscheduled · available" list
+   * to claimable shifts within this radius of their current GPS —
+   * use case: scope a last-minute "any rep" shift to reps already
+   * near the customer's site, not the whole national team.
+   *
+   * NULL = no restriction (the default — backwards compatible with
+   * every pre-2026-05-12 row). Filter is applied client-side; we
+   * don't push it into RLS because the rep's location isn't part of
+   * the auth context.
+   *
+   * Schema: 2026_05_12_shifts_claim_radius.sql adds the column.
+   */
+  claim_radius_m?: number | null;
   /**
    * Optional series id. When the schedule form generates N shifts in
    * one submission (e.g. recurring weekly across multiple customers)
@@ -202,6 +218,11 @@ export async function createShift(
       tasks_total: s.tasks_total ?? 4,
       rep_id: s.rep_id || null,
       series_id: s.series_id ?? null,
+      // Only meaningful when rep_id is null (claimable). Stored on
+      // assigned shifts too so a later "release" preserves the
+      // intended radius — but ignored by the mobile filter once
+      // rep_id is non-null. See the migration comment for details.
+      claim_radius_m: s.claim_radius_m ?? null,
     })
     .select("id, customers(name)")
     .single();
