@@ -25,6 +25,10 @@ interface ShiftRow {
   distance_label: string | null;
   state: string;
   check_in_at: string | null;
+  /** When the rep checked out (or the auto-checkout sweep ran).
+   *  Set alongside `state='complete'`. Used by /day for hours-worked
+   *  aggregation. */
+  check_out_at: string | null;
   tasks_done: number;
   tasks_total: number;
   /** Freeform rep-supplied note for this shift. See the 2026-05-11
@@ -144,6 +148,11 @@ export type ShiftWithMeta = Shift &
     realId: string;
     repId: string | null;
     checkInAt: string | null;
+    /** Wall-clock ISO at which the shift entered terminal state
+     *  (`complete`). Populated alongside state by checkOutOfShift +
+     *  the auto-checkout sweep. /day uses this to compute hours-
+     *  worked aggregates. Null for any state other than complete. */
+    checkOutAt: string | null;
     state: string;
     /** Raw HH:MM[:SS] from the DB so the rep app can compute relative
      *  countdowns ("in 50 min" / "10 min late") without re-parsing
@@ -178,6 +187,7 @@ function rowToShift(row: ShiftRow): ShiftWithMeta {
     realId: row.id,
     repId: row.rep_id,
     checkInAt: row.check_in_at,
+    checkOutAt: row.check_out_at,
     state: row.state,
     rawStartTime: row.start_time || "",
     rawEndTime: row.end_time || "",

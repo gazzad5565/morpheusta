@@ -1003,60 +1003,86 @@ function UpNextCard({
     const TERMINAL = new Set(["complete", "cancelled"]);
     const allDone = totalToday > 0 && shifts.every((s) => TERMINAL.has(s.state));
     if (allDone) {
+      // Tapping this card opens /day — the end-of-day recap with
+      // the cinematic celebration + total hours / tasks / travel /
+      // exception count + per-stop timeline. Previously this block
+      // was pure decoration; making the whole card tappable gives
+      // the rep one obvious place to land for their "what did I
+      // actually do today?" moment. The chevron on the right makes
+      // the affordance discoverable; pressing anywhere on the card
+      // navigates. Reuses the existing okTint visual so reps don't
+      // see a new colour they haven't learned yet.
       return (
         <div style={{ padding: "12px 16px 0" }}>
-          <div
+          <Link
+            href="/day"
+            aria-label={`See today's recap — ${totalToday} shift${totalToday === 1 ? "" : "s"} completed`}
             style={{
-              background: `linear-gradient(135deg, ${MC.okTint} 0%, #ffffff 80%)`,
-              borderRadius: MC.radiusCard,
-              padding: 18,
-              border: `1px solid ${MC.ok}33`,
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-              boxShadow: `0 6px 20px ${MC.ok}1a`,
+              textDecoration: "none",
+              display: "block",
             }}
           >
             <div
               style={{
-                width: 44,
-                height: 44,
-                borderRadius: 12,
-                background: MC.ok,
-                color: "#fff",
+                background: `linear-gradient(135deg, ${MC.okTint} 0%, #ffffff 80%)`,
+                borderRadius: MC.radiusCard,
+                padding: 18,
+                border: `1px solid ${MC.ok}33`,
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                boxShadow: `0 4px 12px ${MC.ok}55`,
-                flexShrink: 0,
+                gap: 14,
+                boxShadow: `0 6px 20px ${MC.ok}1a`,
+                cursor: "pointer",
               }}
             >
-              <Glyph name="check" size={22} color="#fff" strokeWidth={2.6} />
-            </div>
-            <div style={{ flex: 1 }}>
               <div
                 style={{
-                  fontFamily: MC.fontDisplay,
-                  fontSize: 16,
-                  fontWeight: 700,
-                  color: MC.ink,
-                  letterSpacing: -0.2,
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  background: MC.ok,
+                  color: "#fff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: `0 4px 12px ${MC.ok}55`,
+                  flexShrink: 0,
                 }}
               >
-                All shifts done — nice work.
+                <Glyph name="check" size={22} color="#fff" strokeWidth={2.6} />
               </div>
-              <div
-                style={{
-                  fontFamily: MC.font,
-                  fontSize: 12.5,
-                  color: MC.mute,
-                  marginTop: 2,
-                }}
-              >
-                {totalToday} shift{totalToday === 1 ? "" : "s"} completed today.
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: MC.fontDisplay,
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: MC.ink,
+                    letterSpacing: -0.2,
+                  }}
+                >
+                  All shifts done — nice work.
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 12.5,
+                    color: MC.mute,
+                    marginTop: 2,
+                  }}
+                >
+                  {totalToday} shift{totalToday === 1 ? "" : "s"} completed today
+                  · tap to see your recap
+                </div>
               </div>
+              <Glyph
+                name="chev-r"
+                size={20}
+                color={MC.ok}
+                strokeWidth={2.4}
+              />
             </div>
-          </div>
+          </Link>
         </div>
       );
     }
