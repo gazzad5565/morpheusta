@@ -694,36 +694,57 @@ export default function ShiftsListPage() {
             so the CTA pulls more weight here. */}
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
           {(() => {
-            // Visibility rule (May 12 — Gary):
+            // Visibility + copy rules (May 12 — Gary):
             // The pill is the ONLY link to /route now that the
             // Plan-my-day side-menu entry was removed. Hiding it
-            // based on stop count made the page unreachable —
-            // Gary hit exactly this with "1 of 2 done · 1 left"
-            // and lost the entry. Rule: render as long as the rep
-            // has ANY shifts today. The pill swaps copy based on
-            // saved-order state ("Optimized · 2:42 PM" vs "Plan
-            // route") but always provides the navigation link.
+            // based on stop count made the page unreachable — so
+            // we render whenever the rep has any shifts today.
+            // Copy flips based on the day's state:
+            //   - day complete (all shifts done/cancelled)
+            //       → "Day complete" + check (no point saying
+            //         "Optimized" — the work's done, optimisation
+            //         is irrelevant)
+            //   - saved order + remaining > 0 → "Optimized · 2:42 PM"
+            //   - no saved order + remaining > 0 → "Plan route" CTA
             const planned = headerDayPlanned;
             if (mine.length === 0) return null;
-            const optimizedAt = planned && pageSavedAt
+            const remainingStops = mine.filter(
+              (s) => s.state !== "complete" && s.state !== "cancelled"
+            ).length;
+            const dayComplete = remainingStops === 0;
+            const optimizedAt = planned && !dayComplete && pageSavedAt
               ? new Date(pageSavedAt).toLocaleTimeString(undefined, {
                   hour: "numeric",
                   minute: "2-digit",
                   hour12: true,
                 })
               : null;
+            // Three visual modes: ok-tinted "done" state, ok-tinted
+            // "saved" state, brand-deep CTA. The done + saved
+            // states share styling (calm green); the CTA pulls
+            // weight.
+            const isCalm = dayComplete || planned;
+            const label = dayComplete
+              ? "Day complete"
+              : planned
+              ? "Optimized"
+              : "Plan route";
             return (
               <Link
                 href="/route"
                 aria-label={
-                  planned
+                  dayComplete
+                    ? "All shifts done — open Plan my day to review"
+                    : planned
                     ? optimizedAt
                       ? `Day optimized at ${optimizedAt} — view or re-optimize`
                       : "Day optimized — view or re-optimize"
                     : "Plan today's route"
                 }
                 title={
-                  planned
+                  dayComplete
+                    ? "All shifts done"
+                    : planned
                     ? "Tap to view or re-optimize"
                     : "Optimize the order of today's stops"
                 }
@@ -733,19 +754,17 @@ export default function ShiftsListPage() {
                   gap: 6,
                   padding: "8px 12px 8px 10px",
                   borderRadius: 999,
-                  // Solid brand-deep fill when unplanned (CTA);
-                  // subtle okTint when planned (status).
-                  background: planned ? MC.okTint : MC.brandDeep,
-                  border: planned
+                  background: isCalm ? MC.okTint : MC.brandDeep,
+                  border: isCalm
                     ? `1px solid ${MC.ok}55`
                     : `1px solid ${MC.brandDeep}`,
-                  color: planned ? "#0d6a45" : "#fff",
+                  color: isCalm ? "#0d6a45" : "#fff",
                   textDecoration: "none",
                   fontFamily: MC.font,
                   fontSize: 12.5,
                   fontWeight: 700,
                   letterSpacing: -0.1,
-                  boxShadow: planned
+                  boxShadow: isCalm
                     ? "none"
                     : `0 2px 6px ${MC.brand}55`,
                 }}
@@ -754,17 +773,15 @@ export default function ShiftsListPage() {
                   // Identical pair to the home segmented pill so the
                   // affordance reads as the same feature from
                   // either entry point: check-circle = "day's
-                  // optimized", target = "needs planning". Size +
-                  // stroke matched to the home version too (15px /
-                  // 2.4 stroke) — previously this was 13px which
-                  // Gary felt looked subtly different.
-                  name={planned ? "check-circle" : "target"}
+                  // optimized" / "day's done", target = "needs
+                  // planning".
+                  name={isCalm ? "check-circle" : "target"}
                   size={15}
-                  color={planned ? MC.ok : "#fff"}
+                  color={isCalm ? MC.ok : "#fff"}
                   strokeWidth={2.4}
                 />
-                {planned ? "Optimized" : "Plan route"}
-                {planned && optimizedAt && (
+                {label}
+                {optimizedAt && (
                   <span
                     style={{
                       opacity: 0.75,
