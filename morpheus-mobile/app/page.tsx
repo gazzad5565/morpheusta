@@ -507,78 +507,99 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-          {/* Action cluster — View all is the primary destination
-              (always visible). Plan my day is a SECONDARY affordance:
-              smaller, lighter, sits next to View all as a quiet
-              option, not a competing pill. Only renders when the rep
-              has 2+ remaining stops. Planned-state replaces the
-              "target" glyph with a small green check + " Planned"
-              label so the dashboard still reflects state without
-              shouting. */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {(() => {
-              const remainingStops = shifts.filter(
-                (s) => s.state !== "complete" && s.state !== "cancelled"
-              ).length;
-              if (!shiftsLoaded || remainingStops < 2) return null;
-              const planned = dayPlanned;
-              return (
+          {/* Single combined "View all" affordance.
+              Replaces the previous two-pill cluster (Plan day + View
+              all). Now: one brand-tinted pill with TWO tap targets:
+                - left segment (icon only) → /route, signals
+                  plan-state via the icon itself:
+                    🎯 target (no plan yet)
+                    ✓ green check (planned)
+                - right segment ("View all ›") → /shifts
+              A thin divider line separates the two so the rep can
+              see they're distinct hit areas. When the rep has fewer
+              than 2 remaining stops the left segment hides (no
+              planning to do for a single shift) and the pill
+              collapses to just "View all". */}
+          {(() => {
+            const remainingStops = shifts.filter(
+              (s) => s.state !== "complete" && s.state !== "cancelled"
+            ).length;
+            const showPlanSlot = shiftsLoaded && remainingStops >= 2;
+            const planned = dayPlanned;
+            return (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "stretch",
+                  borderRadius: 10,
+                  background: MC.brandTint,
+                  border: `1px solid ${MC.brand}33`,
+                  boxShadow: `0 2px 6px ${MC.brand}22`,
+                  overflow: "hidden",
+                }}
+              >
+                {showPlanSlot && (
+                  <>
+                    <Link
+                      href="/route"
+                      aria-label={
+                        planned
+                          ? "Today is planned — view or re-optimize"
+                          : "Plan today's route"
+                      }
+                      title={
+                        planned
+                          ? "Today's route is planned — tap to view or re-optimize"
+                          : "Plan today's route"
+                      }
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "0 11px",
+                        textDecoration: "none",
+                        background: planned ? MC.okTint : "transparent",
+                      }}
+                    >
+                      <Glyph
+                        name={planned ? "check-circle" : "target"}
+                        size={15}
+                        color={planned ? MC.ok : MC.brandDeep}
+                        strokeWidth={2.4}
+                      />
+                    </Link>
+                    {/* Thin separator so the two halves read as
+                        distinct tap targets. */}
+                    <div
+                      style={{
+                        width: 1,
+                        background: `${MC.brand}33`,
+                        margin: "6px 0",
+                      }}
+                    />
+                  </>
+                )}
                 <Link
-                  href="/route"
-                  aria-label={planned ? "View today's plan" : "Plan my day"}
-                  // Tiny ghost-style pill — minimal chrome, sits as a
-                  // quiet companion to View all rather than another
-                  // big tappable button. Slightly muted text colour
-                  // + transparent background + thin border.
+                  href="/shifts"
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 4,
-                    padding: "5px 9px 5px 7px",
-                    borderRadius: 999,
-                    background: "transparent",
-                    border: `1px solid ${MC.line}`,
-                    color: planned ? "#0d6a45" : MC.mute,
-                    textDecoration: "none",
+                    gap: 6,
+                    padding: "9px 14px",
                     fontFamily: MC.font,
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    letterSpacing: 0.1,
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    color: MC.brandDeep,
+                    letterSpacing: -0.1,
+                    textDecoration: "none",
                   }}
                 >
-                  <Glyph
-                    name={planned ? "check-circle" : "target"}
-                    size={11}
-                    color={planned ? MC.ok : MC.mute}
-                    strokeWidth={2.4}
-                  />
-                  {planned ? "Planned" : "Plan day"}
+                  View all
+                  <Glyph name="chev-r" size={15} color={MC.brandDeep} strokeWidth={2.4} />
                 </Link>
-              );
-            })()}
-            <Link
-              href="/shifts"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "9px 14px",
-                borderRadius: 10,
-                background: MC.brandTint,
-                border: `1px solid ${MC.brand}33`,
-                fontFamily: MC.font,
-                fontSize: 13.5,
-                fontWeight: 700,
-                color: MC.brandDeep,
-                letterSpacing: -0.1,
-                textDecoration: "none",
-                boxShadow: `0 2px 6px ${MC.brand}22`,
-              }}
-            >
-              View all
-              <Glyph name="chev-r" size={15} color={MC.brandDeep} strokeWidth={2.4} />
-            </Link>
-          </div>
+              </div>
+            );
+          })()}
         </div>
         {/* Progress bar: green = complete, brand = in-progress, grey = scheduled. */}
         {totalCount > 0 && (
