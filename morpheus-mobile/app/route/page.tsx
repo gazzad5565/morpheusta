@@ -476,7 +476,15 @@ export default function RoutePage() {
           <span
             role="switch"
             aria-checked={optimize}
+            aria-label="Optimize stop order"
+            tabIndex={0}
             onClick={() => setOptimize((v) => !v)}
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                setOptimize((v) => !v);
+              }
+            }}
             style={{
               width: 38,
               height: 22,
@@ -485,6 +493,7 @@ export default function RoutePage() {
               position: "relative",
               transition: "background .15s ease",
               flexShrink: 0,
+              cursor: "pointer",
             }}
           >
             <span
@@ -524,14 +533,17 @@ export default function RoutePage() {
               Re-order today's stops for the shortest drive
             </div>
           </div>
-          {/* Hidden checkbox keeps a11y semantics on the label tap target */}
-          <input
-            type="checkbox"
-            checked={optimize}
-            onChange={(e) => setOptimize(e.target.checked)}
-            style={{ position: "absolute", opacity: 0, pointerEvents: "none" }}
-            tabIndex={-1}
-          />
+          {/* Hidden checkbox removed (May 12).
+              It used to live here "for a11y" but it actually broke the
+              switch: clicks inside a <label> implicitly toggle the
+              associated checkbox via the label-form association
+              regardless of pointer-events: none, so every tap fired
+              BOTH the span's onClick AND the checkbox's onChange →
+              double-flip → toggle appeared to do nothing.
+              The role="switch" + aria-checked + tabIndex + keyboard
+              handler on the span itself gives screen readers and
+              keyboard users the same affordance without the
+              double-flip footgun. */}
         </label>
 
         {/* Inline warnings: GPS fallback + Google fallback */}
