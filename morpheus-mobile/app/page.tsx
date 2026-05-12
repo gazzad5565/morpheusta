@@ -78,6 +78,9 @@ type DbShift = Shift & {
   attentionReason?: string | null;
   attentionResolvedAt?: string | null;
   attentionResolution?: string | null;
+  /** Flexible-time flag — display "Anytime today" in place of the
+   *  start-end range and skip the countdown pill. */
+  isFlexibleTime?: boolean;
 };
 
 function formatTodayHeader(): string {
@@ -1168,7 +1171,8 @@ function UpNextCard({
                 }}
               >
                 <span>
-                  {next.start} – {next.end} · {next.distance}
+                  {next.isFlexibleTime ? "Anytime today" : `${next.start} – ${next.end}`}
+                  {next.distance ? ` · ${next.distance}` : ""}
                 </span>
                 {/* Live countdown pill — "in 50 min" / "starting now"
                     / "10 min late" / "ends 1h" / "ran 30 min over".
@@ -1183,6 +1187,10 @@ function UpNextCard({
                     times on record (formatShiftCountdown returns
                     null). */}
                 {(() => {
+                  // Flexible-time shifts have no scheduled start to
+                  // count down to — suppress the timing pill so we
+                  // don't show "5h late" for a 06:00 sentinel.
+                  if (next.isFlexibleTime) return null;
                   const timing = formatShiftCountdown(
                     next.shiftDate || "",
                     next.rawStartTime || "",

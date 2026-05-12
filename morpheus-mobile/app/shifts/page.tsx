@@ -48,6 +48,10 @@ type DbShift = Shift & {
   rawStartTime: string;
   rawEndTime: string;
   shiftDate: string;
+  /** Flexible-time flag — when true the manager picked "Anytime
+   *  today" instead of a specific start/end; UI shows "Anytime
+   *  today" and the countdown pill is suppressed. */
+  isFlexibleTime?: boolean;
   /** Site fields — see ShiftWithMeta in lib/shifts-store.ts. */
   siteId?: string | null;
   siteName?: string | null;
@@ -660,12 +664,21 @@ export default function ShiftsListPage() {
               state={s.state}
               expanded={expandedId === s.realId}
               navigating={navigatingTo === s.realId}
-              timing={formatShiftCountdown(
-                s.shiftDate,
-                s.rawStartTime,
-                s.rawEndTime,
-                s.state
-              )}
+              // Flexible-time shifts have no specific start to count
+              // down to, so skip the timing pill entirely. Without
+              // this a flexible shift would show "5h late" because
+              // the 06:00 sentinel start would always have passed
+              // by the time the rep opened the app.
+              timing={
+                s.isFlexibleTime
+                  ? null
+                  : formatShiftCountdown(
+                      s.shiftDate,
+                      s.rawStartTime,
+                      s.rawEndTime,
+                      s.state
+                    )
+              }
               // Only the row matching the planner's "next stop"
               // gets the leave-by pill. Everyone else passes null.
               leaveBy={
@@ -879,6 +892,9 @@ function ShiftRow({
     attentionReason?: string | null;
     attentionResolvedAt?: string | null;
     attentionResolution?: string | null;
+    /** Flexible-time flag — display "Anytime today" in place of the
+     *  start-end range and skip countdown comparisons. */
+    isFlexibleTime?: boolean;
   };
   /** The shift's lifecycle state (scheduled | in-progress | complete | late). Only meaningful for "Mine". */
   state?: string;
@@ -1052,7 +1068,9 @@ function ShiftRow({
                   <>
                     <Glyph name="clock" size={13} color={MC.mute} strokeWidth={2} />
                     <span>
-                      {shift.start}–{shift.end}
+                      {shift.isFlexibleTime
+                        ? "Anytime today"
+                        : `${shift.start}–${shift.end}`}
                     </span>
                     <span
                       style={{
@@ -1099,7 +1117,9 @@ function ShiftRow({
               <>
                 <Glyph name="clock" size={13} color={MC.mute} strokeWidth={2} />
                 <span style={{ textDecoration: isComplete ? "line-through" : "none" }}>
-                  {shift.start}–{shift.end}
+                  {shift.isFlexibleTime
+                    ? "Anytime today"
+                    : `${shift.start}–${shift.end}`}
                 </span>
                 {stateBadge && (
                   <span

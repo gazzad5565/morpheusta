@@ -137,6 +137,13 @@ export interface NewShift {
   tasks_total?: number;
   /** Optional. If null/undefined, the shift is claimable by any rep. */
   rep_id?: string | null;
+  /** Marks the shift as flexible-time ("anytime today") rather than
+   *  a specific start / end. The mobile app surfaces this with copy
+   *  like "Anytime today" instead of the time range, and skips
+   *  late / early exception comparisons. The DB row still carries
+   *  start_time / end_time (set to the org workday bounds at create
+   *  time) so existing reports / timesheet code still works. */
+  is_flexible_time?: boolean;
   /** Optional claim-radius geofence in metres.
    *
    * Only meaningful for unassigned shifts (rep_id == null). When set,
@@ -223,6 +230,7 @@ export async function createShift(
       // intended radius — but ignored by the mobile filter once
       // rep_id is non-null. See the migration comment for details.
       claim_radius_m: s.claim_radius_m ?? null,
+      is_flexible_time: s.is_flexible_time ?? false,
     })
     .select("id, customers(name)")
     .single();

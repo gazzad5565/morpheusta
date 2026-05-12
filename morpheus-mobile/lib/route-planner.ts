@@ -369,6 +369,10 @@ export async function computeNextLeaveBy(): Promise<NextLeaveByInfo | null> {
   const firstStop = result.stopsInOrder[0];
   if (!firstLeg || !firstStop) return null;
   if (!firstStop.rawStartTime || !firstStop.shiftDate) return null;
+  // Flexible-time shifts have no specific scheduled start to compute
+  // "leave by" against (the 06:00 sentinel would produce a meaningless
+  // 5:40 AM leave time). Skip them.
+  if (firstStop.isFlexibleTime) return null;
 
   const [Y, M, D] = firstStop.shiftDate.split("-").map((n) => parseInt(n, 10));
   const [h, m] = firstStop.rawStartTime.split(":").map((n) => parseInt(n, 10));

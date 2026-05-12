@@ -48,6 +48,11 @@ interface ShiftRow {
    *  shifts they can't realistically attend. See
    *  2026_05_12_shifts_claim_radius.sql. */
   claim_radius_m: number | null;
+  /** Flexible-time flag — when true the shift has no specific start /
+   *  end, just a workday window. UI displays "Anytime today" instead
+   *  of the time range and late / early exceptions are skipped.
+   *  See 2026_05_12_shifts_flexible_time.sql. */
+  is_flexible_time?: boolean;
   customers: {
     id: string;
     name: string;
@@ -148,6 +153,11 @@ export type ShiftWithMeta = Shift &
     shiftDate: string;
     /** Freeform rep-supplied note tied to this shift. */
     repNotes: string | null;
+    /** Flexible-time flag — true when the manager picked "Anytime
+     *  today" instead of a specific start/end. UI displays
+     *  "Anytime today" in place of the time range and countdown /
+     *  late-by logic skips the comparison entirely. */
+    isFlexibleTime: boolean;
   };
 
 function rowToShift(row: ShiftRow): ShiftWithMeta {
@@ -172,6 +182,7 @@ function rowToShift(row: ShiftRow): ShiftWithMeta {
     rawStartTime: row.start_time || "",
     rawEndTime: row.end_time || "",
     shiftDate: row.shift_date || "",
+    isFlexibleTime: row.is_flexible_time === true,
     siteId: s?.id ?? row.site_id ?? null,
     siteName: s?.name ?? null,
     siteAddress: s?.address ?? null,

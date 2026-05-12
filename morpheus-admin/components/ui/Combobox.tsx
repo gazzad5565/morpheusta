@@ -100,6 +100,7 @@ export function Combobox(props: ComboboxProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
 
   const isMulti = props.multi === true;
@@ -185,6 +186,47 @@ export function Combobox(props: ComboboxProps) {
       setQuery("");
       setActiveIndex(0);
     }
+  }, [open]);
+
+  // When the menu opens, jump straight to the currently-selected
+  // value's row instead of starting at the top of the list.
+  // Without this, opening a TimeCombobox at "1:00 PM" rendered the
+  // panel scrolled to 6:00 AM and the manager had to scroll a long
+  // way to find their current value. We also pre-set activeIndex
+  // so keyboard arrows continue from the right row.
+  //
+  // Runs after the panel mounts via a microtask (queueMicrotask)
+  // because the portal renders the list on the same tick and
+  // scrollIntoView before it's in the DOM is a no-op. Block:
+  // "center" keeps the row visually mid-list so the rep can see
+  // surrounding options at a glance.
+  useEffect(() => {
+    if (!open) return;
+    // Find the first selected option in the filtered list. For
+    // single-select that's the value; for multi-select we land on
+    // the first picked option, which still beats the top.
+    let selectedIdx = -1;
+    if (isMulti) {
+      const set = new Set((props as MultiProps).value);
+      selectedIdx = filtered.findIndex((o) => set.has(o.value));
+    } else {
+      const v = (props as SingleProps).value;
+      if (v != null) selectedIdx = filtered.findIndex((o) => o.value === v);
+    }
+    if (selectedIdx < 0) return;
+    setActiveIndex(selectedIdx);
+    queueMicrotask(() => {
+      const list = listRef.current;
+      if (!list) return;
+      // Each ComboOption is a direct child of the list container.
+      const row = list.children[selectedIdx] as HTMLElement | undefined;
+      if (row?.scrollIntoView) {
+        row.scrollIntoView({ block: "center" });
+      }
+    });
+    // We only want this firing on the open → true transition, not
+    // every render while open. Hence the [open] dependency only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const selectedSet = useMemo(() => {
@@ -443,7 +485,7 @@ export function Combobox(props: ComboboxProps) {
               </div>
             )}
 
-            <div style={{ overflow: "auto", flex: 1 }}>
+            <div ref={listRef} style={{ overflow: "auto", flex: 1 }}>
               {filtered.length === 0 ? (
                 <div
                   style={{

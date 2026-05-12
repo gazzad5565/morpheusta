@@ -134,6 +134,19 @@ function NewShiftPage() {
   // row even when an assigned rep is chosen so a later "release"
   // preserves the manager's intent — see migration notes.
   const [claimRadiusM, setClaimRadiusM] = useState<number | null>(null);
+
+  // Time mode — "specific" is the historical default (start + end
+  // pickers shown), "anytime" hides the pickers and writes the
+  // org's workday window (06:00–20:00) into start_time / end_time
+  // with the is_flexible_time flag set. The mobile app surfaces
+  // flexible shifts as "Anytime today" and skips late / early
+  // exception comparisons.
+  const [timeMode, setTimeMode] = useState<"specific" | "anytime">("specific");
+  // Workday bounds used when timeMode === "anytime". Hardcoded for
+  // now; once org-level settings carry a workday window, read from
+  // there instead.
+  const ANYTIME_START = "06:00";
+  const ANYTIME_END = "20:00";
   const [shiftDate, setShiftDate] = useState<string>(fromDate || todayISO());
   // Default start = next 30-min slot from now. Hardcoded "09:00" was
   // unhelpful when a manager taps + to schedule a shift starting in
@@ -549,8 +562,13 @@ function NewShiftPage() {
             customer_id: cid,
             site_id: siteChoice[cid] ?? null,
             shift_date: date,
-            start_time: startTime,
-            end_time: endTime,
+            // When timeMode === "anytime" we write the workday
+            // bounds into start/end so the row still has a window
+            // for the calendar + timesheet to render. The
+            // is_flexible_time flag below tells the mobile app to
+            // display "Anytime today" instead of the bare range.
+            start_time: timeMode === "anytime" ? ANYTIME_START : startTime,
+            end_time: timeMode === "anytime" ? ANYTIME_END : endTime,
             // Distance label is left blank — the rep app derives "X km
             // away" from the site's saved coordinates and the rep's
             // live location at check-in time.
@@ -564,6 +582,7 @@ function NewShiftPage() {
             // original "scope" intent without extra UI on the
             // release flow.
             claim_radius_m: claimRadiusM,
+            is_flexible_time: timeMode === "anytime",
           });
           done += 1;
           setProgress({ done, total: totalShifts });
@@ -775,7 +794,60 @@ function NewShiftPage() {
             </Step>
           ) : (
           <Step number={2} title="When?" sub="Date and time. Switch to Weekly to repeat across a date range." last>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+            {/* Time-mode toggle. "Specific" is the historical
+                default (Start / End pickers). "Anytime today" hides
+                the pickers and writes the workday bounds into the
+                shift; the mobile app surfaces it as "Anytime
+                today" and skips late / early exception logic. */}
+            <Field
+              label="Time"
+              hint={
+                timeMode === "anytime"
+                  ? "Rep can show up any time during the workday."
+                  : "Pick the exact start and end."
+              }
+            >
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {(
+                  [
+                    { v: "specific", label: "Specific time" },
+                    { v: "anytime", label: "Anytime today" },
+                  ] as const
+                ).map((opt) => {
+                  const on = timeMode === opt.v;
+                  return (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      onClick={() => setTimeMode(opt.v)}
+                      style={{
+                        padding: "7px 14px",
+                        borderRadius: 99,
+                        background: on ? AC.ink : "#fff",
+                        color: on ? "#fff" : AC.ink2,
+                        border: `1px solid ${on ? AC.ink : AC.line}`,
+                        fontFamily: AC.font,
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        letterSpacing: -0.1,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  timeMode === "specific" ? "1fr 1fr 1fr" : "1fr",
+                gap: 14,
+              }}
+            >
               <Field label="Date" required>
                 <input
                   type="date"
@@ -784,12 +856,16 @@ function NewShiftPage() {
                   style={inputStyle}
                 />
               </Field>
-              <Field label="Start" required>
-                <TimeCombobox value={startTime} onChange={onStartChange} />
-              </Field>
-              <Field label="End" required>
-                <TimeCombobox value={endTime} onChange={setEndTime} />
-              </Field>
+              {timeMode === "specific" && (
+                <>
+                  <Field label="Start" required>
+                    <TimeCombobox value={startTime} onChange={onStartChange} />
+                  </Field>
+                  <Field label="End" required>
+                    <TimeCombobox value={endTime} onChange={setEndTime} />
+                  </Field>
+                </>
+              )}
             </div>
 
             <Field label="Repeat">
