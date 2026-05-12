@@ -30,6 +30,8 @@ import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { Combobox } from "@/components/ui/Combobox";
 import { SegTabs } from "@/components/ui/SegTabs";
+import { TimeCombobox } from "@/components/ui/TimeCombobox";
+import { inputStyle } from "@/components/ui/Filters";
 import { LoadingBar } from "@/components/ui/LoadingBar";
 import { AC } from "@/lib/tokens";
 import {
@@ -2640,6 +2642,51 @@ function ShiftQuickPopover({
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // Inline quick-edit. Only available for scheduled shifts (the DB
+  // enforces the same rule via updateShift's state guard). Lets the
+  // manager change the most-fiddled fields — start, end, date — right
+  // here instead of bouncing to the full edit page. Customer / rep
+  // changes still require the full /shifts/[id]/edit page.
+  const canQuickEdit = shift.state === "scheduled";
+  const [editMode, setEditMode] = useState(false);
+  // Trim Postgres' HH:MM:SS to the HH:MM that TimeCombobox expects.
+  const trimTime = (t: string) => /^\d{2}:\d{2}/.exec(t || "")?.[0] || "";
+  const [editStart, setEditStart] = useState(trimTime(shift.start_time));
+  const [editEnd, setEditEnd] = useState(trimTime(shift.end_time));
+  const [editDate, setEditDate] = useState(shift.shift_date);
+  const [saving, setSaving] = useState(false);
+  const dirty =
+    editStart !== trimTime(shift.start_time) ||
+    editEnd !== trimTime(shift.end_time) ||
+    editDate !== shift.shift_date;
+  const onSaveInline = async () => {
+    if (!dirty || saving) return;
+    if (!editStart || !editEnd) {
+      setError("Start and end times are required.");
+      return;
+    }
+    if (editStart >= editEnd) {
+      setError("End time must be after start time.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const r = await updateShift(shift.id, {
+      start_time: editStart,
+      end_time: editEnd,
+      shift_date: editDate,
+    });
+    setSaving(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't save.");
+      return;
+    }
+    // Calendar page has a realtime subscribeShifts() that refetches
+    // automatically — no manual refresh needed. Close the popover so
+    // the manager sees the updated row in the calendar grid.
+    onClose();
+  };
+
   const c = shift.customers;
   const color = c?.color || "#888";
   const customerName = c?.name || "Unknown customer";
@@ -2790,12 +2837,77 @@ function ShiftQuickPopover({
           {shift.site && shift.site.name && shift.site.name !== "Head office" && (
             <PopRow label="Site" value={shift.site.name} />
           )}
-          <PopRow
-            label="When"
-            value={`${dateLabel} · ${formatTime(shift.start_time, {
-              compact: true,
-            })}–${formatTime(shift.end_time, { compact: true })}`}
-          />
+          {editMode ? (
+            // Inline edit: Date + Start + End. Customer / rep changes
+            // require the full /shifts/[id]/edit page (the picker is
+            // chunky and rarely the change the manager wants here).
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: AC.mute,
+                    fontWeight: 700,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                    width: 56,
+                    flexShrink: 0,
+                  }}
+                >
+                  Date
+                </div>
+                <input
+                  type="date"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: AC.mute,
+                    fontWeight: 700,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                    width: 56,
+                    flexShrink: 0,
+                  }}
+                >
+                  Start
+                </div>
+                <div style={{ flex: 1 }}>
+                  <TimeCombobox value={editStart} onChange={setEditStart} />
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: AC.mute,
+                    fontWeight: 700,
+                    letterSpacing: 0.3,
+                    textTransform: "uppercase",
+                    width: 56,
+                    flexShrink: 0,
+                  }}
+                >
+                  End
+                </div>
+                <div style={{ flex: 1 }}>
+                  <TimeCombobox value={editEnd} onChange={setEditEnd} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <PopRow
+              label="When"
+              value={`${dateLabel} · ${formatTime(shift.start_time, {
+                compact: true,
+              })}–${formatTime(shift.end_time, { compact: true })}`}
+            />
+          )}
           <PopRow
             label="Tasks"
             value={`${shift.tasks_done} / ${shift.tasks_total}`}
@@ -2890,9 +3002,51 @@ function ShiftQuickPopover({
             )}
           </div>
 
-          {/* Right side — affordances for the manager's next move */}
-          {!confirmDelete && (
+          {/* Right side — affordances for the manager's next move.
+              When in inline-edit mode the row collapses to
+              Cancel / Save so the manager focuses on committing the
+              tweak. Otherwise we show the usual:
+                Edit here · Add another here · Full edit
+              "Edit here" only appears for scheduled shifts (the DB
+              guards updateShift against any later state anyway). */}
+          {!confirmDelete && editMode && (
             <div style={{ display: "flex", gap: 8 }}>
+              <Btn
+                size="sm"
+                onClick={() => {
+                  // Cancel: revert local edits + leave edit mode.
+                  setEditStart(trimTime(shift.start_time));
+                  setEditEnd(trimTime(shift.end_time));
+                  setEditDate(shift.shift_date);
+                  setEditMode(false);
+                  setError(null);
+                }}
+                disabled={saving}
+              >
+                Cancel
+              </Btn>
+              <Btn
+                kind="primary"
+                size="sm"
+                icon="check"
+                onClick={onSaveInline}
+                disabled={!dirty || saving}
+              >
+                {saving ? "Saving…" : "Save"}
+              </Btn>
+            </div>
+          )}
+          {!confirmDelete && !editMode && (
+            <div style={{ display: "flex", gap: 8 }}>
+              {canQuickEdit && (
+                <Btn
+                  size="sm"
+                  icon="edit"
+                  onClick={() => setEditMode(true)}
+                >
+                  Edit here
+                </Btn>
+              )}
               {/* Add another shift in the same time slot — pre-fills
                   /schedule/new with date + start + end from THIS
                   shift. Manager picks the new customer/rep and goes.
@@ -2907,12 +3061,12 @@ function ShiftQuickPopover({
                   // shape; raw HH:MM:SS from Postgres would fail
                   // the regex and silently fall back to the default
                   // next-half-hour slot.
-                  const trimTime = (t: string) =>
+                  const trim = (t: string) =>
                     /^\d{2}:\d{2}/.exec(t || "")?.[0] || "";
                   const qs = new URLSearchParams({
                     date: shift.shift_date,
-                    start: trimTime(shift.start_time),
-                    end: trimTime(shift.end_time),
+                    start: trim(shift.start_time),
+                    end: trim(shift.end_time),
                   });
                   onClose();
                   router.push(`/schedule/new?${qs.toString()}`);
@@ -2926,7 +3080,7 @@ function ShiftQuickPopover({
                 icon="chev-r"
                 onClick={() => router.push(shiftHref(shift))}
               >
-                {shift.state === "scheduled" ? "Edit" : "View"}
+                {canQuickEdit ? "Full edit" : "View"}
               </Btn>
             </div>
           )}
