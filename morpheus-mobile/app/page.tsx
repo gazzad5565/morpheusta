@@ -532,44 +532,53 @@ export default function DashboardPage() {
       />
 
       {/* Slim "Plan my day" link directly under the Up Next card —
-          only when the rep has 2+ stops, otherwise the one shift is
-          already covered by Up Next's own Directions / Resume CTAs.
-          Used to be a chunky full-width card up between the map and
-          Up Next; that disrupted the visual flow the user liked, so
-          we collapsed it into a small right-aligned pill that sits
-          near Up Next without competing with it. */}
-      {shiftsLoaded && shifts.length >= 2 && (
-        <div
-          style={{
-            padding: "8px 16px 0",
-            display: "flex",
-            justifyContent: "flex-end",
-          }}
-        >
-          <Link
-            href="/route"
+          only when the rep has 2+ REMAINING stops (anything not
+          complete). Earlier this counted shifts.length, which
+          included completed stops — so after the rep finished one,
+          the pill kept saying "5 stops" even though the actual route
+          had 4 left. Match the count to what planMyDay() will
+          actually plan (it filters out complete + cancelled
+          server-side). Hide entirely once you're down to one or
+          zero remaining since Up Next's own Resume/Check-in already
+          covers a single-stop case. */}
+      {(() => {
+        const remainingStops = shifts.filter(
+          (s) => s.state !== "complete" && s.state !== "cancelled"
+        ).length;
+        if (!shiftsLoaded || remainingStops < 2) return null;
+        return (
+          <div
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "6px 11px 6px 9px",
-              borderRadius: 999,
-              background: MC.okTint,
-              border: `1px solid ${MC.ok}33`,
-              color: "#0d6a45",
-              textDecoration: "none",
-              fontFamily: MC.font,
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: -0.1,
+              padding: "8px 16px 0",
+              display: "flex",
+              justifyContent: "flex-end",
             }}
           >
-            <Glyph name="target" size={12} color={MC.ok} strokeWidth={2.4} />
-            Plan my day · {shifts.length} stops
-            <Glyph name="chev-r" size={12} color="#0d6a45" />
-          </Link>
-        </div>
-      )}
+            <Link
+              href="/route"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 11px 6px 9px",
+                borderRadius: 999,
+                background: MC.okTint,
+                border: `1px solid ${MC.ok}33`,
+                color: "#0d6a45",
+                textDecoration: "none",
+                fontFamily: MC.font,
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: -0.1,
+              }}
+            >
+              <Glyph name="target" size={12} color={MC.ok} strokeWidth={2.4} />
+              Plan my day · {remainingStops} stops
+              <Glyph name="chev-r" size={12} color="#0d6a45" />
+            </Link>
+          </div>
+        );
+      })()}
 
       {/* Break or travel — combined affordance. The chooser sheet lets
           the rep pick break length OR start a travel timer without
@@ -953,14 +962,18 @@ function UpNextCard({
             ) : (
               <StatusChip tone="brand" icon="sparkle">Up next</StatusChip>
             )}
-            {/* "Can't make this shift?" — relocated to a tiny
-                icon-only affordance top-right of the card. The full
-                underlined "Can't make this shift?" link at the
-                bottom was too in-your-face right under the primary
-                Check-in CTA. Tap opens the same sheet; a long-press /
-                hover reveals the title text "Can't make this shift?".
-                Hidden once the shift is in-progress (no point
-                offering the action then). */}
+            {/* "Can't make this shift?" — icon-only affordance
+                top-right of the card. Previously transparent + neutral
+                line border, which was too easy to miss — managers
+                reported "I didn't realise that was clickable." Bumped
+                to a warnTint background + warnTint border so it reads
+                as a real action without screaming. Still icon-only
+                (no label) to keep it from competing with the primary
+                Check-in CTA. Tap opens the unable-to-attend sheet;
+                long-press / hover reveals the full title.
+                Hidden once the shift is in-progress / on-break (no
+                point offering the action then — the rep's already on
+                it). */}
             {!isResume && onUnableToAttend && (
               <button
                 type="button"
@@ -968,23 +981,24 @@ function UpNextCard({
                 aria-label="Can't make this shift?"
                 title="Can't make this shift?"
                 style={{
-                  width: 28,
-                  height: 28,
+                  width: 30,
+                  height: 30,
                   borderRadius: 99,
-                  background: "transparent",
-                  border: `1px solid ${MC.line}`,
+                  background: MC.warnTint,
+                  border: `1px solid ${MC.warn}55`,
                   cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   padding: 0,
+                  boxShadow: `0 1px 2px ${MC.warn}22`,
                 }}
               >
                 <Glyph
                   name="warn"
-                  size={13}
+                  size={14}
                   color={MC.warn}
-                  strokeWidth={2.2}
+                  strokeWidth={2.4}
                 />
               </button>
             )}

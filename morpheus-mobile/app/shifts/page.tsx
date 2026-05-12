@@ -422,13 +422,14 @@ export default function ShiftsListPage() {
           )}
         </div>
         {/* Action pills (right-aligned in the header row).
-            "Plan my day" only surfaces when the rep has 2+ assigned
-            shifts today — anything less and Up Next on the dashboard
-            already handles the one-tap navigation case. Same okTint
-            colourway as the home-page pill so the affordance reads as
-            the same feature from either entry point. */}
+            "Plan my day" only surfaces when the rep has 2+ REMAINING
+            stops (anything not complete) — single-stop or all-done
+            days are covered by the dashboard's Up Next CTAs.
+            Same okTint colourway as the home-page pill so the
+            affordance reads as the same feature from either entry
+            point. */}
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-          {mine.length >= 2 && (
+          {mine.filter((s) => s.state !== "complete" && s.state !== "cancelled").length >= 2 && (
             <Link
               href="/route"
               aria-label="Plan my day"
