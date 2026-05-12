@@ -751,8 +751,15 @@ export default function ShiftsListPage() {
                 }}
               >
                 <Glyph
+                  // Identical pair to the home segmented pill so the
+                  // affordance reads as the same feature from
+                  // either entry point: check-circle = "day's
+                  // optimized", target = "needs planning". Size +
+                  // stroke matched to the home version too (15px /
+                  // 2.4 stroke) — previously this was 13px which
+                  // Gary felt looked subtly different.
                   name={planned ? "check-circle" : "target"}
-                  size={13}
+                  size={15}
                   color={planned ? MC.ok : "#fff"}
                   strokeWidth={2.4}
                 />
