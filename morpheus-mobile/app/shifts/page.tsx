@@ -25,6 +25,14 @@ import {
 import { AppHeader, AppFooter, CustomerTile, SectionLabel } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
 import { CheckingInOverlay } from "@/components/CheckingInOverlay";
+import dynamic from "next/dynamic";
+// MapLibre needs `window` — defer to client-only and only when the
+// row is actually expanded (the dynamic import keeps the bundle
+// trim for reps who never expand a shift).
+const MiniRouteMap = dynamic(
+  () => import("@/components/MiniRouteMap").then((m) => m.MiniRouteMap),
+  { ssr: false }
+);
 import {
   UnableToAttendSheet,
   unableReasonLabel,
@@ -926,6 +934,11 @@ function ShiftRow({
     siteId?: string | null;
     siteName?: string | null;
     siteAddress?: string | null;
+    /** Coordinates — needed by the inline MiniRouteMap in the
+     *  expanded section. Optional because pre-2026-05-08 rows may
+     *  not have a site joined yet. */
+    siteLat?: number | null;
+    siteLng?: number | null;
     siteContactPhone?: string | null;
     siteContactName?: string | null;
     siteNotes?: string | null;
@@ -1643,6 +1656,41 @@ function ShiftRow({
               )}
             </div>
           )}
+
+          {/* Inline mini route map — mirrors the home Up Next card's
+              "tap Directions to see the route" affordance, but
+              embedded directly in the expanded row so the rep
+              doesn't have to leave /shifts. Shows the actual
+              road-following polyline from the rep's GPS to this
+              site, with a small drive-time caption overlaid.
+
+              Only mounted when:
+                - the row is currently expanded (component is
+                  dynamic-imported so the bundle stays small for
+                  reps who never open a row)
+                - the shift has coords on file (no point showing a
+                  map of nothing)
+                - the shift is in a "going there" state (scheduled,
+                  late, travelling). For in-progress / on-break the
+                  rep is already at the site; for complete it's
+                  done. Hiding in those cases keeps the row tight.
+
+              At most one row is expanded at a time (expandedId is
+              single-valued) so only one MapLibre instance is live
+              at any moment. */}
+          {(state === "scheduled" || state === "late" || state === "travelling") &&
+            typeof shift.siteLat === "number" &&
+            typeof shift.siteLng === "number" && (
+              <div style={{ marginBottom: 12 }}>
+                <MiniRouteMap
+                  destLat={shift.siteLat}
+                  destLng={shift.siteLng}
+                  destLabel={shift.name}
+                  destInitials={shift.initials}
+                  destColor={shift.color}
+                />
+              </div>
+            )}
 
           {/* When the rep has raised an unable-to-attend flag we skip
               the regular action row entirely — the amber banner +
