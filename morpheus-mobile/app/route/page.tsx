@@ -211,6 +211,56 @@ export default function RoutePage() {
     };
   }, [optimize, useTraffic]);
 
+  // Background fetch of the OTHER mode so we can compare totals and
+  // show concrete proof that "Optimize stop order" is doing something.
+  // Without this comparison the rep flicks the toggle, sees the same
+  // stops in (often) the same order, and concludes the feature is
+  // broken. The 5-min planRoute cache absorbs repeat calls cheaply.
+  //
+  // We store BOTH totals; the leg list still renders the primary
+  // `result` (whatever the rep's toggle currently selects), but the
+  // savings banner at the top reads off this comparison state.
+  const [comparison, setComparison] = useState<{
+    chronologicalSec: number;
+    chronologicalMeters: number;
+    optimizedSec: number;
+    optimizedMeters: number;
+    chronologicalOrder: string[];
+    optimizedOrder: string[];
+  } | null>(null);
+  useEffect(() => {
+    if (!result || result.route.legs.length < 2) {
+      setComparison(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [chrono, opt] = await Promise.all([
+          planMyDay({ optimize: false, traffic: useTraffic }),
+          planMyDay({ optimize: true, traffic: useTraffic }),
+        ]);
+        if (cancelled) return;
+        setComparison({
+          chronologicalSec: chrono.route.totalSeconds,
+          chronologicalMeters: chrono.route.totalMeters,
+          optimizedSec: opt.route.totalSeconds,
+          optimizedMeters: opt.route.totalMeters,
+          chronologicalOrder: chrono.route.order,
+          optimizedOrder: opt.route.order,
+        });
+      } catch {
+        if (!cancelled) setComparison(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Recompute whenever the rep's data changes — but NOT on the
+    // optimize toggle flip (the comparison itself is order-agnostic;
+    // flipping the toggle just changes which we display as primary).
+  }, [useTraffic, result?.stopsInOrder.map((s) => s.realId).join("|")]);
+
   const route = result?.route;
   const stopsInOrder = result?.stopsInOrder ?? [];
   const provider = route?.provider ?? "mock";
@@ -512,6 +562,117 @@ export default function RoutePage() {
 
       {/* Main scroll area — leg list */}
       <div style={{ flex: 1, padding: "14px 14px 24px" }}>
+        {/* Optimize comparison banner — proof that the toggle is doing
+            something concrete. Three states:
+              - savings > 1 min: green banner "Optimized order saves
+                N min · X km less"
+              - savings ≤ 1 min: neutral "Already in the best order"
+              - no comparison yet / too few stops: hide entirely
+            Sits ABOVE the leg list so the rep sees the value before
+            scanning the cards. Hidden during the initial load to
+            avoid flashing. */}
+        {legs.length >= 2 && comparison && !loading && (
+          (() => {
+            const savedSec =
+              comparison.chronologicalSec - comparison.optimizedSec;
+            const savedMin = Math.round(savedSec / 60);
+            const savedKm =
+              (comparison.chronologicalMeters - comparison.optimizedMeters) /
+              1000;
+            // Order differs if the two stop-id arrays don't match
+            // element-for-element. A different order with similar
+            // total time is still WORTH showing — it might be more
+            // logical for the rep.
+            const orderDiffers =
+              comparison.chronologicalOrder.join("|") !==
+              comparison.optimizedOrder.join("|");
+            const hasMeaningfulSaving = savedMin >= 1 || orderDiffers;
+            if (!hasMeaningfulSaving) {
+              return (
+                <div
+                  style={{
+                    marginBottom: 12,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    background: MC.bg,
+                    border: `1px solid ${MC.line}`,
+                    fontFamily: MC.font,
+                    fontSize: 12.5,
+                    color: MC.mute,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <Glyph
+                    name="check"
+                    size={13}
+                    color={MC.mute}
+                    strokeWidth={2.2}
+                  />
+                  Your shifts are already in the best order — optimizing
+                  wouldn't save you any time today.
+                </div>
+              );
+            }
+            // Optimize ON + meaningful savings → loud green banner.
+            // Optimize OFF + savings available → softer "you could
+            // save N min" prompt with the toggle as the call-to-action.
+            const optimizeOn = optimize;
+            const tone = optimizeOn
+              ? { bg: MC.okTint, border: MC.ok, fg: "#0d6a45" }
+              : { bg: MC.brandTint, border: MC.brand, fg: MC.brandDeep };
+            return (
+              <div
+                style={{
+                  marginBottom: 12,
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  background: tone.bg,
+                  border: `1px solid ${tone.border}33`,
+                  borderLeft: `3px solid ${tone.border}`,
+                  fontFamily: MC.font,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <Glyph
+                  name="sparkle"
+                  size={14}
+                  color={tone.fg}
+                  strokeWidth={2.4}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: tone.fg,
+                      letterSpacing: -0.1,
+                    }}
+                  >
+                    {optimizeOn
+                      ? `Optimized order saves ${savedMin > 0 ? `${savedMin} min` : "drive time"}${savedKm > 0.5 ? ` · ${savedKm.toFixed(1)} km less` : ""}`
+                      : `Could save ${savedMin > 0 ? `${savedMin} min` : "drive time"} by reordering`}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      color: MC.mute,
+                      marginTop: 2,
+                    }}
+                  >
+                    {optimizeOn
+                      ? "Compared with visiting your stops in scheduled-time order."
+                      : "Flip 'Optimize stop order' above to use the shorter route."}
+                  </div>
+                </div>
+              </div>
+            );
+          })()
+        )}
+
         {loading && !result ? (
           <LoadingSkeleton />
         ) : error ? (
@@ -901,52 +1062,101 @@ function LegList({
               </div>
             </div>
 
-            {/* Schedule row — three chips that tell the whole story
-                without contradicting each other:
-                  1. When you'll arrive if you leave now
-                  2. When the shift is scheduled to start
-                  3. A single on-time / tight / late status, derived
-                     from the comparison of the first two.
-                Replaces an earlier "Arrive X · Leave by Y" pair that
-                managers were reading as a contradiction (the math was
-                right; the framing was wrong). */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              <StatusChip tone="brand" icon="clock">
-                Arrive ~ {formatClock(eta)}
-              </StatusChip>
-              {scheduledStart && (
-                <StatusChip tone="neutral" icon="check">
-                  Shift starts {formatClock(scheduledStart)}
-                </StatusChip>
-              )}
-              {status && (
-                <StatusChip
-                  tone={
-                    status.kind === "late"
-                      ? "danger"
-                      : status.kind === "tight"
-                      ? "warn"
-                      : "ok"
-                  }
-                  icon={status.kind === "late" ? "warn" : "check-circle"}
+            {/* Schedule block.
+                User feedback: three competing chips (Arrive / Shift
+                starts / Status) read as a pile of numbers without an
+                obvious story. "On time" in green was particularly
+                unclear — green relative to WHAT?
+                Replaced with a single coloured status banner that
+                reads like a sentence ("17 min early — arrive 12:13
+                for the 12:30 shift"). One block, one colour, one
+                idea. */}
+            {(() => {
+              if (!status || !scheduledStart) {
+                // No scheduled time on file → just show the ETA so
+                // the rep at least knows when they'll arrive.
+                return (
+                  <div
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      background: MC.bg,
+                      border: `1px solid ${MC.line}`,
+                      fontFamily: MC.font,
+                      fontSize: 13,
+                      color: MC.ink,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Arrive {formatClock(eta)}
+                  </div>
+                );
+              }
+              // Tones and the headline copy per status. Headline is
+              // the most important fact ("17 min early" / "Late by
+              // 12 min") because that's what the rep needs to act
+              // on. The times sit beneath as a muted detail line.
+              const headline =
+                status.kind === "late"
+                  ? `Late by ${status.minsLate} min`
+                  : status.kind === "tight"
+                  ? `Leave by ${formatClock(status.leaveBy)}`
+                  : status.kind === "ok"
+                  ? "On time"
+                  : `${status.minsEarly} min early`;
+              const tone =
+                status.kind === "late"
+                  ? { bg: MC.dangerTint, fg: "#9c1a3c", border: MC.danger }
+                  : status.kind === "tight"
+                  ? { bg: MC.warnTint, fg: "#7A560A", border: MC.warn }
+                  : { bg: MC.okTint, fg: "#0d6a45", border: MC.ok };
+              return (
+                <div
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    background: tone.bg,
+                    border: `1px solid ${tone.border}33`,
+                    borderLeft: `3px solid ${tone.border}`,
+                    fontFamily: MC.font,
+                  }}
                 >
-                  {status.kind === "late"
-                    ? `Late by ${status.minsLate} min`
-                    : status.kind === "tight"
-                    ? `Leave by ${formatClock(status.leaveBy)}`
-                    : status.kind === "ok"
-                    ? "On time"
-                    : `On time · ${status.minsEarly} min early`}
-                </StatusChip>
-              )}
-            </div>
+                  <div
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 700,
+                      color: tone.fg,
+                      letterSpacing: -0.1,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Glyph
+                      name={status.kind === "late" ? "warn" : "check-circle"}
+                      size={14}
+                      color={tone.fg}
+                      strokeWidth={2.4}
+                    />
+                    {headline}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 3,
+                      fontSize: 12,
+                      color: MC.mute,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {status.kind === "late"
+                      ? `You'll arrive ${formatClock(eta)}. Shift was due to start ${formatClock(scheduledStart)}.`
+                      : status.kind === "tight"
+                      ? `Leave by ${formatClock(status.leaveBy)} to arrive on time for the ${formatClock(scheduledStart)} shift.`
+                      : `Arrive ${formatClock(eta)} for the ${formatClock(scheduledStart)} shift.`}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Per-leg Open in Maps — openMapsLink() handles the
                 iOS-vs-Android split so the PWA stays reachable
