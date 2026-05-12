@@ -523,10 +523,15 @@ export default function DashboardPage() {
               planning to do for a single shift) and the pill
               collapses to just "View all". */}
           {(() => {
-            const remainingStops = shifts.filter(
-              (s) => s.state !== "complete" && s.state !== "cancelled"
-            ).length;
-            const showPlanSlot = shiftsLoaded && remainingStops >= 2;
+            // The plan-icon slot used to hide when remainingStops <
+            // 2. That logic stranded the rep on a day where one
+            // shift was already done — they had 1 remaining stop,
+            // no plan-slot icon, AND we'd removed Plan-my-day from
+            // the side menu. Net: zero entry points to /route.
+            // Now the slot renders as long as the rep has any
+            // shifts today; the icon flips to a green check once
+            // an order is saved.
+            const showPlanSlot = shiftsLoaded && shifts.length > 0;
             const planned = dayPlanned;
             return (
               <div

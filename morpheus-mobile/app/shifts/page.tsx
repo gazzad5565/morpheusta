@@ -695,23 +695,16 @@ export default function ShiftsListPage() {
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
           {(() => {
             // Visibility rule (May 12 — Gary):
-            //   - If the rep has a saved order → ALWAYS show the
-            //     pill (regardless of how many stops are still
-            //     remaining). Even with 1 stop left, the rep wants
-            //     to see "the day is already optimized + at what
-            //     time" — that confirmation answers "did I save
-            //     this?" every time they land on /shifts.
-            //   - If no saved order → show the CTA "Plan route"
-            //     only when there are 2+ remaining stops (single-
-            //     stop days don't need optimization).
-            //   - Hide entirely only when 0 remaining AND no save
-            //     on file (truly nothing to do).
-            const remainingStops = mine.filter(
-              (s) => s.state !== "complete" && s.state !== "cancelled"
-            ).length;
+            // The pill is the ONLY link to /route now that the
+            // Plan-my-day side-menu entry was removed. Hiding it
+            // based on stop count made the page unreachable —
+            // Gary hit exactly this with "1 of 2 done · 1 left"
+            // and lost the entry. Rule: render as long as the rep
+            // has ANY shifts today. The pill swaps copy based on
+            // saved-order state ("Optimized · 2:42 PM" vs "Plan
+            // route") but always provides the navigation link.
             const planned = headerDayPlanned;
-            if (!planned && remainingStops < 2) return null;
-            if (planned && remainingStops === 0) return null;
+            if (mine.length === 0) return null;
             const optimizedAt = planned && pageSavedAt
               ? new Date(pageSavedAt).toLocaleTimeString(undefined, {
                   hour: "numeric",
