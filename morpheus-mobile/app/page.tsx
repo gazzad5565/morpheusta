@@ -11,6 +11,7 @@ import { CheckingInOverlay, type CheckMode } from "@/components/CheckingInOverla
 import { useMenu } from "@/components/MenuShell";
 import { LoadingBar, Skeleton } from "@/components/Loading";
 import { Glyph, formatTime } from "@/components/Glyph";
+import { formatShiftCountdown } from "@/lib/format";
 import { getUser } from "@/lib/auth";
 import { logEvent } from "@/lib/events-store";
 import { drainEventQueue } from "@/lib/event-queue";
@@ -48,6 +49,15 @@ type DbShift = Shift & {
   repId: string | null;
   checkInAt: string | null;
   state: string;
+  /** Raw HH:MM[:SS] + ISO date strings — feeds formatShiftCountdown
+   *  on the Up Next card so the rep sees a live "in 50 min" /
+   *  "10 min late" / "ends 1h" pill alongside the time row. The
+   *  formatted `start` / `end` strings on the parent Shift type are
+   *  human display ("9:00 AM"); these raw values are what the
+   *  countdown helper needs for math. */
+  shiftDate?: string;
+  rawStartTime?: string;
+  rawEndTime?: string;
   /** Site fields — flat for ergonomic access on cards. Mirror the shape
    *  exposed by lib/shifts-store.ts ShiftWithMeta. */
   siteId?: string | null;
@@ -1091,9 +1101,66 @@ function UpNextCard({
                   fontSize: 13,
                   color: MC.mute,
                   marginTop: 2,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
                 }}
               >
-                {next.start} – {next.end} · {next.distance}
+                <span>
+                  {next.start} – {next.end} · {next.distance}
+                </span>
+                {/* Live countdown pill — "in 50 min" / "starting now"
+                    / "10 min late" / "ends 1h" / "ran 30 min over".
+                    Restored here after an earlier refactor stripped
+                    it from the home card; managers had grown used to
+                    glancing at this for at-a-glance urgency without
+                    opening the card.
+                    `now` is the home-card state that ticks once a
+                    minute (see the useEffect above), so the label
+                    updates every minute without each row owning a
+                    timer. Hidden when the shift has no scheduled
+                    times on record (formatShiftCountdown returns
+                    null). */}
+                {(() => {
+                  const timing = formatShiftCountdown(
+                    next.shiftDate || "",
+                    next.rawStartTime || "",
+                    next.rawEndTime || "",
+                    next.state,
+                    new Date(now)
+                  );
+                  if (!timing) return null;
+                  const tone =
+                    timing.tone === "late"
+                      ? { bg: MC.dangerTint, fg: "#9c1a3c" }
+                      : timing.tone === "now"
+                      ? { bg: MC.warnTint, fg: "#7A560A" }
+                      : timing.tone === "live"
+                      ? { bg: MC.okTint, fg: "#0d6a45" }
+                      : timing.tone === "soon"
+                      ? { bg: MC.brandTint, fg: MC.brandDeep }
+                      : { bg: "#EEF0F3", fg: MC.ink2 };
+                  return (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "2px 8px",
+                        borderRadius: 999,
+                        background: tone.bg,
+                        color: tone.fg,
+                        fontFamily: MC.font,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: 0.3,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {timing.label}
+                    </span>
+                  );
+                })()}
               </div>
               {/* Small address line so the rep can see the actual
                   street without having to open the card. Truncates
