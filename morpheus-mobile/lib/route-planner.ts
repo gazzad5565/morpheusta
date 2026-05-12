@@ -277,3 +277,58 @@ export function buildDayMapsUrl(
 export function buildLegMapsUrl(stop: PlannerStop): string {
   return `https://www.google.com/maps/dir/?api=1&destination=${stop.lat},${stop.lng}&travelmode=driving`;
 }
+
+/**
+ * Open a Google Maps deep-link with the right strategy for the
+ * platform, so the PWA stays alive and reachable when the rep
+ * comes back from the Maps app.
+ *
+ * Why this isn't just a plain `<a href target="_blank">`:
+ *
+ *   - **iOS PWAs** white-screen on return from Maps if the deep-link
+ *     opens in a new browser context (target="_blank" spawns a new
+ *     window the iOS process model can't restore). The reliable
+ *     pattern on iOS is to navigate the SAME window with
+ *     `window.location.href = url`; iOS recognises maps.google.com
+ *     as a universal link, intercepts the navigation BEFORE the
+ *     PWA actually leaves the page, and hands off to the Maps app.
+ *     When the rep switches back, the PWA is exactly where they
+ *     left it.
+ *
+ *   - **Android PWAs** behave the opposite way: `window.location.href`
+ *     on a maps.google.com URL doesn't always trigger the intent
+ *     picker — sometimes the PWA just navigates to google.com/maps
+ *     in its own window, which strands the rep on a web map view
+ *     with no way back to their shift screen. The reliable pattern
+ *     on Android is `window.open(url, "_blank")`, which spawns a
+ *     Chrome custom tab the OS happily hands off to Maps via the
+ *     intent system; the PWA stays alive in its own process and is
+ *     reachable via the app switcher.
+ *
+ *   - **Desktop browsers** behave like Android — `window.open(url,
+ *     "_blank")` is the conventional "open in a new tab" pattern.
+ *
+ * Falls back to a same-window navigation if window.open is blocked
+ * (some popup-blocker configurations) so the link never silently
+ * dies.
+ */
+export function openMapsLink(url: string): void {
+  if (typeof window === "undefined") return;
+  const ua = navigator.userAgent || "";
+  // iPad on iOS 13+ reports as Mac in some configs — sniff for
+  // Apple touch devices to catch both.
+  const isIOS =
+    /iPad|iPhone|iPod/.test(ua) ||
+    (ua.includes("Mac") && typeof document !== "undefined" && "ontouchend" in document);
+  if (isIOS) {
+    // Same-window nav. iOS catches the maps.google.com universal
+    // link before the PWA actually navigates, so the page stays put.
+    window.location.href = url;
+    return;
+  }
+  // Android / desktop — new window/tab. window.open returns null
+  // when blocked; fall back to same-window so the rep still gets
+  // somewhere.
+  const w = window.open(url, "_blank", "noopener,noreferrer");
+  if (!w) window.location.href = url;
+}

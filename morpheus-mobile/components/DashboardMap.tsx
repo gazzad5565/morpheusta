@@ -24,6 +24,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { MC } from "@/lib/tokens";
 import { listAllCustomers } from "@/lib/customers-store";
 import { getMyProfile } from "@/lib/profiles-store";
+import { openMapsLink } from "@/lib/route-planner";
 import type { Customer } from "@/lib/mock-data";
 
 const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
@@ -526,12 +527,19 @@ export function DashboardMap({
               </div>
               <a
                 href={preview.openUrl}
+                onClick={(e) => {
+                  e.preventDefault();
+                  openMapsLink(preview.openUrl);
+                }}
                 rel="noopener noreferrer"
-                // No target="_blank" — see comment in /route/page.tsx.
-                // tl;dr: iOS PWA white-screens on return from Maps if
-                // we open the deeplink in a new browser context;
-                // letting the OS handle the URL as a universal link
-                // keeps the PWA in its previous state.
+                // openMapsLink() picks the right open strategy per
+                // platform — same-window nav on iOS PWA so the
+                // universal link interceptor catches the URL before
+                // the PWA leaves the page (preventing the white-
+                // screen-on-return bug), window.open(_blank) on
+                // Android / desktop so the Maps app launches via
+                // the Android intent system and the PWA stays
+                // alive in its own process.
                 style={{
                   display: "inline-flex",
                   alignItems: "center",

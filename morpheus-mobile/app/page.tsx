@@ -30,6 +30,7 @@ import {
   unableReasonLabel,
 } from "@/components/UnableToAttendSheet";
 import { resolvedAttentionFeedback } from "@/lib/shifts-store";
+import { openMapsLink } from "@/lib/route-planner";
 
 // MapLibre needs `window`; defer to client-only.
 const DashboardMap = dynamic(
@@ -1265,7 +1266,7 @@ function UpNextCard({
                                 openUrl: url,
                               });
                             } else {
-                              window.open(url, "_blank", "noopener,noreferrer");
+                              openMapsLink(url);
                             }
                           }}
                           disabled={!enabled}
@@ -1309,7 +1310,7 @@ function UpNextCard({
                               setTravellingSince(Date.now());
                               const url = buildDirectionsUrl(next);
                               if (url) {
-                                window.open(url, "_blank", "noopener,noreferrer");
+                                openMapsLink(url);
                               }
                             }}
                             disabled={!enabled}

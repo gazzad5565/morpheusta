@@ -43,6 +43,7 @@ import {
   clearRouteCache,
   buildDayMapsUrl,
   buildLegMapsUrl,
+  openMapsLink,
   type PlanMyDayResult,
   type PlannerStop,
 } from "@/lib/route-planner";
@@ -522,19 +523,21 @@ export default function RoutePage() {
         )}
 
         {/* Open whole day in Maps.
-            target="_blank" was removed because on iOS PWAs it
-            spawned a new browser context that broke when iOS tried
-            to switch to the Maps app and back — the rep saw a
-            white screen after returning from Maps and had to force-
-            close the PWA. Without target="_blank", iOS treats the
-            maps.google.com URL as a universal link, hands it off
-            cleanly to the Maps app, and the PWA stays in its
-            previous state when the rep switches back. Same fix
-            applied to the per-leg Open-in-Maps link below and the
-            DashboardMap "Open in Maps" overlay. */}
+            Uses openMapsLink() which picks the right open strategy
+            per platform:
+              - iOS PWA → same-window navigation (universal link
+                intercepts before the PWA actually leaves the page,
+                no white-screen on return)
+              - Android PWA / desktop → window.open(_blank) so the
+                PWA stays alive in its own process and is reachable
+                via the app switcher when the rep comes back. */}
         {dayMapsUrl && legs.length >= 2 && (
           <a
             href={dayMapsUrl}
+            onClick={(e) => {
+              e.preventDefault();
+              openMapsLink(dayMapsUrl);
+            }}
             rel="noopener noreferrer"
             style={{
               marginTop: 14,
@@ -941,12 +944,16 @@ function LegList({
               )}
             </div>
 
-            {/* Per-leg Open in Maps — no target="_blank" so iOS
-                universal-link handoff doesn't spawn a new browser
-                context and white-screen the PWA on return. */}
+            {/* Per-leg Open in Maps — openMapsLink() handles the
+                iOS-vs-Android split so the PWA stays reachable
+                after the rep returns from the Maps app. */}
             {legMapsUrl && (
               <a
                 href={legMapsUrl}
+                onClick={(e) => {
+                  e.preventDefault();
+                  openMapsLink(legMapsUrl);
+                }}
                 rel="noopener noreferrer"
                 style={{
                   height: 38,
