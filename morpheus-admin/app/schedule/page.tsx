@@ -2609,11 +2609,20 @@ function DraggableShiftCard({
  * Click-a-shift popover. Mounted as a fixed-position overlay so it can
  * never get clipped by the day column's bounds even on narrow lanes.
  * Action buttons:
- *   View / Edit  → routes via shiftHref (scheduled goes to /edit,
- *                  everything else goes to the read-only detail).
- *   Delete       → only on scheduled shifts. Confirms inline before
- *                  calling deleteShift; the realtime sub on this page
- *                  refetches automatically once the row is gone.
+ *   View / Edit       → routes via shiftHref (scheduled goes to /edit,
+ *                       everything else goes to the read-only detail).
+ *   Delete            → only on scheduled shifts. Confirms inline before
+ *                       calling deleteShift; the realtime sub on this
+ *                       page refetches automatically once the row is gone.
+ *   Add another here  → deep-links to /schedule/new with date + start +
+ *                       end pre-filled from THIS shift. Lets a manager
+ *                       book a second rep into the same time window for
+ *                       a different customer without having to manually
+ *                       retype the slot in the new-shift form. The
+ *                       canonical use case: two reps working two
+ *                       different customers in parallel at 14:00–15:00.
+ *                       Hidden once a delete confirm is in flight so the
+ *                       action row doesn't crowd.
  */
 function ShiftQuickPopover({
   shift,
@@ -2837,49 +2846,89 @@ function ShiftQuickPopover({
           </div>
         )}
 
-        {/* Actions */}
+        {/* Actions
+            Layout: Delete pinned left (when applicable), then
+            "Add another here" + View/Edit on the right. The
+            add-another button uses neutral styling (not primary)
+            so the page's main next-step stays View/Edit. */}
         <div
           style={{
             marginTop: 14,
             display: "flex",
             gap: 8,
-            justifyContent: "flex-end",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
           }}
         >
-          {canDelete && !confirmDelete && (
-            <Btn
-              kind="danger"
-              size="sm"
-              onClick={() => setConfirmDelete(true)}
-              disabled={deleting}
-            >
-              Delete
-            </Btn>
-          )}
-          {canDelete && confirmDelete && (
-            <>
-              <Btn size="sm" onClick={() => setConfirmDelete(false)} disabled={deleting}>
-                Cancel
-              </Btn>
+          {/* Left side — destructive actions */}
+          <div style={{ display: "flex", gap: 8 }}>
+            {canDelete && !confirmDelete && (
               <Btn
                 kind="danger"
                 size="sm"
-                onClick={onConfirmDelete}
+                onClick={() => setConfirmDelete(true)}
                 disabled={deleting}
               >
-                {deleting ? "Deleting…" : "Yes, delete"}
+                Delete
               </Btn>
-            </>
-          )}
+            )}
+            {canDelete && confirmDelete && (
+              <>
+                <Btn size="sm" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                  Cancel
+                </Btn>
+                <Btn
+                  kind="danger"
+                  size="sm"
+                  onClick={onConfirmDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? "Deleting…" : "Yes, delete"}
+                </Btn>
+              </>
+            )}
+          </div>
+
+          {/* Right side — affordances for the manager's next move */}
           {!confirmDelete && (
-            <Btn
-              kind="primary"
-              size="sm"
-              icon="chev-r"
-              onClick={() => router.push(shiftHref(shift))}
-            >
-              {shift.state === "scheduled" ? "Edit" : "View"}
-            </Btn>
+            <div style={{ display: "flex", gap: 8 }}>
+              {/* Add another shift in the same time slot — pre-fills
+                  /schedule/new with date + start + end from THIS
+                  shift. Manager picks the new customer/rep and goes.
+                  Available on every state (not just scheduled) — a
+                  manager might want to book a second rep into the
+                  same hour even when shift #1 is already in progress. */}
+              <Btn
+                size="sm"
+                icon="plus"
+                onClick={() => {
+                  // Trim to HH:MM — /schedule/new validates that
+                  // shape; raw HH:MM:SS from Postgres would fail
+                  // the regex and silently fall back to the default
+                  // next-half-hour slot.
+                  const trimTime = (t: string) =>
+                    /^\d{2}:\d{2}/.exec(t || "")?.[0] || "";
+                  const qs = new URLSearchParams({
+                    date: shift.shift_date,
+                    start: trimTime(shift.start_time),
+                    end: trimTime(shift.end_time),
+                  });
+                  onClose();
+                  router.push(`/schedule/new?${qs.toString()}`);
+                }}
+              >
+                Add another here
+              </Btn>
+              <Btn
+                kind="primary"
+                size="sm"
+                icon="chev-r"
+                onClick={() => router.push(shiftHref(shift))}
+              >
+                {shift.state === "scheduled" ? "Edit" : "View"}
+              </Btn>
+            </div>
           )}
         </div>
       </div>
