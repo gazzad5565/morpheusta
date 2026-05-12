@@ -495,11 +495,16 @@ export default function RoutePage() {
                 letterSpacing: -0.1,
               }}
             >
+              {/* Whole-day total: cumulative drive time + distance
+                  across every leg in the visit order. Renamed from a
+                  bare "20 min · 8.8 km" to lead with "Total drive"
+                  so the rep doesn't have to guess what number they're
+                  looking at. */}
               {loading
                 ? "Planning…"
                 : legs.length === 0
                 ? "No stops"
-                : `${formatDuration(totalSeconds)} · ${formatMeters(totalMeters)}`}
+                : `Total drive: ${formatDuration(totalSeconds)} · ${formatMeters(totalMeters)}`}
             </div>
           </div>
           {/* Single re-check action. Was labelled "Refresh" — renamed
@@ -615,7 +620,7 @@ export default function RoutePage() {
               }}
             >
               {savedOrder
-                ? "Re-check below for any better route with current traffic."
+                ? "Tap Re-check above to refresh with current traffic — we'll flag any better route."
                 : "Re-order today's stops for the shortest drive"}
             </div>
             {/* "Optimized order saved · X min ago" caption.
@@ -641,16 +646,12 @@ export default function RoutePage() {
                   color={MC.ok}
                   strokeWidth={2.2}
                 />
-                Optimized order saved ·{" "}
-                {(() => {
-                  const ms = Math.max(0, Date.now() - savedAt);
-                  const min = Math.round(ms / 60_000);
-                  if (min < 1) return "just now";
-                  if (min < 60) return `${min} min ago`;
-                  const h = Math.floor(min / 60);
-                  const m = min % 60;
-                  return m === 0 ? `${h}h ago` : `${h}h ${m}m ago`;
-                })()}
+                Optimized order saved at{" "}
+                {new Date(savedAt).toLocaleTimeString(undefined, {
+                  hour: "numeric",
+                  minute: "2-digit",
+                  hour12: true,
+                })}
               </div>
             )}
           </div>
