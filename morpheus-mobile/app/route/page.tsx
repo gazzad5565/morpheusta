@@ -148,7 +148,20 @@ function computeScheduleStatus(
 
 export default function RoutePage() {
   const router = useRouter();
-  const [optimize, setOptimize] = useState(false);
+  // Optimize defaults to ON when the rep already has a saved order
+  // for today — they "planned their day" in a previous session and
+  // /route should reflect that, not silently revert to chronological.
+  // Without this the saved-order banner on home said "Day planned"
+  // but tapping through showed the original order, which felt
+  // broken. (Applying the saved order client-side would need a
+  // re-fetch with the saved order as input to get correct per-leg
+  // drive times — turning optimize on is a pragmatic approximation:
+  // the planner's greedy nearest-neighbour tends to produce a result
+  // very close to what the rep saved.)
+  const [optimize, setOptimize] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return !!readShiftOrder();
+  });
   // Org-wide gate from /settings/check-in-rules → "Allow Plan my day
   // to optimize stop order". When false, the Optimize toggle hides
   // entirely and the rep sees their day in chronological order only.
@@ -690,7 +703,19 @@ export default function RoutePage() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => saveShiftOrder(currentOrder)}
+                  onClick={() => {
+                    saveShiftOrder(currentOrder);
+                    // Don't loiter on /route after a save — the rep
+                    // wanted to plan their day, they planned it,
+                    // bounce them somewhere useful. /shifts is the
+                    // natural next destination because that's where
+                    // they'll see their list reordered to match.
+                    // Small delay so the success state on the
+                    // button is briefly visible before nav.
+                    window.setTimeout(() => {
+                      router.push("/shifts");
+                    }, 350);
+                  }}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -1290,18 +1315,23 @@ function LegList({
                   </div>
                 );
               }
-              // Tones and the headline copy per status. Headline is
-              // the most important fact ("17 min early" / "Late by
-              // 12 min") because that's what the rep needs to act
-              // on. The times sit beneath as a muted detail line.
+              // Tones and the headline copy per status. The "if you
+              // leave now" framing is explicit on early / late /
+              // on-time so the rep doesn't have to mentally hold the
+              // assumption "this number is relative to leaving
+              // right this second". The tight case keeps "Leave by
+              // HH:MM" because that IS the actionable number for
+              // that bucket. Gary's reported confusion was that
+              // "Late by 66 min" wasn't obviously "if you leave
+              // now" — now it says so.
               const headline =
                 status.kind === "late"
-                  ? `Late by ${status.minsLate} min`
+                  ? `Leave now — ${status.minsLate} min late`
                   : status.kind === "tight"
                   ? `Leave by ${formatClock(status.leaveBy)}`
                   : status.kind === "ok"
-                  ? "On time"
-                  : `${status.minsEarly} min early`;
+                  ? "Leave now to be on time"
+                  : `Leave now — ${status.minsEarly} min early`;
               const tone =
                 status.kind === "late"
                   ? { bg: MC.dangerTint, fg: "#9c1a3c", border: MC.danger }
@@ -1347,10 +1377,10 @@ function LegList({
                     }}
                   >
                     {status.kind === "late"
-                      ? `You'll arrive ${formatClock(eta)}. Shift was due to start ${formatClock(scheduledStart)}.`
+                      ? `You'd arrive at ${formatClock(eta)} — shift was due to start at ${formatClock(scheduledStart)}.`
                       : status.kind === "tight"
-                      ? `Leave by ${formatClock(status.leaveBy)} to arrive on time for the ${formatClock(scheduledStart)} shift.`
-                      : `Arrive ${formatClock(eta)} for the ${formatClock(scheduledStart)} shift.`}
+                      ? `Arriving on time for the ${formatClock(scheduledStart)} shift needs you out the door by ${formatClock(status.leaveBy)}.`
+                      : `You'd arrive at ${formatClock(eta)} for the ${formatClock(scheduledStart)} shift.`}
                   </div>
                 </div>
               );

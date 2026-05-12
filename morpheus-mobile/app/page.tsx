@@ -507,32 +507,79 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-          {/* View all — primary action on the dashboard, was a tiny
-              text link that disappeared next to the big shift count.
-              Now a proper pill-style button that's actually tappable
-              on a phone. */}
-          <Link
-            href="/shifts"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "9px 14px",
-              borderRadius: 10,
-              background: MC.brandTint,
-              border: `1px solid ${MC.brand}33`,
-              fontFamily: MC.font,
-              fontSize: 13.5,
-              fontWeight: 700,
-              color: MC.brandDeep,
-              letterSpacing: -0.1,
-              textDecoration: "none",
-              boxShadow: `0 2px 6px ${MC.brand}22`,
-            }}
-          >
-            View all
-            <Glyph name="chev-r" size={15} color={MC.brandDeep} strokeWidth={2.4} />
-          </Link>
+          {/* Action cluster — Plan my day (when relevant) + View all.
+              Plan my day moved here from a stand-alone row below Up
+              Next so the day-summary actions sit together in one
+              top-row cluster. It only renders when the rep has 2+
+              REMAINING (non-completed) stops, otherwise hides.
+              When the rep has already saved an order today the pill
+              flips to "Day planned · view" with an ink-filled style
+              so the dashboard reflects the planned state. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {(() => {
+              const remainingStops = shifts.filter(
+                (s) => s.state !== "complete" && s.state !== "cancelled"
+              ).length;
+              if (!shiftsLoaded || remainingStops < 2) return null;
+              const planned = dayPlanned;
+              return (
+                <Link
+                  href="/route"
+                  aria-label={planned ? "View today's plan" : "Plan my day"}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    padding: "9px 12px",
+                    borderRadius: 10,
+                    background: planned ? MC.ink : MC.okTint,
+                    border: planned
+                      ? `1px solid ${MC.ink}`
+                      : `1px solid ${MC.ok}33`,
+                    color: planned ? "#fff" : "#0d6a45",
+                    textDecoration: "none",
+                    fontFamily: MC.font,
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    letterSpacing: -0.1,
+                    boxShadow: planned
+                      ? `0 2px 6px rgba(10,15,30,.18)`
+                      : `0 2px 6px ${MC.ok}22`,
+                  }}
+                >
+                  <Glyph
+                    name={planned ? "check-circle" : "target"}
+                    size={14}
+                    color={planned ? "#fff" : MC.ok}
+                    strokeWidth={2.4}
+                  />
+                  {planned ? "Day planned" : "Plan my day"}
+                </Link>
+              );
+            })()}
+            <Link
+              href="/shifts"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "9px 14px",
+                borderRadius: 10,
+                background: MC.brandTint,
+                border: `1px solid ${MC.brand}33`,
+                fontFamily: MC.font,
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: MC.brandDeep,
+                letterSpacing: -0.1,
+                textDecoration: "none",
+                boxShadow: `0 2px 6px ${MC.brand}22`,
+              }}
+            >
+              View all
+              <Glyph name="chev-r" size={15} color={MC.brandDeep} strokeWidth={2.4} />
+            </Link>
+          </div>
         </div>
         {/* Progress bar: green = complete, brand = in-progress, grey = scheduled. */}
         {totalCount > 0 && (
@@ -602,73 +649,11 @@ export default function DashboardPage() {
         }}
       />
 
-      {/* Slim "Plan my day" link directly under the Up Next card —
-          only when the rep has 2+ REMAINING stops (anything not
-          complete). Earlier this counted shifts.length, which
-          included completed stops — so after the rep finished one,
-          the pill kept saying "5 stops" even though the actual route
-          had 4 left. Match the count to what planMyDay() will
-          actually plan (it filters out complete + cancelled
-          server-side). Hide entirely once you're down to one or
-          zero remaining since Up Next's own Resume/Check-in already
-          covers a single-stop case. */}
-      {(() => {
-        const remainingStops = shifts.filter(
-          (s) => s.state !== "complete" && s.state !== "cancelled"
-        ).length;
-        if (!shiftsLoaded || remainingStops < 2) return null;
-        // Pill flips state once the rep has saved a visit order:
-        //   - Not planned yet → "Plan my day" (green, call to action)
-        //   - Planned → "Day planned · view" (ink-filled, status pill
-        //     with checkmark) so the home dashboard reflects that
-        //     a decision was made. Tap still routes to /route so the
-        //     rep can review / re-optimise / clear.
-        const planned = dayPlanned;
-        return (
-          <div
-            style={{
-              padding: "8px 16px 0",
-              display: "flex",
-              justifyContent: "flex-end",
-            }}
-          >
-            <Link
-              href="/route"
-              aria-label={planned ? "View today's plan" : "Plan my day"}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 11px 6px 9px",
-                borderRadius: 999,
-                background: planned ? MC.ink : MC.okTint,
-                border: planned
-                  ? `1px solid ${MC.ink}`
-                  : `1px solid ${MC.ok}33`,
-                color: planned ? "#fff" : "#0d6a45",
-                textDecoration: "none",
-                fontFamily: MC.font,
-                fontSize: 12,
-                fontWeight: 700,
-                letterSpacing: -0.1,
-              }}
-            >
-              <Glyph
-                name={planned ? "check-circle" : "target"}
-                size={12}
-                color={planned ? "#fff" : MC.ok}
-                strokeWidth={2.4}
-              />
-              {planned ? "Day planned · view" : "Plan my day"}
-              <Glyph
-                name="chev-r"
-                size={12}
-                color={planned ? "#fff" : "#0d6a45"}
-              />
-            </Link>
-          </div>
-        );
-      })()}
+      {/* Plan-my-day pill moved (May 12) — used to live as its own
+          row below Up Next. The new home is next to "View all" in
+          the top stats row (see the section above) where the day-
+          summary actions cluster naturally. The bottom of the page
+          flows cleaner with one less stand-alone row. */}
 
       {/* Break or travel — combined affordance. The chooser sheet lets
           the rep pick break length OR start a travel timer without
