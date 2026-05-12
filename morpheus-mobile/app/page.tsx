@@ -36,6 +36,11 @@ import {
   computeNextLeaveBy,
   type NextLeaveByInfo,
 } from "@/lib/route-planner";
+import {
+  readShiftOrder,
+  applySavedOrder,
+  subscribeShiftOrder,
+} from "@/lib/shift-order-store";
 
 // MapLibre needs `window`; defer to client-only.
 const DashboardMap = dynamic(
@@ -281,6 +286,29 @@ export default function DashboardPage() {
     // Trigger by shifts list length + the realId set so we recompute
     // when a shift completes / new one lands / states change.
   }, [shiftsLoaded, shifts.map((s) => `${s.realId}:${s.state}`).join("|")]);
+
+  // Saved visit order ("planned my day") — read from localStorage on
+  // mount, refreshed whenever the rep saves/clears on /route via the
+  // shared shift-order-store event bus. Drives:
+  //   - the Up Next picker (within the same state bucket, the
+  //     "next" shift follows the saved order)
+  //   - the Plan-my-day pill copy ("Plan my day" vs "Day planned ·
+  //     view")
+  //   - the visual ordering of the home shift list (when we render it)
+  const [savedOrder, setSavedOrder] = useState<string[] | null>(() =>
+    typeof window === "undefined" ? null : readShiftOrder()
+  );
+  useEffect(() => {
+    setSavedOrder(readShiftOrder());
+    return subscribeShiftOrder(() => setSavedOrder(readShiftOrder()));
+  }, []);
+  // True when the rep has saved an order AND at least one of those
+  // shifts is still on the schedule today (so the pill doesn't
+  // claim "day planned" using a stale order from earlier).
+  const dayPlanned =
+    !!savedOrder &&
+    savedOrder.length > 0 &&
+    shifts.some((s) => savedOrder.includes(s.realId));
 
   // "I can't make this shift" sheet state — applies to the up-next
   // shift only on the dashboard. Mirrors the /shifts page pattern so
@@ -542,6 +570,7 @@ export default function DashboardPage() {
         shifts={shifts}
         loaded={shiftsLoaded}
         nextLeaveBy={nextLeaveBy}
+        savedOrder={savedOrder}
         travellingSince={travellingSince}
         setTravellingSince={setTravellingSince}
         inProgressCount={inProgressCount}
@@ -585,6 +614,13 @@ export default function DashboardPage() {
           (s) => s.state !== "complete" && s.state !== "cancelled"
         ).length;
         if (!shiftsLoaded || remainingStops < 2) return null;
+        // Pill flips state once the rep has saved a visit order:
+        //   - Not planned yet → "Plan my day" (green, call to action)
+        //   - Planned → "Day planned · view" (ink-filled, status pill
+        //     with checkmark) so the home dashboard reflects that
+        //     a decision was made. Tap still routes to /route so the
+        //     rep can review / re-optimise / clear.
+        const planned = dayPlanned;
         return (
           <div
             style={{
@@ -595,15 +631,18 @@ export default function DashboardPage() {
           >
             <Link
               href="/route"
+              aria-label={planned ? "View today's plan" : "Plan my day"}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
                 padding: "6px 11px 6px 9px",
                 borderRadius: 999,
-                background: MC.okTint,
-                border: `1px solid ${MC.ok}33`,
-                color: "#0d6a45",
+                background: planned ? MC.ink : MC.okTint,
+                border: planned
+                  ? `1px solid ${MC.ink}`
+                  : `1px solid ${MC.ok}33`,
+                color: planned ? "#fff" : "#0d6a45",
                 textDecoration: "none",
                 fontFamily: MC.font,
                 fontSize: 12,
@@ -611,9 +650,18 @@ export default function DashboardPage() {
                 letterSpacing: -0.1,
               }}
             >
-              <Glyph name="target" size={12} color={MC.ok} strokeWidth={2.4} />
-              Plan my day
-              <Glyph name="chev-r" size={12} color="#0d6a45" />
+              <Glyph
+                name={planned ? "check-circle" : "target"}
+                size={12}
+                color={planned ? "#fff" : MC.ok}
+                strokeWidth={2.4}
+              />
+              {planned ? "Day planned · view" : "Plan my day"}
+              <Glyph
+                name="chev-r"
+                size={12}
+                color={planned ? "#fff" : "#0d6a45"}
+              />
             </Link>
           </div>
         );
@@ -731,6 +779,7 @@ function UpNextCard({
   shifts,
   loaded,
   nextLeaveBy,
+  savedOrder,
   travellingSince,
   setTravellingSince,
   inProgressCount,
@@ -747,6 +796,10 @@ function UpNextCard({
    *  the customer, the card renders a small "Leave by HH:MM · X
    *  min drive" line. Otherwise hidden. */
   nextLeaveBy: NextLeaveByInfo | null;
+  /** Per-rep saved visit order from /route → Save this order. When
+   *  set, the "next up" picker prefers shifts in this order within
+   *  the same state-priority bucket. Null = chronological fallback. */
+  savedOrder: string[] | null;
   travellingSince: number | null;
   setTravellingSince: (v: number | null) => void;
   inProgressCount: number;
@@ -796,7 +849,14 @@ function UpNextCard({
     late: 3,
     scheduled: 4,
   };
-  const candidates = shifts
+  // Apply the saved visit order BEFORE the state-priority sort.
+  // Array.sort is stable, so within the same priority bucket the
+  // saved-order positioning survives. End result: if the rep has
+  // saved an order, "next up" follows it within the relevant
+  // priority bucket; with no saved order it falls back to the
+  // server's chronological ordering.
+  const ordered = applySavedOrder(shifts, savedOrder);
+  const candidates = ordered
     .filter((s) => s.state !== "complete" && PRIORITY[s.state] !== undefined)
     .sort((a, b) => PRIORITY[a.state] - PRIORITY[b.state]);
   const next = candidates[0] || null;

@@ -33,6 +33,11 @@ import {
   computeNextLeaveBy,
   type NextLeaveByInfo,
 } from "@/lib/route-planner";
+import {
+  readShiftOrder,
+  applySavedOrder,
+  subscribeShiftOrder,
+} from "@/lib/shift-order-store";
 
 // A shift row from the DB carries internal id + state alongside the display fields.
 type DbShift = Shift & {
@@ -122,14 +127,24 @@ export default function ShiftsListPage() {
     ]).then(([m, u, r]) => {
       // Sort: in-progress first → scheduled → complete (so completed
       // shifts sink to the bottom of the list).
+      //
+      // The secondary tiebreaker (within the same state bucket) honours
+      // the rep's saved visit order from /route → Save this order
+      // when present. With no saved order it falls through to the
+      // server's chronological ordering. Array.sort is stable, so a
+      // savedOrder-applied pre-sort survives the state bucket sort.
+      const saved = readShiftOrder();
+      const preSorted = applySavedOrder(m, saved);
       const order: Record<string, number> = {
         "in-progress": 0,
         scheduled: 1,
         late: 2,
         complete: 3,
       };
-      m.sort((a, b) => (order[a.state] ?? 1) - (order[b.state] ?? 1));
-      setMine(m);
+      preSorted.sort(
+        (a, b) => (order[a.state] ?? 1) - (order[b.state] ?? 1)
+      );
+      setMine(preSorted);
       setUnassigned(u);
       setRequested(r);
       setLoaded(true);
@@ -151,11 +166,17 @@ export default function ShiftsListPage() {
     document.addEventListener("visibilitychange", onVis);
     const unsubShifts = subscribeShifts(reload);
     const unsubRequests = subscribeRequestedShifts(reload);
+    // Re-sort when the rep saves / clears a visit order from /route.
+    // Cheap: this re-runs the existing reload() which fetches the same
+    // 3 lists and re-applies the order. Could be optimised to just
+    // resort the `mine` state but the network impact is negligible.
+    const unsubOrder = subscribeShiftOrder(reload);
     const poll = window.setInterval(reload, 60_000);
     return () => {
       document.removeEventListener("visibilitychange", onVis);
       unsubShifts();
       unsubRequests();
+      unsubOrder();
       window.clearInterval(poll);
     };
   }, []);

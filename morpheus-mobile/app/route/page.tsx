@@ -48,6 +48,12 @@ import {
   type PlanMyDayResult,
   type PlannerStop,
 } from "@/lib/route-planner";
+import {
+  saveShiftOrder,
+  clearShiftOrder,
+  readShiftOrder,
+  subscribeShiftOrder,
+} from "@/lib/shift-order-store";
 
 /** "5 km" / "950 m" — friendly distance. */
 function formatMeters(m: number): string {
@@ -210,6 +216,22 @@ export default function RoutePage() {
       cancelled = true;
     };
   }, [optimize, useTraffic]);
+
+  // Saved visit order (Option A — per-rep preference, non-destructive).
+  // Reps tap "Save this order" after flipping Optimize to lock in the
+  // optimized sequence; /shifts + home Up Next then honour it. We
+  // store today's array of shift IDs in localStorage and subscribe to
+  // changes so a save propagates instantly without remounts.
+  const [savedOrder, setSavedOrder] = useState<string[] | null>(() =>
+    typeof window === "undefined" ? null : readShiftOrder()
+  );
+  useEffect(() => {
+    // Re-read after hydration in case SSR returned null.
+    setSavedOrder(readShiftOrder());
+    return subscribeShiftOrder(() => {
+      setSavedOrder(readShiftOrder());
+    });
+  }, []);
 
   // Background fetch of the OTHER mode so we can compare totals and
   // show concrete proof that "Optimize stop order" is doing something.
@@ -545,6 +567,140 @@ export default function RoutePage() {
               keyboard users the same affordance without the
               double-flip footgun. */}
         </label>
+
+        {/* Save / Clear order button.
+            Three states:
+              - No saved order, optimize is OFF or the order matches
+                chronological → don't render (nothing meaningful to
+                save).
+              - Order currently displayed differs from chronological
+                AND nothing saved yet (OR saved order doesn't match
+                current) → "Save this order" — green pill, primary.
+              - Saved order matches the currently displayed order →
+                "Order saved ✓ · Clear" — neutral pill with a clear
+                action.
+            Honours Option A: this is a per-rep view preference. It
+            never touches shifts.start_time so the manager's
+            calendar stays exactly as scheduled. */}
+        {(() => {
+          if (!result || result.route.legs.length < 2) return null;
+          const currentOrder = result.stopsInOrder.map((s) => s.realId);
+          if (currentOrder.length < 2) return null;
+          // The chronological-comparison data sits in `comparison`.
+          // If we don't have it yet, suppress the save UI to avoid
+          // flashing "Save" before we know whether it's even
+          // meaningful.
+          if (!comparison) return null;
+          const chronoSame =
+            comparison.chronologicalOrder.join("|") === currentOrder.join("|");
+          // Saved-order presence + match against what's on screen.
+          const savedMatchesCurrent =
+            !!savedOrder &&
+            savedOrder.length === currentOrder.length &&
+            savedOrder.join("|") === currentOrder.join("|");
+          const savedExists = !!savedOrder && savedOrder.length > 0;
+          // Hide the button entirely when chronological is on screen
+          // AND nothing is saved — nothing useful to do.
+          if (chronoSame && !savedExists) return null;
+          return (
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              {savedMatchesCurrent ? (
+                <>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      padding: "6px 11px",
+                      borderRadius: 999,
+                      background: MC.okTint,
+                      border: `1px solid ${MC.ok}33`,
+                      color: "#0d6a45",
+                      fontFamily: MC.font,
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      letterSpacing: 0.3,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    <Glyph
+                      name="check-circle"
+                      size={12}
+                      color={MC.ok}
+                      strokeWidth={2.4}
+                    />
+                    Order saved
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => clearShiftOrder()}
+                    style={{
+                      padding: "6px 11px",
+                      borderRadius: 999,
+                      background: "#fff",
+                      border: `1px solid ${MC.line}`,
+                      color: MC.mute,
+                      fontFamily: MC.font,
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Clear
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => saveShiftOrder(currentOrder)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "7px 12px",
+                    borderRadius: 999,
+                    background: MC.brand,
+                    color: "#fff",
+                    border: "none",
+                    fontFamily: MC.font,
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    letterSpacing: -0.1,
+                    cursor: "pointer",
+                    boxShadow: `0 2px 8px ${MC.brand}44`,
+                  }}
+                >
+                  <Glyph
+                    name="check"
+                    size={13}
+                    color="#fff"
+                    strokeWidth={2.4}
+                  />
+                  {savedExists ? "Update saved order" : "Save this order"}
+                </button>
+              )}
+              <span
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 11,
+                  color: MC.hint,
+                  lineHeight: 1.35,
+                }}
+              >
+                Reorders your shifts list to match — doesn&apos;t change
+                customer scheduled times.
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Inline warnings: GPS fallback + Google fallback */}
         {(originFromFirstStop || warning) && legs.length > 0 && (
