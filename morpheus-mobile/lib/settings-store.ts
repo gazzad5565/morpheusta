@@ -71,3 +71,15 @@ export async function getTimingExceptionsEnabled(): Promise<boolean> {
   const v = await readSetting<boolean>("timing_exceptions_enabled", true);
   return v === false ? false : true;
 }
+
+/**
+ * Org-wide gate for the /route page's "Optimize stop order" toggle.
+ * Set in admin /settings/check-in-rules. When false, the mobile
+ * Plan-my-day page hides the Optimize toggle entirely so reps can't
+ * reshuffle a day that has customers on strict appointment slots.
+ * Default ON for backwards compatibility.
+ */
+export async function getRouteOptimizationAllowed(): Promise<boolean> {
+  const v = await readSetting<boolean>("route_optimization_allowed", true);
+  return v === false ? false : true;
+}

@@ -29,6 +29,8 @@ import {
   setLocationExceptionsEnabled,
   getTimingExceptionsEnabled,
   setTimingExceptionsEnabled,
+  getRouteOptimizationAllowed,
+  setRouteOptimizationAllowed,
 } from "@/lib/settings-store";
 
 export default function CheckInRulesPage() {
@@ -38,6 +40,7 @@ export default function CheckInRulesPage() {
   const [autoCheckoutTime, setAutoCheckoutTimeState] = useState<string>("23:59");
   const [locationOn, setLocationOn] = useState<boolean>(true);
   const [timingOn, setTimingOn] = useState<boolean>(true);
+  const [routeOptimizeOn, setRouteOptimizeOn] = useState<boolean>(true);
   const [loaded, setLoaded] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -50,13 +53,15 @@ export default function CheckInRulesPage() {
       getAutoCheckoutTime(),
       getLocationExceptionsEnabled(),
       getTimingExceptionsEnabled(),
-    ]).then(([late, early, radius, autoTime, locOn, timeOn]) => {
+      getRouteOptimizationAllowed(),
+    ]).then(([late, early, radius, autoTime, locOn, timeOn, routeOn]) => {
       setLateMin(String(late));
       setEarlyMin(String(early));
       setDefaultRadius(String(radius));
       setAutoCheckoutTimeState(autoTime);
       setLocationOn(locOn);
       setTimingOn(timeOn);
+      setRouteOptimizeOn(routeOn);
       setLoaded(true);
     });
   }, []);
@@ -93,6 +98,22 @@ export default function CheckInRulesPage() {
       next
         ? "Timing exceptions enabled — late and early check-ins will surface a reason card."
         : "Timing exceptions disabled — late and early check-ins no longer prompt for a reason."
+    );
+  };
+  const toggleRouteOptimize = async (next: boolean) => {
+    setRouteOptimizeOn(next);
+    setSavingKey("routeOpt");
+    const r = await setRouteOptimizationAllowed(next);
+    setSavingKey(null);
+    if (!r.ok) {
+      setRouteOptimizeOn(!next);
+      setMessage(r.error || "Couldn't save.");
+      return;
+    }
+    setMessage(
+      next
+        ? "Route optimization enabled — reps can reorder their day on Plan my day."
+        : "Route optimization disabled — reps see their shifts in chronological order only."
     );
   };
 
@@ -192,6 +213,22 @@ export default function CheckInRulesPage() {
           saving={savingKey === "timeOn"}
           disabled={!loaded}
           onChange={toggleTiming}
+        />
+        <div style={{ height: 1, background: AC.lineDim, margin: "10px 0" }} />
+        {/* Route optimization gate. Lives here next to the exception
+            toggles because it's the same shape of org-wide rule —
+            gates a piece of mobile-app behaviour from the admin.
+            Some merch teams have customers with strict appointment
+            times (school deliveries, retail-shelf-reset slots) where
+            a re-ordered route would breach an SLA. Flipping this off
+            hides the Optimize toggle on /route entirely. */}
+        <ToggleRow
+          title="Allow Plan my day to optimize stop order"
+          subtitle="When off, reps see their shifts in chronological order only — they can't reshuffle the day on the route planner. Turn off if customers have strict appointment slots."
+          on={routeOptimizeOn}
+          saving={savingKey === "routeOpt"}
+          disabled={!loaded}
+          onChange={toggleRouteOptimize}
         />
       </Card>
 

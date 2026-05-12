@@ -54,6 +54,7 @@ import {
   readShiftOrder,
   subscribeShiftOrder,
 } from "@/lib/shift-order-store";
+import { getRouteOptimizationAllowed } from "@/lib/settings-store";
 
 /** "5 km" / "950 m" — friendly distance. */
 function formatMeters(m: number): string {
@@ -148,6 +149,27 @@ function computeScheduleStatus(
 export default function RoutePage() {
   const router = useRouter();
   const [optimize, setOptimize] = useState(false);
+  // Org-wide gate from /settings/check-in-rules → "Allow Plan my day
+  // to optimize stop order". When false, the Optimize toggle hides
+  // entirely and the rep sees their day in chronological order only.
+  // Defaults to true so a missing setting / slow fetch doesn't break
+  // the feature on first load.
+  const [optimizeAllowed, setOptimizeAllowed] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    getRouteOptimizationAllowed().then((on) => {
+      if (!cancelled) setOptimizeAllowed(on);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // When the setting flips off after the rep had optimize on, force
+  // the toggle back to false so the comparison logic doesn't run
+  // against an order the rep can't actually use.
+  useEffect(() => {
+    if (!optimizeAllowed && optimize) setOptimize(false);
+  }, [optimizeAllowed, optimize]);
   // Live-traffic toggle. Initialised from localStorage on mount (after
   // hydration to avoid SSR/CSR mismatch), default true.
   const [useTraffic, setUseTraffic] = useState(true);
@@ -484,7 +506,14 @@ export default function RoutePage() {
           </button>
         </div>
 
-        {/* Optimize order — flips the toggle, useEffect refetches */}
+        {/* Optimize order — flips the toggle, useEffect refetches.
+            Hidden entirely when the org has disabled route
+            optimization (admin /settings/check-in-rules → "Allow
+            Plan my day to optimize stop order"). The savings banner
+            below and the Save-order button also fall away naturally
+            because they depend on `comparison` / non-chronological
+            order which never fires when optimize stays false. */}
+        {optimizeAllowed && (
         <label
           style={{
             marginTop: 10,
@@ -567,6 +596,7 @@ export default function RoutePage() {
               keyboard users the same affordance without the
               double-flip footgun. */}
         </label>
+        )}
 
         {/* Save / Clear order button.
             Three states:

@@ -180,8 +180,12 @@ function NewShiftPage() {
     setStartTime(next);
     setEndTime(addMinutesHHMM(next, 30));
   };
-  // Recurrence
-  const [repeatMode, setRepeatMode] = useState<"none" | "weekly">("none");
+  // Recurrence — One-off, Weekly (pick weekdays), Biweekly (same
+  // weekday(s) but every other week from the anchor), Monthly (same
+  // day of month each month, skipping invalid days like Feb 31).
+  const [repeatMode, setRepeatMode] = useState<
+    "none" | "weekly" | "biweekly" | "monthly"
+  >("none");
   const [weekdays, setWeekdays] = useState<Set<number>>(new Set());
   // Default until-date sits 27 days out (NOT 28). The cartesian walk
   // includes both endpoints, so a 28-day inclusive range hits the
@@ -271,9 +275,13 @@ function NewShiftPage() {
     if (untilDate < shiftDate) setUntilDate(addDaysISO(shiftDate, 28));
   }, [shiftDate, untilDate]);
 
-  // Default: tick the day-of-week of the start date when toggling on weekly.
+  // Default: tick the day-of-week of the start date when toggling on
+  // weekly OR biweekly (both use the same weekday picker).
   useEffect(() => {
-    if (repeatMode === "weekly" && weekdays.size === 0) {
+    if (
+      (repeatMode === "weekly" || repeatMode === "biweekly") &&
+      weekdays.size === 0
+    ) {
       const dow = jsDayToIndex(new Date(shiftDate).getDay());
       setWeekdays(new Set([dow]));
     }
@@ -283,18 +291,59 @@ function NewShiftPage() {
   const generatedDates = useMemo(() => {
     if (repeatMode === "none") return [shiftDate];
     if (!untilDate || untilDate < shiftDate) return [shiftDate];
-    if (weekdays.size === 0) return [];
-    const out: string[] = [];
     // Anchor the date walk at noon-local so DST transitions can't flip
     // a Sunday into a Saturday and skip the wrong weekday.
     const start = new Date(shiftDate + "T12:00:00");
     const end = new Date(untilDate + "T12:00:00");
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      if (weekdays.has(jsDayToIndex(d.getDay()))) {
+
+    if (repeatMode === "weekly" || repeatMode === "biweekly") {
+      if (weekdays.size === 0) return [];
+      const out: string[] = [];
+      const anchorMs = start.getTime();
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        if (!weekdays.has(jsDayToIndex(d.getDay()))) continue;
+        if (repeatMode === "biweekly") {
+          // Only include the anchor week (week 0), week 2, week 4, …
+          // Compute whole-weeks-since-anchor based on day count
+          // (avoids partial-week DST drift).
+          const daysSince = Math.floor((d.getTime() - anchorMs) / 86_400_000);
+          const weeksSince = Math.floor(daysSince / 7);
+          if (weeksSince % 2 !== 0) continue;
+        }
         out.push(localISO(d));
       }
+      return out;
     }
-    return out;
+
+    if (repeatMode === "monthly") {
+      // Same calendar day of each month from start through end.
+      // Skips months where the day doesn't exist (Feb 30/31, Apr 31,
+      // etc) — JS auto-rolls invalid dates so we detect the rollover
+      // by comparing month+day after construction.
+      const startDay = start.getDate();
+      const out: string[] = [];
+      let year = start.getFullYear();
+      let month = start.getMonth();
+      // Safety cap so a bad until-date can't loop forever.
+      for (let i = 0; i < 36; i++) {
+        const candidate = new Date(year, month, startDay, 12, 0, 0, 0);
+        if (
+          candidate.getMonth() === month &&
+          candidate.getDate() === startDay
+        ) {
+          if (candidate > end) break;
+          if (candidate >= start) out.push(localISO(candidate));
+        }
+        month += 1;
+        if (month > 11) {
+          month = 0;
+          year += 1;
+        }
+      }
+      return out;
+    }
+
+    return [shiftDate];
   }, [repeatMode, shiftDate, untilDate, weekdays]);
 
   // Resolve the actual customer ids being targeted.
@@ -508,8 +557,12 @@ function NewShiftPage() {
     if (!shiftDate) return setError("Pick a start date.");
     if (!startTime || !endTime) return setError("Set start and end times.");
     if (startTime >= endTime) return setError("End time must be after start time.");
-    if (repeatMode === "weekly") {
+    if (repeatMode === "weekly" || repeatMode === "biweekly") {
       if (weekdays.size === 0) return setError("Pick at least one weekday for the recurrence.");
+      if (!untilDate) return setError("Pick an 'until' date for the recurrence.");
+      if (untilDate < shiftDate) return setError("'Until' date must be on or after the start date.");
+    }
+    if (repeatMode === "monthly") {
       if (!untilDate) return setError("Pick an 'until' date for the recurrence.");
       if (untilDate < shiftDate) return setError("'Until' date must be on or after the start date.");
     }
@@ -869,7 +922,7 @@ function NewShiftPage() {
             </div>
 
             <Field label="Repeat">
-              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
                 <RepeatOption
                   active={repeatMode === "none"}
                   onClick={() => setRepeatMode("none")}
@@ -882,8 +935,20 @@ function NewShiftPage() {
                   title="Weekly"
                   sub="Pick weekdays + an 'until' date"
                 />
+                <RepeatOption
+                  active={repeatMode === "biweekly"}
+                  onClick={() => setRepeatMode("biweekly")}
+                  title="Biweekly"
+                  sub="Every other week, same weekday(s)"
+                />
+                <RepeatOption
+                  active={repeatMode === "monthly"}
+                  onClick={() => setRepeatMode("monthly")}
+                  title="Monthly"
+                  sub="Same day each month"
+                />
               </div>
-              {repeatMode === "weekly" && (
+              {(repeatMode === "weekly" || repeatMode === "biweekly") && (
                 <div
                   style={{
                     border: `1px solid ${AC.line}`,
@@ -953,6 +1018,62 @@ function NewShiftPage() {
                       <>
                         : <b style={{ color: AC.ink2 }}>{generatedDates[0]}</b> →{" "}
                         <b style={{ color: AC.ink2 }}>{generatedDates[generatedDates.length - 1]}</b>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+              {/* Monthly has no weekday picker (it's "same day of
+                  month") but still needs an Until date + generated-
+                  date preview. */}
+              {repeatMode === "monthly" && (
+                <div
+                  style={{
+                    border: `1px solid ${AC.line}`,
+                    borderRadius: 10,
+                    padding: 12,
+                    background: "#fff",
+                  }}
+                >
+                  <Field label="Until (inclusive)" required>
+                    <input
+                      type="date"
+                      value={untilDate}
+                      min={shiftDate}
+                      onChange={(e) => setUntilDate(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </Field>
+                  <div
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 11.5,
+                      color: AC.mute,
+                      marginTop: 4,
+                    }}
+                  >
+                    Will generate {generatedDates.length} date
+                    {generatedDates.length === 1 ? "" : "s"} on the{" "}
+                    {(() => {
+                      const day = parseInt(shiftDate.split("-")[2] || "0", 10);
+                      // Add an ordinal suffix so the copy reads naturally
+                      // ("on the 14th of each month"). Falls back to the
+                      // bare number for invalid input.
+                      const suffix = ((d: number) => {
+                        if (d >= 11 && d <= 13) return "th";
+                        const last = d % 10;
+                        return last === 1 ? "st" : last === 2 ? "nd" : last === 3 ? "rd" : "th";
+                      })(day);
+                      return Number.isFinite(day) && day > 0
+                        ? `${day}${suffix} of each month`
+                        : "same day each month";
+                    })()}
+                    {generatedDates.length > 0 && (
+                      <>
+                        : <b style={{ color: AC.ink2 }}>{generatedDates[0]}</b> →{" "}
+                        <b style={{ color: AC.ink2 }}>
+                          {generatedDates[generatedDates.length - 1]}
+                        </b>
                       </>
                     )}
                   </div>
@@ -1547,7 +1668,7 @@ function PreviewSentence({
   repScope: RepScope;
   shiftDate: string;
   untilDate: string;
-  repeatMode: "none" | "weekly";
+  repeatMode: "none" | "weekly" | "biweekly" | "monthly";
   dateCount: number;
   startTime: string;
   endTime: string;
@@ -1570,7 +1691,10 @@ function PreviewSentence({
         </span>
       );
     }
-    if (repeatMode === "weekly" && dateCount === 0) {
+    if (
+      (repeatMode === "weekly" || repeatMode === "biweekly") &&
+      dateCount === 0
+    ) {
       return (
         <span style={{ color: AC.mute }}>
           Pick at least one weekday in <b style={{ color: AC.ink2 }}>Step 2</b> for the

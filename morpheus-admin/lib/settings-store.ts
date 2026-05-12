@@ -339,6 +339,33 @@ export async function setTimingExceptionsEnabled(
   return writeSetting("timing_exceptions_enabled", !!on);
 }
 
+// ─── Route optimization ──────────────────────────────────────────
+//
+// Org-wide gate for the mobile /route page's "Optimize stop order"
+// feature. Some merchandising teams have customers with strict
+// appointment times (school deliveries, retail-shelf-reset slots,
+// etc) where a reordered route would land the rep at the wrong
+// time and breach an SLA. Flipping this off hides the Optimize
+// toggle on /route entirely — reps see only their chronological
+// order with no choice to reshuffle.
+//
+// Default ON to preserve existing behaviour. A per-customer
+// override is intentionally deferred (Gary: "just a general size
+// setting for now"); once managers want it per-customer, we can
+// add a column on `customers` + read it in planMyDay the same way
+// the exception toggles work.
+
+export async function getRouteOptimizationAllowed(): Promise<boolean> {
+  const v = await readSetting<boolean>("route_optimization_allowed", true);
+  return v === false ? false : true;
+}
+
+export async function setRouteOptimizationAllowed(
+  on: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting("route_optimization_allowed", !!on);
+}
+
 /** One-shot fetch of every org text field for a settings form. */
 export async function getOrganisationDetails(): Promise<{
   address: string;
