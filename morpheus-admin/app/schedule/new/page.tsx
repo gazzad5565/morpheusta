@@ -289,6 +289,20 @@ function NewShiftPage() {
     return repScope;
   }, [repScope]);
 
+  // Progressive-disclosure gates. The form reveals one step at a time
+  // so a manager creating a one-off shift sees:
+  //   1. Customers (always)
+  //   2. Site picker + Reps (once customer is picked)
+  //   3. Date / time / repeat (once rep choice is made — including
+  //      explicit "Unassigned", which is itself a valid choice)
+  // Compared to the old "everything on screen at once" form this
+  // reduces the perceived friction massively for the most common
+  // case (single customer, single rep, single date).
+  const customerFilled =
+    customerScope === null || (Array.isArray(customerScope) && customerScope.length > 0);
+  const repFilled =
+    repScope === null || (Array.isArray(repScope) && repScope.length > 0);
+
   const totalShifts =
     generatedDates.length * targetedCustomerIds.length * targetedRepIds.length;
 
@@ -618,43 +632,65 @@ function NewShiftPage() {
               />
             </Field>
 
-            {/* Site picker — only renders for customers with multiple
-                active sites. Single-site customers auto-resolve;
-                customers with no active sites surface a hard error
-                below so the manager can't accidentally schedule into
-                a missing location. */}
-            <SitesNeedingPick
-              customers={customers}
-              targetedCustomerIds={targetedCustomerIds}
-              sitesByCustomer={sitesByCustomer}
-              siteChoice={siteChoice}
-              onPick={(cid, siteId) =>
-                setSiteChoice((prev) => ({ ...prev, [cid]: siteId }))
-              }
-              customersWithoutSite={customersWithoutSite}
-            />
+            {/* Site picker + Reps only appear once a customer has
+                been picked. Before that, the form shows a single
+                soft prompt where the rep block would go so the
+                manager knows what comes next without being shown
+                an inert input. */}
+            {customerFilled ? (
+              <>
+                {/* Site picker — only renders for customers with
+                    multiple active sites. Single-site customers
+                    auto-resolve; customers with no active sites
+                    surface a hard error below so the manager can't
+                    accidentally schedule into a missing location. */}
+                <SitesNeedingPick
+                  customers={customers}
+                  targetedCustomerIds={targetedCustomerIds}
+                  sitesByCustomer={sitesByCustomer}
+                  siteChoice={siteChoice}
+                  onPick={(cid, siteId) =>
+                    setSiteChoice((prev) => ({ ...prev, [cid]: siteId }))
+                  }
+                  customersWithoutSite={customersWithoutSite}
+                />
 
-            <Field
-              label="Reps"
-              prominent
-              glyph="reps"
-              hint="Pick one to assign, several to spawn one shift per rep, or leave Unassigned."
-            >
-              <RepScopePicker
-                reps={reps}
-                loading={loading}
-                value={repScope}
-                onChange={setRepScope}
-                unassignedLabel="Unassigned"
-                unassignedSubLabel="Claimable by any rep"
-                specificLabel="Specific"
-                specificSubLabel="Pick one or many"
-              />
-            </Field>
+                <Field
+                  label="Reps"
+                  prominent
+                  glyph="reps"
+                  hint="Pick one to assign, several to spawn one shift per rep, or leave Unassigned."
+                >
+                  <RepScopePicker
+                    reps={reps}
+                    loading={loading}
+                    value={repScope}
+                    onChange={setRepScope}
+                    unassignedLabel="Unassigned"
+                    unassignedSubLabel="Claimable by any rep"
+                    specificLabel="Specific"
+                    specificSubLabel="Pick one or many"
+                  />
+                </Field>
+              </>
+            ) : (
+              <NextStepHint label="Pick a customer to continue." />
+            )}
           </Step>
 
-          {/* ─── Step 2 — When (last step now that distance/tasks are
-              auto-derived from the customer record) ──────────────── */}
+          {/* ─── Step 2 — When (only revealed once the rep choice is
+              made; that includes "Unassigned" as a valid pick) ──── */}
+          {!repFilled ? (
+            <Step number={2} title="When?" sub="Pick or skip a rep above first." last>
+              <NextStepHint
+                label={
+                  customerFilled
+                    ? "Choose a rep (or leave Unassigned) to set the schedule."
+                    : "Pick a customer first, then a rep."
+                }
+              />
+            </Step>
+          ) : (
           <Step number={2} title="When?" sub="Date and time. Switch to Weekly to repeat across a date range." last>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
               <Field label="Date" required>
@@ -765,6 +801,7 @@ function NewShiftPage() {
               )}
             </Field>
           </Step>
+          )}
 
           {/* Distance + total tasks used to live here as Step 3 — both
               are now derived automatically. Distance comes from the
@@ -1200,6 +1237,44 @@ function Field({
  * shape. Bottom border separates each step except the last so the action
  * buttons feel attached to step 3.
  */
+/**
+ * Soft placeholder shown when a progressive-disclosure step is gated
+ * by an earlier choice. Renders a single dashed-border row with hint
+ * copy so the form looks intentional, not broken — without making the
+ * manager think they're missing an interactive element.
+ */
+function NextStepHint({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        padding: "14px 16px",
+        border: `1px dashed ${AC.line}`,
+        borderRadius: 12,
+        background: AC.bg,
+        fontFamily: AC.font,
+        fontSize: 12.5,
+        color: AC.mute,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        lineHeight: 1.4,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 99,
+          background: AC.line,
+          flexShrink: 0,
+        }}
+      />
+      {label}
+    </div>
+  );
+}
+
 function Step({
   number,
   title,

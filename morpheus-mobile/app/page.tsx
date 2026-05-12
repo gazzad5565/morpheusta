@@ -602,7 +602,7 @@ export default function DashboardPage() {
               }}
             >
               <Glyph name="target" size={12} color={MC.ok} strokeWidth={2.4} />
-              Plan my day · {remainingStops} stops
+              Plan my day
               <Glyph name="chev-r" size={12} color="#0d6a45" />
             </Link>
           </div>
