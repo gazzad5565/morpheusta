@@ -73,6 +73,7 @@ function formatDistance(meters: number): string {
 }
 import {
   readShiftOrder,
+  readShiftOrderMeta,
   applySavedOrder,
   subscribeShiftOrder,
 } from "@/lib/shift-order-store";
@@ -301,9 +302,20 @@ export default function ShiftsListPage() {
   const [pageSavedOrder, setPageSavedOrder] = useState<string[] | null>(() =>
     typeof window === "undefined" ? null : readShiftOrder()
   );
+  // Wall-clock timestamp of the last save. Powers the "Optimized ·
+  // 2:42 PM" caption on the header pill so the rep sees WHEN the
+  // current order was locked in. Stays in sync with savedOrder via
+  // the same subscribeShiftOrder change event.
+  const [pageSavedAt, setPageSavedAt] = useState<number | null>(() =>
+    typeof window === "undefined" ? null : readShiftOrderMeta()?.savedAt ?? null
+  );
   useEffect(() => {
     setPageSavedOrder(readShiftOrder());
-    return subscribeShiftOrder(() => setPageSavedOrder(readShiftOrder()));
+    setPageSavedAt(readShiftOrderMeta()?.savedAt ?? null);
+    return subscribeShiftOrder(() => {
+      setPageSavedOrder(readShiftOrder());
+      setPageSavedAt(readShiftOrderMeta()?.savedAt ?? null);
+    });
   }, []);
   const headerDayPlanned =
     !!pageSavedOrder &&
@@ -682,22 +694,44 @@ export default function ShiftsListPage() {
             so the CTA pulls more weight here. */}
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
           {(() => {
+            // Visibility rule (May 12 — Gary):
+            //   - If the rep has a saved order → ALWAYS show the
+            //     pill (regardless of how many stops are still
+            //     remaining). Even with 1 stop left, the rep wants
+            //     to see "the day is already optimized + at what
+            //     time" — that confirmation answers "did I save
+            //     this?" every time they land on /shifts.
+            //   - If no saved order → show the CTA "Plan route"
+            //     only when there are 2+ remaining stops (single-
+            //     stop days don't need optimization).
+            //   - Hide entirely only when 0 remaining AND no save
+            //     on file (truly nothing to do).
             const remainingStops = mine.filter(
               (s) => s.state !== "complete" && s.state !== "cancelled"
             ).length;
-            if (remainingStops < 2) return null;
             const planned = headerDayPlanned;
+            if (!planned && remainingStops < 2) return null;
+            if (planned && remainingStops === 0) return null;
+            const optimizedAt = planned && pageSavedAt
+              ? new Date(pageSavedAt).toLocaleTimeString(undefined, {
+                  hour: "numeric",
+                  minute: "2-digit",
+                  hour12: true,
+                })
+              : null;
             return (
               <Link
                 href="/route"
                 aria-label={
                   planned
-                    ? `Today's route is planned (${remainingStops} stops) — view or re-optimize`
-                    : `Plan today's route (${remainingStops} stops)`
+                    ? optimizedAt
+                      ? `Day optimized at ${optimizedAt} — view or re-optimize`
+                      : "Day optimized — view or re-optimize"
+                    : "Plan today's route"
                 }
                 title={
                   planned
-                    ? "Route is planned — tap to view or re-optimize"
+                    ? "Tap to view or re-optimize"
                     : "Optimize the order of today's stops"
                 }
                 style={{
@@ -729,17 +763,19 @@ export default function ShiftsListPage() {
                   color={planned ? MC.ok : "#fff"}
                   strokeWidth={2.4}
                 />
-                {planned ? "Planned" : "Plan route"}
-                <span
-                  style={{
-                    opacity: planned ? 0.75 : 0.85,
-                    fontWeight: 500,
-                    fontSize: 11.5,
-                    marginLeft: 1,
-                  }}
-                >
-                  · {remainingStops} stops
-                </span>
+                {planned ? "Optimized" : "Plan route"}
+                {planned && optimizedAt && (
+                  <span
+                    style={{
+                      opacity: 0.75,
+                      fontWeight: 500,
+                      fontSize: 11.5,
+                      marginLeft: 1,
+                    }}
+                  >
+                    · {optimizedAt}
+                  </span>
+                )}
               </Link>
             );
           })()}
@@ -1305,12 +1341,33 @@ function ShiftRow({
           border: "none",
           padding: 14,
           display: "flex",
-          gap: 12,
-          alignItems: "center",
+          // Claimable rows stack their actions below the content so
+          // the meta line (time · AVAILABLE · distance) + the full
+          // address have full width to breathe. Previously the
+          // Claim button sat in-line on the right and squeezed the
+          // content into a 140px column — the time wrapped, the
+          // distance dropped to a new line, the address sprawled
+          // across 4 lines. Now: top row carries the row data,
+          // bottom row carries the Claim CTA right-aligned.
+          flexDirection: claimable ? "column" : "row",
+          gap: claimable ? 10 : 12,
+          alignItems: claimable ? "stretch" : "center",
           cursor: onToggle ? "pointer" : "default",
           textAlign: "left",
         }}
       >
+        <div
+          style={
+            claimable
+              ? {
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "flex-start",
+                  width: "100%",
+                }
+              : { display: "contents" }
+          }
+        >
         <CustomerTile initials={shift.initials} color={shift.color} size={52} logoUrl={shift.logoUrl} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -1686,7 +1743,9 @@ function ShiftRow({
             strokeWidth={2}
           />
         )}
+        </div>
         {unscheduled && claimable && onClaim && (
+          <div style={{ display: "flex", justifyContent: "flex-end", width: "100%" }}>
           <button
             type="button"
             onClick={(e) => {
@@ -1710,6 +1769,7 @@ function ShiftRow({
           >
             {claiming ? "Claiming…" : "Claim"}
           </button>
+          </div>
         )}
         {unscheduled && requested && onRemove && (
           <button
