@@ -156,6 +156,74 @@ function Confetti({ count = 80 }: { count?: number }) {
   );
 }
 
+/** A SECOND confetti volley — fires later than the primary one to
+ *  punctuate the tile drops. Identical to <Confetti> except the
+ *  particles have a baked-in animationDelay so they don't fire on
+ *  mount; they wait until the tile drop window. */
+function SecondaryConfetti({ count = 48 }: { count?: number }) {
+  const particles = useMemo(() => {
+    const palette = [MC.brand, MC.brandDeep, "#5b3da5", "#2E4FB8", MC.ok, "#E5A017"];
+    return Array.from({ length: count }, (_, i) => {
+      const angle = (Math.random() * 140 - 110) * (Math.PI / 180);
+      const speed = 60 + Math.random() * 120;
+      const tx = Math.cos(angle) * speed;
+      const ty = Math.sin(angle) * speed;
+      const tyFinal = ty + 80 + Math.random() * 60;
+      const rot = (Math.random() - 0.5) * 540;
+      const color = palette[i % palette.length];
+      const isCircle = Math.random() > 0.5;
+      const w = isCircle ? 5 + Math.random() * 4 : 4 + Math.random() * 3;
+      const h = isCircle ? w : 7 + Math.random() * 5;
+      // The base 2300ms delay aligns with the first tile drop
+      // (tile delay = 2400ms) so the confetti starts a fraction
+      // before the tile lands — feels like the tile "broke" the
+      // wave open. Then 0-200ms jitter for natural spray.
+      const delay = 2300 + Math.random() * 200;
+      return { tx, tyFinal, rot, color, w, h, isCircle, delay, key: i };
+    });
+  }, [count]);
+
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        left: "50%",
+        top: 20,
+        width: 0,
+        height: 0,
+        pointerEvents: "none",
+        zIndex: 5,
+      }}
+      className="dm-confetti-host"
+    >
+      {particles.map((p) => (
+        <span
+          key={p.key}
+          className="dm-confetti-piece"
+          style={
+            {
+              position: "absolute",
+              left: 0,
+              top: 0,
+              width: p.w,
+              height: p.h,
+              borderRadius: p.isCircle ? "50%" : 2,
+              background: p.color,
+              opacity: 0,
+              boxShadow: `0 0 6px ${p.color}99`,
+              ["--tx" as never]: `${p.tx}px`,
+              ["--ty" as never]: `${p.tyFinal}px`,
+              ["--rot" as never]: `${p.rot}deg`,
+              animationDelay: `${p.delay}ms`,
+            } as React.CSSProperties
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
 /** "7h 24m" / "45m" — friendly duration formatter. Floors seconds. */
 function formatHHMM(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "—";
@@ -348,12 +416,16 @@ export default function DayPage() {
 
         /* Number explosion — comes from huge scale, overshoots,
            settles. The bezier here is the secret: high overshoot
-           + slight bounce so it lands with WEIGHT. */
+           + slight bounce so it lands with WEIGHT. Extended to
+           1.5s (was 0.9s) so the count-up inside has room to
+           breathe — the user actually SEES the number tick from
+           0 to its final value instead of just appearing. */
         @keyframes dm-hero-num {
-          0%   { transform: scale(0.2) rotate(-6deg); opacity: 0; filter: blur(20px); }
-          40%  { opacity: 1; filter: blur(0); }
-          60%  { transform: scale(1.18) rotate(2deg); }
-          80%  { transform: scale(0.96) rotate(-1deg); }
+          0%   { transform: scale(0.15) rotate(-8deg); opacity: 0; filter: blur(28px); }
+          25%  { opacity: 1; filter: blur(8px); }
+          50%  { transform: scale(1.24) rotate(3deg); filter: blur(0); }
+          70%  { transform: scale(0.93) rotate(-1.5deg); }
+          85%  { transform: scale(1.04) rotate(0.5deg); }
           100% { transform: scale(1) rotate(0); opacity: 1; filter: blur(0); }
         }
         /* Starburst flare — radial gradient that explodes outward
@@ -416,7 +488,7 @@ export default function DayPage() {
         }
 
         .dm-hero-num {
-          animation: dm-hero-num .9s cubic-bezier(.18, 1.6, .35, 1) both;
+          animation: dm-hero-num 1.8s cubic-bezier(.18, 1.5, .35, 1) both;
         }
         .dm-starburst {
           animation: dm-starburst 1.1s cubic-bezier(.16, 1, .3, 1) .05s both;
@@ -587,15 +659,26 @@ export default function DayPage() {
             className="dm-hero-num"
             style={{
               fontFamily: MC.fontDisplay,
-              fontSize: 160,
+              fontSize: 168,
               fontWeight: 800,
               lineHeight: 1,
               letterSpacing: -6,
               color: "#fff",
-              textShadow: `0 0 60px ${MC.brand}cc, 0 0 20px ${MC.brand}aa`,
+              textShadow: `0 0 80px ${MC.brand}ee, 0 0 40px ${MC.brand}cc, 0 0 12px ${MC.brand}aa`,
             }}
           >
-            {loaded && stats ? stats.shiftsDone : 0}
+            {/* Count-up from 0 → real number on top of the drop-in
+                animation. Without this the hero is just a static
+                "3" sitting there — the entire entrance feels like a
+                still image once the CSS keyframes complete (Gary's
+                "barely working" feedback). Counting up gives the
+                eye something to track for 1.5 seconds, which is
+                what makes the moment feel earned. */}
+            <CountUp
+              to={loaded && stats ? stats.shiftsDone : 0}
+              duration={1500}
+              delay={400}
+            />
           </div>
           {/* Letter-typed "SHIFTS COMPLETE" sub-label.
               Each char animates in with a small stagger so it
@@ -617,7 +700,7 @@ export default function DayPage() {
               <span
                 key={i}
                 className="dm-letter"
-                style={{ animationDelay: `${0.85 + i * 0.04}s` }}
+                style={{ animationDelay: `${1.5 + i * 0.06}s` }}
               >
                 {ch === " " ? " " : ch}
               </span>
@@ -629,7 +712,7 @@ export default function DayPage() {
         <div
           className="dm-rise"
           style={{
-            animationDelay: "1.3s",
+            animationDelay: "2.0s",
             marginTop: 26,
             position: "relative",
             zIndex: 2,
@@ -651,7 +734,7 @@ export default function DayPage() {
         <div
           className="dm-rise"
           style={{
-            animationDelay: "1.5s",
+            animationDelay: "2.2s",
             fontFamily: MC.font,
             fontSize: 15,
             color: "rgba(255,255,255,.75)",
@@ -670,21 +753,26 @@ export default function DayPage() {
 
       {/* Four stat tiles in a 2×2 grid. Each animates in with a
           staggered 3D-feel drop + a count-up inside so the numbers
-          feel earned. Delays start at 1.7s so the hero number has
-          had its full moment first.
-          Like the hero, we gate rendering on `loaded` so the
-          count-ups + drop animations fire ONCE with the real
-          numbers in scope. */}
+          feel earned. Delays bumped to 2.4s so the hero count-up
+          (now 1.5s) has fully resolved first — otherwise the eye
+          gets pulled away from the dramatic number tick before
+          it lands. */}
       {loaded && stats && (
-      <div style={{ padding: "20px 16px 0" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      <div style={{ position: "relative", padding: "24px 16px 0" }}>
+        {/* Second confetti volley — fires from the tile area
+            right as the tiles begin to drop. Gives the cinematic
+            a "phase 2" hit so it doesn't feel like one explosion
+            and done. Smaller particle count for a calmer second
+            wave. */}
+        <SecondaryConfetti count={48} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, position: "relative", zIndex: 2 }}>
           <DayStat
             label="Shifts done"
             tone="brand"
             icon="check-circle"
             countTo={stats?.shiftsDone ?? 0}
             format={(n) => String(n)}
-            delay={1700}
+            delay={2400}
           />
           <DayStat
             label="Hours worked"
@@ -692,7 +780,7 @@ export default function DayPage() {
             icon="clock"
             countTo={stats?.hoursSeconds ?? 0}
             format={(s) => formatHHMM(s)}
-            delay={1820}
+            delay={2560}
           />
           <DayStat
             label="Tasks completed"
@@ -700,7 +788,7 @@ export default function DayPage() {
             icon="check"
             countTo={stats?.tasksCompleted ?? 0}
             format={(n) => String(n)}
-            delay={1940}
+            delay={2720}
           />
           <DayStat
             label="Travel time"
@@ -708,7 +796,7 @@ export default function DayPage() {
             icon="pin"
             countTo={stats?.travelSeconds ?? 0}
             format={(s) => formatHHMM(s)}
-            delay={2060}
+            delay={2880}
           />
         </div>
       </div>
@@ -722,7 +810,7 @@ export default function DayPage() {
           <div
             className="dm-fade-up"
             style={{
-              animationDelay: "2.3s",
+              animationDelay: "3.1s",
               fontFamily: MC.font,
               fontSize: 11,
               fontWeight: 700,
@@ -736,7 +824,7 @@ export default function DayPage() {
           </div>
           <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 8 }}>
             {stats.shifts.map((s, i) => (
-              <DayShiftRow key={s.realId} shift={s} delay={2400 + i * 80} />
+              <DayShiftRow key={s.realId} shift={s} delay={3200 + i * 90} />
             ))}
           </div>
         </>
@@ -747,7 +835,7 @@ export default function DayPage() {
         <div
           className="dm-fade-up"
           style={{
-            animationDelay: "2.7s",
+            animationDelay: "3.6s",
             margin: "18px 16px 0",
             padding: "10px 12px",
             borderRadius: 12,
@@ -775,7 +863,7 @@ export default function DayPage() {
       <div
         className="dm-fade-up"
         style={{
-          animationDelay: "2.9s",
+          animationDelay: "3.9s",
           padding: "24px 16px 32px",
           display: "flex",
           justifyContent: "center",
@@ -892,12 +980,17 @@ function DayStat({
       <div
         style={{
           fontFamily: MC.font,
-          fontSize: 10.5,
-          fontWeight: 700,
-          letterSpacing: 0.8,
+          // Bumped from 10.5 → 11.5 to add readable weight
+          fontSize: 11.5,
+          fontWeight: 800,
+          letterSpacing: 0.6,
           textTransform: "uppercase",
-          color: palette.fg,
-          opacity: 0.7,
+          // Dropped the 0.7 opacity (Gary screenshot showed labels
+          // reading near-invisible on real iOS Safari — opacity
+          // compounds against the white-fading tile gradient). Now
+          // using a neutral dark-grey at full opacity for max
+          // contrast on every tile palette.
+          color: MC.ink2,
           marginTop: 2,
         }}
       >
