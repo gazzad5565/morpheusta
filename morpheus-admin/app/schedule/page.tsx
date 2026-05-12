@@ -2745,7 +2745,11 @@ function ShiftQuickPopover({
           top: "50%",
           left: "50%",
           transform: "translate(-50%, -50%)",
-          width: 320,
+          // Bumped from 320 → 440 so the action row (Delete · Edit
+          // here · Add another · Full edit) fits cleanly on a single
+          // line. 320 forced the buttons to wrap into two rows,
+          // which looked unfinished.
+          width: 440,
           maxWidth: "calc(100vw - 32px)",
           background: "#fff",
           border: `1px solid ${AC.line}`,
@@ -2960,9 +2964,9 @@ function ShiftQuickPopover({
 
         {/* Actions
             Layout: Delete pinned left (when applicable), then
-            "Add another here" + View/Edit on the right. The
-            add-another button uses neutral styling (not primary)
-            so the page's main next-step stays View/Edit. */}
+            "Edit here · Add another · Full edit" on the right. All
+            sit on a single row — the popover widened to 440px to
+            accommodate (was 320px and wrapping). */}
         <div
           style={{
             marginTop: 14,
@@ -2970,11 +2974,10 @@ function ShiftQuickPopover({
             gap: 8,
             justifyContent: "space-between",
             alignItems: "center",
-            flexWrap: "wrap",
           }}
         >
           {/* Left side — destructive actions */}
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             {canDelete && !confirmDelete && (
               <Btn
                 kind="danger"
@@ -3010,7 +3013,7 @@ function ShiftQuickPopover({
               "Edit here" only appears for scheduled shifts (the DB
               guards updateShift against any later state anyway). */}
           {!confirmDelete && editMode && (
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
               <Btn
                 size="sm"
                 onClick={() => {
@@ -3037,7 +3040,7 @@ function ShiftQuickPopover({
             </div>
           )}
           {!confirmDelete && !editMode && (
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
               {canQuickEdit && (
                 <Btn
                   size="sm"
@@ -3072,7 +3075,7 @@ function ShiftQuickPopover({
                   router.push(`/schedule/new?${qs.toString()}`);
                 }}
               >
-                Add another here
+                Add another
               </Btn>
               <Btn
                 kind="primary"
