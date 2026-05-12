@@ -151,27 +151,66 @@ function CheckInPage() {
 
   // Get the rep's GPS once. Best-effort; if denied we treat as unknown
   // location → off-site exception with a "Location unavailable" reason.
+  //
+  // Cross-platform: same code path on iOS Safari, iOS PWA, and Android
+  // Chrome. We pre-check navigator.permissions when available so a
+  // denied state shorts out immediately (no pointless prompt) and a
+  // granted state silently calls getCurrentPosition (no Safari re-
+  // prompt on rep already-granted-once cases). When the Permissions
+  // API isn't available we fall back to the previous direct call,
+  // preserving the original behaviour on older browsers.
   useEffect(() => {
     if (typeof window === "undefined" || !navigator.geolocation) {
       setPositionLoading(false);
       setPositionError("Geolocation not available on this device.");
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setPosition({ lat: pos.coords.latitude, lon: pos.coords.longitude });
-        setPositionLoading(false);
-      },
-      (err) => {
-        setPositionLoading(false);
-        setPositionError(
-          err.code === err.PERMISSION_DENIED
-            ? "Location permission denied."
-            : "Couldn't read your location."
-        );
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30_000 }
-    );
+
+    const fetchPosition = () => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setPosition({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+          setPositionLoading(false);
+        },
+        (err) => {
+          setPositionLoading(false);
+          setPositionError(
+            err.code === err.PERMISSION_DENIED
+              ? "Location permission denied."
+              : "Couldn't read your location."
+          );
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 30_000 }
+      );
+    };
+
+    type PermsAPI = {
+      query: (d: { name: PermissionName }) => Promise<{ state: PermissionState }>;
+    };
+    const perms = (
+      navigator as Navigator & { permissions?: PermsAPI }
+    ).permissions;
+    if (perms && typeof perms.query === "function") {
+      void perms
+        .query({ name: "geolocation" as PermissionName })
+        .then((res) => {
+          if (res.state === "denied") {
+            setPositionLoading(false);
+            setPositionError("Location permission denied.");
+            return;
+          }
+          // 'granted' → silent fetch. 'prompt' → user-initiated
+          // prompt (rep just tapped Check in; iOS handles this well).
+          fetchPosition();
+        })
+        .catch(() => {
+          // Permissions API present but query failed — fall back.
+          fetchPosition();
+        });
+    } else {
+      // Old browser without Permissions API — preserve prior path.
+      fetchPosition();
+    }
   }, []);
 
   // ─── Effective exception toggles ─────────────────────────────────────

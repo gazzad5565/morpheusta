@@ -122,22 +122,81 @@ export async function planRoute(
 }
 
 /**
- * Get the rep's current GPS (best-effort, falls back to a reasonable
- * default if denied). Used by planMyDay below.
+ * Cross-platform geolocation request with permission-state awareness.
+ *
+ * Why a shared helper: iOS Safari is aggressive about downgrading the
+ * "Allow Once" geolocation grant between sessions, so a naive
+ * `getCurrentPosition` call re-prompts the rep every visit. Android
+ * Chrome is much stickier — once granted, it stays granted. To avoid
+ * needlessly retriggering iOS's prompt on user-initiated flows that
+ * the rep takes every shift (Check in, Check out, Plan my day), we:
+ *
+ *   1. Query navigator.permissions first.
+ *   2. If `granted` → silent fetch via getCurrentPosition (no prompt).
+ *   3. If `denied` → resolve null immediately (no prompt — saves the
+ *      rep tapping an action that's just going to fail).
+ *   4. If `prompt` or no Permissions API support → call
+ *      getCurrentPosition directly. iOS handles a user-initiated
+ *      prompt gracefully when the rep just tapped a button; if they
+ *      pick "Allow on Every Visit" the permission becomes `granted`
+ *      and step 2 above kicks in for every subsequent call.
+ *
+ * Both platforms see consistent behaviour: no spurious prompts on
+ * iOS, no regressions on Android. Both honour the same options
+ * (8s timeout, low-accuracy, 60s cache) so the latency profile
+ * matches.
+ */
+export async function requestGeolocationOnce(
+  opts?: { highAccuracy?: boolean; timeoutMs?: number; maxAgeMs?: number }
+): Promise<LatLng | null> {
+  if (typeof window === "undefined" || !navigator.geolocation) return null;
+
+  const options: PositionOptions = {
+    enableHighAccuracy: opts?.highAccuracy ?? false,
+    timeout: opts?.timeoutMs ?? 8000,
+    maximumAge: opts?.maxAgeMs ?? 60_000,
+  };
+
+  const fetchNow = () =>
+    new Promise<LatLng | null>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) =>
+          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve(null),
+        options
+      );
+    });
+
+  // Permissions API check. Safari < 16 lacks it — fall through.
+  type PermsAPI = {
+    query: (d: { name: PermissionName }) => Promise<{ state: PermissionState }>;
+  };
+  const perms = (
+    navigator as Navigator & { permissions?: PermsAPI }
+  ).permissions;
+  if (perms && typeof perms.query === "function") {
+    try {
+      const res = await perms.query({ name: "geolocation" as PermissionName });
+      if (res.state === "denied") return null;
+      // 'granted' OR 'prompt' both fall through to fetchNow.
+      // For 'granted' the call is silent. For 'prompt' the OS asks
+      // — acceptable on user-initiated flows.
+      return await fetchNow();
+    } catch {
+      // Permissions API exists but query failed — fall through.
+    }
+  }
+  return fetchNow();
+}
+
+/**
+ * Internal alias used by planMyDay so the call site reads naturally
+ * ("get my current location"). Thin wrapper over
+ * requestGeolocationOnce so /route taps get the same permission-aware
+ * behaviour as /check-in and /check-out.
  */
 function getCurrentLocation(): Promise<LatLng | null> {
-  return new Promise((resolve) => {
-    if (typeof window === "undefined" || !navigator.geolocation) {
-      resolve(null);
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => resolve(null),
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
-    );
-  });
+  return requestGeolocationOnce();
 }
 
 export interface PlanMyDayResult {

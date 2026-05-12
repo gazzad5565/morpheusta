@@ -3,8 +3,34 @@
  * table while the active shift screen is open.
  *
  * Throttled to MIN_INTERVAL_MS so rapid position events don't hammer the DB.
- * Browsers can't run this in the background once the page is hidden — the
- * geolocation watcher is paused and resumes when the user returns.
+ *
+ * ── Cross-platform note (iOS vs Android PWAs) ─────────────────────
+ *
+ * Browsers can't run this in the background once the page is hidden —
+ * the geolocation watcher pauses and resumes when the user returns.
+ * That browser-level pause is consistent across platforms.
+ *
+ * What's NOT consistent is how aggressively the OS suspends a hidden
+ * PWA:
+ *
+ *   - **Android Chrome PWAs** keep the page alive longer when
+ *     backgrounded; on return from another app the page resumes
+ *     quickly and the geolocation watcher fires within ~1s.
+ *
+ *   - **iOS Safari PWAs** suspend the page very aggressively when
+ *     the rep locks the screen, switches to another app, or even
+ *     just minimises the PWA. On resume there's often a multi-
+ *     second gap before the first GPS tick lands. Worst case, iOS
+ *     evicts the PWA from memory entirely and a cold start has to
+ *     re-acquire location from scratch.
+ *
+ * For TRUE background GPS tracking (continuous location during a
+ * shift even when the phone is locked or the rep is in another
+ * app), the only durable solution is a Capacitor native wrap with
+ * the background-location plugin. That's on the deferred list. For
+ * now the rep_locations row updates only while the /active screen
+ * is in the foreground — which is the design intent today.
+ * ──────────────────────────────────────────────────────────────────
  */
 
 import { supabase, isSupabaseConfigured } from "./supabase";

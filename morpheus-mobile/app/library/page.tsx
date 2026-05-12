@@ -88,6 +88,15 @@ export default function LibraryPage() {
       alert(`Couldn't open: ${r.error}`);
       return;
     }
+    // Library files (PDFs, images, docs) are web URLs that don't
+    // hand off to a separate native app, so the iOS PWA "white
+    // screen after return from external app" bug doesn't apply
+    // here — that bug specifically hits when iOS forwards a
+    // universal link to e.g. the Maps app. For arbitrary web URLs
+    // target="_blank" still gives the expected UX on both
+    // platforms: iOS Safari opens the file in a tab, Android
+    // Chrome opens a custom tab. Switching back to the PWA
+    // restores it cleanly in both cases.
     window.open(r.url, "_blank", "noopener,noreferrer");
   };
 

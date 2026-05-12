@@ -118,27 +118,61 @@ function CheckOutPage() {
   }, []);
 
   // Best-effort GPS read for the off-site check.
+  //
+  // Same cross-platform pattern as /check-in: pre-check the
+  // Permissions API to skip the prompt entirely when permission is
+  // already denied (or already granted), and fall back to a direct
+  // getCurrentPosition call on browsers that lack the API. iOS
+  // Safari, iOS PWA, Android Chrome, and Android PWA all hit the
+  // same path; behaviour differs only inside the OS handlers.
   useEffect(() => {
     if (typeof window === "undefined" || !navigator.geolocation) {
       setPositionLoading(false);
       setPositionError("Geolocation not available on this device.");
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setPosition({ lat: pos.coords.latitude, lon: pos.coords.longitude });
-        setPositionLoading(false);
-      },
-      (err) => {
-        setPositionLoading(false);
-        setPositionError(
-          err.code === err.PERMISSION_DENIED
-            ? "Location permission denied."
-            : "Couldn't read your location."
-        );
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30_000 }
-    );
+
+    const fetchPosition = () => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setPosition({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+          setPositionLoading(false);
+        },
+        (err) => {
+          setPositionLoading(false);
+          setPositionError(
+            err.code === err.PERMISSION_DENIED
+              ? "Location permission denied."
+              : "Couldn't read your location."
+          );
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 30_000 }
+      );
+    };
+
+    type PermsAPI = {
+      query: (d: { name: PermissionName }) => Promise<{ state: PermissionState }>;
+    };
+    const perms = (
+      navigator as Navigator & { permissions?: PermsAPI }
+    ).permissions;
+    if (perms && typeof perms.query === "function") {
+      void perms
+        .query({ name: "geolocation" as PermissionName })
+        .then((res) => {
+          if (res.state === "denied") {
+            setPositionLoading(false);
+            setPositionError("Location permission denied.");
+            return;
+          }
+          fetchPosition();
+        })
+        .catch(() => {
+          fetchPosition();
+        });
+    } else {
+      fetchPosition();
+    }
   }, []);
 
   // Read completed task IDs from URL (set by /active page on Check Out tap).
