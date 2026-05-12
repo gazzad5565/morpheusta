@@ -408,6 +408,12 @@ export default function DayPage() {
           0%   { opacity: 0; transform: translateY(8px); }
           100% { opacity: 1; transform: translateY(0); }
         }
+        /* "Tallying your day…" placeholder pulse before data lands.
+           Pauses entirely under prefers-reduced-motion. */
+        @keyframes dm-pulse {
+          0%, 100% { opacity: .4; }
+          50%      { opacity: 1; }
+        }
 
         .dm-hero-num {
           animation: dm-hero-num .9s cubic-bezier(.18, 1.6, .35, 1) both;
@@ -461,8 +467,19 @@ export default function DayPage() {
       {/* Hero stage — dark cinematic backdrop, hero number explodes
           in from huge scale, three shockwave rings expand outward,
           starburst flare blooms behind, 80 confetti particles spray
-          on land, animated-gradient "DAY DONE" label below. */}
+          on land, animated-gradient "DAY DONE" label below.
+
+          The `key` prop is critical: it remounts the entire hero
+          subtree the moment `loaded` flips to true, which restarts
+          every CSS animation from t=0 against the REAL data. Without
+          this, the animations play once on initial render (when
+          stats is null and the hero number is "0"), then the real
+          number snaps in afterwards with no animation. That's the
+          "I almost fell asleep" bug — the cinematic was happening
+          on placeholder zeros, and by the time the data landed the
+          show was over. */}
       <div
+        key={loaded ? `ready-${stats?.shiftsDone ?? 0}` : "loading"}
         style={{
           padding: "44px 20px 38px",
           background: `radial-gradient(ellipse at 50% 0%, ${MC.brandDeep} 0%, ${MC.ink} 55%, #050912 100%)`,
@@ -472,6 +489,34 @@ export default function DayPage() {
           minHeight: 320,
         }}
       >
+        {/* While we're still tallying, show a calm dark stage with
+            a quietly-pulsing dot so the user knows something is
+            coming. The cinematic doesn't start until `loaded` is
+            true. Typical wait is < 500ms — barely perceptible. */}
+        {!loaded && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(255,255,255,.5)",
+              fontFamily: MC.font,
+              fontSize: 13,
+              letterSpacing: 2,
+              textTransform: "uppercase",
+              fontWeight: 700,
+            }}
+          >
+            <span style={{ animation: "dm-pulse 1.2s ease-in-out infinite" }}>
+              Tallying your day…
+            </span>
+          </div>
+        )}
+        {/* Everything below renders only after data has landed so
+            the animations fire ONCE with the real numbers. */}
+        {loaded && <>
         {/* Big confetti volley — 80 particles, wider spread. */}
         <Confetti count={80} />
 
@@ -604,18 +649,21 @@ export default function DayPage() {
             fontWeight: 500,
           }}
         >
-          {loaded && stats
-            ? stats.shiftsDone === 0
-              ? "No completed shifts today."
-              : `${formatHHMM(stats.hoursSeconds)} on the clock`
-            : "Tallying your day…"}
+          {stats && stats.shiftsDone === 0
+            ? "No completed shifts today."
+            : `${formatHHMM(stats?.hoursSeconds ?? 0)} on the clock`}
         </div>
+        </>}
       </div>
 
       {/* Four stat tiles in a 2×2 grid. Each animates in with a
           staggered 3D-feel drop + a count-up inside so the numbers
           feel earned. Delays start at 1.7s so the hero number has
-          had its full moment first. */}
+          had its full moment first.
+          Like the hero, we gate rendering on `loaded` so the
+          count-ups + drop animations fire ONCE with the real
+          numbers in scope. */}
+      {loaded && stats && (
       <div style={{ padding: "20px 16px 0" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <DayStat
@@ -652,6 +700,7 @@ export default function DayPage() {
           />
         </div>
       </div>
+      )}
 
       {/* Per-stop timeline — gives the day texture. Each row is a
           completed shift with the customer logo, the check-in /
