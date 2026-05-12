@@ -29,6 +29,10 @@ import {
   UnableToAttendSheet,
   unableReasonLabel,
 } from "@/components/UnableToAttendSheet";
+import {
+  computeNextLeaveBy,
+  type NextLeaveByInfo,
+} from "@/lib/route-planner";
 
 // A shift row from the DB carries internal id + state alongside the display fields.
 type DbShift = Shift & {
@@ -87,6 +91,28 @@ export default function ShiftsListPage() {
     const t = window.setInterval(() => setNowTick((n) => n + 1), 30_000);
     return () => window.clearInterval(t);
   }, []);
+
+  // "Leave by HH:MM · X min drive" pill for the next-upcoming shift.
+  // Computed via the shared planner helper so the home Up Next card
+  // and this page show the same number. Recomputes when the shifts
+  // list changes (a shift completes / a new one lands / states flip).
+  // Only the matching row in `mine` will render the pill — the rest
+  // stay clean.
+  const [nextLeaveBy, setNextLeaveBy] = useState<NextLeaveByInfo | null>(null);
+  useEffect(() => {
+    if (!loaded) return;
+    let cancelled = false;
+    computeNextLeaveBy()
+      .then((info) => {
+        if (!cancelled) setNextLeaveBy(info);
+      })
+      .catch(() => {
+        if (!cancelled) setNextLeaveBy(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loaded, mine.map((s) => `${s.realId}:${s.state}`).join("|")]);
 
   const reload = () => {
     Promise.all([
@@ -619,6 +645,17 @@ export default function ShiftsListPage() {
                 s.rawEndTime,
                 s.state
               )}
+              // Only the row matching the planner's "next stop"
+              // gets the leave-by pill. Everyone else passes null.
+              leaveBy={
+                nextLeaveBy && nextLeaveBy.shiftRealId === s.realId
+                  ? {
+                      leaveBy: nextLeaveBy.leaveBy,
+                      driveSeconds: nextLeaveBy.driveSeconds,
+                      trafficAware: nextLeaveBy.trafficAware,
+                    }
+                  : null
+              }
               onToggle={() =>
                 setExpandedId(expandedId === s.realId ? null : s.realId)
               }
@@ -797,6 +834,7 @@ function ShiftRow({
   claiming,
   navigating,
   timing,
+  leaveBy,
   onToggle,
   onCheckIn,
   onResume,
@@ -836,6 +874,17 @@ function ShiftRow({
    *  Computed in the parent so it lives off the page-level 30s tick rather
    *  than each row owning its own timer. */
   timing?: import("@/lib/format").ShiftTiming | null;
+  /** When set, the row renders a small "Leave by 10:42 · 12 min drive"
+   *  pill below the time line. Only the next-upcoming row in the
+   *  list passes this in — the rest leave it undefined to keep the
+   *  list clean. Drive duration + leave-by come from the shared
+   *  planner so the number matches the home Up Next card and /route
+   *  exactly. */
+  leaveBy?: {
+    leaveBy: Date;
+    driveSeconds: number;
+    trafficAware: boolean;
+  } | null;
   onToggle?: () => void;
   onCheckIn?: () => void;
   onResume?: () => void;
@@ -1094,6 +1143,43 @@ function ShiftRow({
               >
                 {shift.siteAddress}
               </span>
+            </div>
+          )}
+          {/* Leave-by pill — only the next-upcoming row gets the
+              `leaveBy` prop from the parent, so this only renders on
+              that one row. Same shape as the home Up Next card so
+              reps see the same number in both places. */}
+          {leaveBy && (
+            <div
+              style={{
+                marginTop: 6,
+                fontFamily: MC.font,
+                fontSize: 11.5,
+                fontWeight: 700,
+                color: "#7A560A",
+                background: MC.warnTint,
+                border: `1px solid ${MC.warn}33`,
+                padding: "3px 8px 3px 6px",
+                borderRadius: 999,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                letterSpacing: 0.2,
+              }}
+              title={
+                leaveBy.trafficAware
+                  ? "Based on live traffic"
+                  : "Estimated drive time"
+              }
+            >
+              <Glyph name="clock" size={11} color={MC.warn} strokeWidth={2.4} />
+              Leave by{" "}
+              {leaveBy.leaveBy.toLocaleTimeString(undefined, {
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+              })}{" "}
+              · {Math.max(1, Math.round(leaveBy.driveSeconds / 60))} min drive
             </div>
           )}
         </div>

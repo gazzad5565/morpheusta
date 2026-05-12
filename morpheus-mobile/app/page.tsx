@@ -30,7 +30,11 @@ import {
   unableReasonLabel,
 } from "@/components/UnableToAttendSheet";
 import { resolvedAttentionFeedback } from "@/lib/shifts-store";
-import { openMapsLink } from "@/lib/route-planner";
+import {
+  openMapsLink,
+  computeNextLeaveBy,
+  type NextLeaveByInfo,
+} from "@/lib/route-planner";
 
 // MapLibre needs `window`; defer to client-only.
 const DashboardMap = dynamic(
@@ -244,6 +248,29 @@ export default function DashboardPage() {
   const [shiftsLoaded, setShiftsLoaded] = useState(false);
   // Real library file count, used for the Library shortcut subtitle.
   const [libraryCount, setLibraryCount] = useState<number | null>(null);
+
+  // "Leave by HH:MM · X min drive" line for the next upcoming shift.
+  // Computed by the shared planner helper so /shifts and the home
+  // page Up Next card show the exact same number. Refetches when
+  // the shifts list changes; only the FIRST upcoming shift gets the
+  // line so the rest of the day stays uncluttered.
+  const [nextLeaveBy, setNextLeaveBy] = useState<NextLeaveByInfo | null>(null);
+  useEffect(() => {
+    if (!shiftsLoaded) return;
+    let cancelled = false;
+    computeNextLeaveBy()
+      .then((info) => {
+        if (!cancelled) setNextLeaveBy(info);
+      })
+      .catch(() => {
+        if (!cancelled) setNextLeaveBy(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Trigger by shifts list length + the realId set so we recompute
+    // when a shift completes / new one lands / states change.
+  }, [shiftsLoaded, shifts.map((s) => `${s.realId}:${s.state}`).join("|")]);
 
   // "I can't make this shift" sheet state — applies to the up-next
   // shift only on the dashboard. Mirrors the /shifts page pattern so
@@ -504,6 +531,7 @@ export default function DashboardPage() {
       <UpNextCard
         shifts={shifts}
         loaded={shiftsLoaded}
+        nextLeaveBy={nextLeaveBy}
         travellingSince={travellingSince}
         setTravellingSince={setTravellingSince}
         inProgressCount={inProgressCount}
@@ -692,6 +720,7 @@ export default function DashboardPage() {
 function UpNextCard({
   shifts,
   loaded,
+  nextLeaveBy,
   travellingSince,
   setTravellingSince,
   inProgressCount,
@@ -703,6 +732,11 @@ function UpNextCard({
 }: {
   shifts: DbShift[];
   loaded: boolean;
+  /** Computed by the parent via computeNextLeaveBy(). When the
+   *  realId matches the up-next shift AND the rep isn't already at
+   *  the customer, the card renders a small "Leave by HH:MM · X
+   *  min drive" line. Otherwise hidden. */
+  nextLeaveBy: NextLeaveByInfo | null;
   travellingSince: number | null;
   setTravellingSince: (v: number | null) => void;
   inProgressCount: number;
@@ -1072,6 +1106,46 @@ function UpNextCard({
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                     {next.siteAddress}
                   </span>
+                </div>
+              )}
+              {/* Leave-by line — only when the planner could compute
+                  it (we have real GPS origin + the up-next shift
+                  hasn't started yet). Tiny single-line pill so it
+                  reads as actionable info without crowding the card.
+                  Same shape on the /shifts row so reps learn the
+                  pattern once. */}
+              {!isResume && nextLeaveBy && nextLeaveBy.shiftRealId === next.realId && (
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontFamily: MC.font,
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    color: "#7A560A",
+                    background: MC.warnTint,
+                    border: `1px solid ${MC.warn}33`,
+                    padding: "4px 8px 4px 6px",
+                    borderRadius: 999,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    letterSpacing: 0.2,
+                  }}
+                  title={
+                    nextLeaveBy.trafficAware
+                      ? "Based on live traffic"
+                      : "Estimated drive time"
+                  }
+                >
+                  <Glyph name="clock" size={11} color={MC.warn} strokeWidth={2.4} />
+                  Leave by{" "}
+                  {nextLeaveBy.leaveBy.toLocaleTimeString(undefined, {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    hour12: true,
+                  })}{" "}
+                  ·{" "}
+                  {Math.max(1, Math.round(nextLeaveBy.driveSeconds / 60))} min drive
                 </div>
               )}
             </div>

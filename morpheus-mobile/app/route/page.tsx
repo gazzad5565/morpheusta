@@ -44,6 +44,7 @@ import {
   buildDayMapsUrl,
   buildLegMapsUrl,
   openMapsLink,
+  TRAFFIC_LS_KEY,
   type PlanMyDayResult,
   type PlannerStop,
 } from "@/lib/route-planner";
@@ -134,11 +135,9 @@ function computeScheduleStatus(
   return { kind: "early", eta, scheduled, minsEarly: diffMin };
 }
 
-/** localStorage key for the rep's "Live traffic" toggle preference.
- *  Persists across sessions so they don't have to flick it every
- *  time they reopen the app. Default is true — the green Live-traffic
- *  state is what most reps want once the API key is wired up. */
-const TRAFFIC_LS_KEY = "morpheus.route.useTraffic";
+// TRAFFIC_LS_KEY is imported from lib/route-planner so the leave-by
+// helpers used by /shifts and the home page can honour the same
+// preference the rep set here.
 
 export default function RoutePage() {
   const router = useRouter();

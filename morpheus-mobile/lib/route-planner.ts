@@ -307,6 +307,83 @@ function buildArrivalISO(date: string, time: string): string | undefined {
   return new Date(Y, M - 1, D, h, m, 0, 0).toISOString();
 }
 
+/* ─── Shared leave-by helper ──────────────────────────────────────
+ *
+ * The /shifts list and the home page Up Next card both want a small
+ * "Leave by 10:42 · 12 min drive" line on the rep's next upcoming
+ * shift — without duplicating the planner call or the math. This
+ * section exposes:
+ *
+ *   - TRAFFIC_LS_KEY / readTrafficPref()
+ *     The /route page's "Live traffic" toggle is persisted in
+ *     localStorage; reading it from here lets the leave-by line
+ *     honour the same preference so the rep sees consistent data
+ *     across screens.
+ *
+ *   - NextLeaveByInfo / computeNextLeaveBy()
+ *     One async call that returns the next shift's leave-by, drive
+ *     duration, and which shift it applies to (so the caller can
+ *     match it to the right row). Uses the existing planMyDay
+ *     pipeline, so the 5-min planRoute cache absorbs repeat calls
+ *     between /shifts and home.
+ *
+ * Returns null when:
+ *   - no remaining shifts today
+ *   - the GPS origin couldn't be determined (originFromFirstStop is
+ *     true) — "leave by" math is meaningless without knowing where
+ *     the rep is leaving from
+ *   - the first shift has no scheduled start on record
+ */
+
+export const TRAFFIC_LS_KEY = "morpheus.route.useTraffic";
+
+export function readTrafficPref(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.localStorage.getItem(TRAFFIC_LS_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+export interface NextLeaveByInfo {
+  /** Real shift id this applies to — match against ShiftWithMeta.realId
+   *  to find the right row in the consumer's list. */
+  shiftRealId: string;
+  /** Wall-clock time the rep should leave to arrive at the scheduled
+   *  start. */
+  leaveBy: Date;
+  /** Drive seconds from current location to the next stop. */
+  driveSeconds: number;
+  /** True when the planner used Google traffic-aware data, false for
+   *  the mock fallback. Lets the consumer add a "with live traffic"
+   *  subtitle when available. */
+  trafficAware: boolean;
+}
+
+export async function computeNextLeaveBy(): Promise<NextLeaveByInfo | null> {
+  const result = await planMyDay({ traffic: readTrafficPref() });
+  // No real origin → no meaningful leave-by.
+  if (result.originFromFirstStop) return null;
+  const firstLeg = result.route.legs[0];
+  const firstStop = result.stopsInOrder[0];
+  if (!firstLeg || !firstStop) return null;
+  if (!firstStop.rawStartTime || !firstStop.shiftDate) return null;
+
+  const [Y, M, D] = firstStop.shiftDate.split("-").map((n) => parseInt(n, 10));
+  const [h, m] = firstStop.rawStartTime.split(":").map((n) => parseInt(n, 10));
+  if (![Y, M, D, h, m].every((n) => Number.isFinite(n))) return null;
+  const scheduled = new Date(Y, M - 1, D, h, m, 0, 0);
+  const leaveBy = new Date(scheduled.getTime() - firstLeg.driveSeconds * 1000);
+
+  return {
+    shiftRealId: firstStop.realId,
+    leaveBy,
+    driveSeconds: firstLeg.driveSeconds,
+    trafficAware: result.route.trafficAware,
+  };
+}
+
 /**
  * Direct-link helper for "Open the whole day in Maps" — Google Maps
  * URL with multiple waypoints. iOS routes maps.google.com URLs into
