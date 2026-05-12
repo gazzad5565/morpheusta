@@ -81,8 +81,10 @@ function CountUp({
   return <>{format(n)}</>;
 }
 
-/** 36-particle CSS confetti burst — gravity arc, 1.7s lifespan. */
-function Confetti({ count = 36 }: { count?: number }) {
+/** 80-particle CSS confetti volley — wide spread, gravity arc,
+ *  2.2s lifespan. Brand-aligned palette plus white speckles for
+ *  the dark hero backdrop. */
+function Confetti({ count = 80 }: { count?: number }) {
   const particles = useMemo(() => {
     const palette = [
       MC.brand,
@@ -91,19 +93,24 @@ function Confetti({ count = 36 }: { count?: number }) {
       "#2E4FB8",
       MC.ok,
       "#E5A017",
+      "#ffffff",
+      "#ffe7a0",
+      MC.brand,
+      MC.ok,
     ];
     return Array.from({ length: count }, (_, i) => {
-      const angle = (Math.random() * 140 - 110) * (Math.PI / 180);
-      const speed = 80 + Math.random() * 140;
+      // Wider angular spread — basically a half-disc upward.
+      const angle = (Math.random() * 180 - 165) * (Math.PI / 180);
+      const speed = 110 + Math.random() * 220;
       const tx = Math.cos(angle) * speed;
       const ty = Math.sin(angle) * speed;
-      const tyFinal = ty + 60 + Math.random() * 40;
-      const rot = (Math.random() - 0.5) * 720;
+      const tyFinal = ty + 120 + Math.random() * 90;
+      const rot = (Math.random() - 0.5) * 1080;
       const color = palette[i % palette.length];
-      const isCircle = Math.random() > 0.55;
-      const w = isCircle ? 6 + Math.random() * 4 : 4 + Math.random() * 4;
-      const h = isCircle ? w : 8 + Math.random() * 6;
-      const delay = Math.random() * 80;
+      const isCircle = Math.random() > 0.5;
+      const w = isCircle ? 7 + Math.random() * 5 : 5 + Math.random() * 4;
+      const h = isCircle ? w : 10 + Math.random() * 8;
+      const delay = Math.random() * 200;
       return { tx, tyFinal, rot, color, w, h, isCircle, delay, key: i };
     });
   }, [count]);
@@ -114,7 +121,7 @@ function Confetti({ count = 36 }: { count?: number }) {
       style={{
         position: "absolute",
         left: "50%",
-        top: 56,
+        top: 100,
         width: 0,
         height: 0,
         pointerEvents: "none",
@@ -136,6 +143,7 @@ function Confetti({ count = 36 }: { count?: number }) {
               borderRadius: p.isCircle ? "50%" : 2,
               background: p.color,
               opacity: 0,
+              boxShadow: `0 0 6px ${p.color}99`,
               ["--tx" as never]: `${p.tx}px`,
               ["--ty" as never]: `${p.tyFinal}px`,
               ["--rot" as never]: `${p.rot}deg`,
@@ -302,6 +310,24 @@ export default function DayPage() {
           shifts: complete,
         });
         setLoaded(true);
+
+        // Haptic pop on data-ready — Android Chrome supports
+        // navigator.vibrate, iOS Safari ignores cleanly. The
+        // pattern is a quick double-tap + a longer pulse to mirror
+        // the hero number landing + the confetti finale. Pure
+        // visual additions need a physical kick to feel real on
+        // mobile; this is the cheapest way to land that punch.
+        try {
+          if (
+            typeof navigator !== "undefined" &&
+            typeof navigator.vibrate === "function" &&
+            complete.length > 0
+          ) {
+            navigator.vibrate([35, 60, 35, 90, 120]);
+          }
+        } catch {
+          /* unsupported */
+        }
       }
     })();
 
@@ -313,180 +339,284 @@ export default function DayPage() {
   return (
     <div style={{ background: MC.bg, minHeight: "100%", overflow: "hidden" }}>
       <style>{`
-        /* Cinematic entry — same grammar as the deleted /summary so
-           the visual language is consistent if reps see the old
-           wrap-up overlay then land here. */
-        @keyframes dm-pop {
-          0%   { transform: scale(0);   opacity: 0; }
-          60%  { transform: scale(1.12); opacity: 1; }
-          100% { transform: scale(1);   opacity: 1; }
+        /* Cinematic entry — designed to feel like a moment, not a
+           transition. Spotify-Wrapped / Apple-Activity energy:
+           dark cinematic backdrop, oversized headline number that
+           explodes onto screen, animated gradient on the title,
+           multiple confetti waves, starburst flare behind the
+           number. ~3 second arc end-to-end. */
+
+        /* Number explosion — comes from huge scale, overshoots,
+           settles. The bezier here is the secret: high overshoot
+           + slight bounce so it lands with WEIGHT. */
+        @keyframes dm-hero-num {
+          0%   { transform: scale(0.2) rotate(-6deg); opacity: 0; filter: blur(20px); }
+          40%  { opacity: 1; filter: blur(0); }
+          60%  { transform: scale(1.18) rotate(2deg); }
+          80%  { transform: scale(0.96) rotate(-1deg); }
+          100% { transform: scale(1) rotate(0); opacity: 1; filter: blur(0); }
         }
-        @keyframes dm-ring {
-          0%   { transform: translate(-50%, -50%) scale(0.7); opacity: 0.65; }
-          100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
+        /* Starburst flare — radial gradient that explodes outward
+           behind the hero number. Pure CSS, no images. */
+        @keyframes dm-starburst {
+          0%   { transform: scale(0.3); opacity: 0; }
+          30%  { transform: scale(1.2); opacity: 1; }
+          100% { transform: scale(3); opacity: 0; }
         }
-        @keyframes dm-draw { to { stroke-dashoffset: 0; } }
-        @keyframes dm-fade-up {
-          0%   { opacity: 0; transform: translateY(12px); }
-          100% { opacity: 1; transform: translateY(0); }
+        /* Ring shockwave — like Activity ring closing.
+           Faster + crisper than the old leisurely pulse. */
+        @keyframes dm-shockwave {
+          0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0.85; }
+          100% { transform: translate(-50%, -50%) scale(4.2); opacity: 0; }
         }
-        @keyframes dm-tile {
-          0%   { opacity: 0; transform: translateY(14px) scale(.96); }
-          100% { opacity: 1; transform: translateY(0)    scale(1); }
+        /* Animated gradient text — moves a colour wash across
+           the headline so it feels alive, not painted on. */
+        @keyframes dm-gradient-sweep {
+          0%   { background-position: 0% 50%; }
+          100% { background-position: 200% 50%; }
         }
+        /* Subtitle drop — comes from below with a slight
+           overshoot. */
+        @keyframes dm-rise-bouncy {
+          0%   { opacity: 0; transform: translateY(28px) scale(.94); }
+          70%  { opacity: 1; transform: translateY(-3px) scale(1.02); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        /* Tile reveals — each tile has a 3D-feel drop with depth
+           shadow appearing on land. */
+        @keyframes dm-tile-drop {
+          0%   { opacity: 0; transform: translateY(40px) rotateX(-12deg); }
+          70%  { opacity: 1; transform: translateY(-4px) rotateX(2deg); }
+          100% { opacity: 1; transform: translateY(0) rotateX(0); }
+        }
+        /* Confetti — same physics as before but with a delayed
+           second wave that fires from the tile area. */
         @keyframes dm-confetti {
           0%   { opacity: 0; transform: translate(0,0) rotate(0); }
           12%  { opacity: 1; }
           100% { opacity: 0; transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); }
         }
-        @keyframes dm-shimmer {
-          0%   { transform: translateX(-120%); opacity: 0; }
-          25%  { opacity: .4; }
-          100% { transform: translateX(220%); opacity: 0; }
+        /* Generic fade-up with longer travel for downstream
+           content (timeline rows etc.). */
+        @keyframes dm-fade-up {
+          0%   { opacity: 0; transform: translateY(16px); }
+          100% { opacity: 1; transform: translateY(0); }
         }
-        .dm-stage   { animation: dm-pop .5s cubic-bezier(.34, 1.6, .64, 1) both; }
-        .dm-ring    { animation: dm-ring 1.6s cubic-bezier(.16, 1, .3, 1) .15s both; }
-        .dm-ring-2  { animation-delay: .4s; }
-        .dm-ring-3  { animation-delay: .65s; }
-        .dm-check-path {
-          stroke-dasharray: 28;
-          stroke-dashoffset: 28;
-          animation: dm-draw .42s cubic-bezier(.65, 0, .35, 1) .35s both;
+        /* Sub-label characters typing in — adds drama to the
+           "DAY COMPLETE" label below the hero number. */
+        @keyframes dm-letter-in {
+          0%   { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
         }
-        .dm-confetti-piece { animation: dm-confetti 1.7s cubic-bezier(.22, .61, .36, 1) both; }
-        .dm-fade-up { animation: dm-fade-up .5s cubic-bezier(.22, 1, .36, 1) both; }
-        .dm-tile    { animation: dm-tile .55s cubic-bezier(.22, 1, .36, 1) both; }
-        .dm-shimmer {
-          position: absolute; inset: 0;
+
+        .dm-hero-num {
+          animation: dm-hero-num .9s cubic-bezier(.18, 1.6, .35, 1) both;
+        }
+        .dm-starburst {
+          animation: dm-starburst 1.1s cubic-bezier(.16, 1, .3, 1) .05s both;
+        }
+        .dm-shock {
+          animation: dm-shockwave 1.4s cubic-bezier(.16, 1, .3, 1) both;
+        }
+        .dm-shock-2 { animation-delay: .25s; }
+        .dm-shock-3 { animation-delay: .5s; }
+        .dm-gradient {
           background: linear-gradient(
-            105deg,
-            transparent 35%,
-            rgba(255,255,255,.55) 50%,
-            transparent 65%
+            90deg,
+            #fff 0%,
+            ${MC.brand} 25%,
+            #fff 50%,
+            ${MC.brand} 75%,
+            #fff 100%
           );
-          mix-blend-mode: overlay;
-          pointer-events: none;
-          animation: dm-shimmer 1.4s ease-out 1.1s both;
+          background-size: 200% 100%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          animation: dm-gradient-sweep 3.5s linear infinite;
         }
+        .dm-rise { animation: dm-rise-bouncy .7s cubic-bezier(.18, 1.4, .35, 1) both; }
+        .dm-tile { animation: dm-tile-drop .65s cubic-bezier(.18, 1.3, .35, 1) both; }
+        .dm-confetti-piece { animation: dm-confetti 2.2s cubic-bezier(.22, .61, .36, 1) both; }
+        .dm-fade-up { animation: dm-fade-up .5s cubic-bezier(.22, 1, .36, 1) both; }
+        .dm-letter {
+          display: inline-block;
+          animation: dm-letter-in .35s cubic-bezier(.18, 1.4, .35, 1) both;
+        }
+
         @media (prefers-reduced-motion: reduce) {
-          .dm-stage, .dm-ring, .dm-check-path, .dm-confetti-piece,
-          .dm-fade-up, .dm-tile, .dm-shimmer {
+          .dm-hero-num, .dm-starburst, .dm-shock, .dm-rise,
+          .dm-tile, .dm-confetti-piece, .dm-fade-up, .dm-letter,
+          .dm-gradient {
             animation: none !important;
+            -webkit-text-fill-color: #fff !important;
+            background: none !important;
           }
-          .dm-check-path { stroke-dashoffset: 0; }
           .dm-confetti-host { display: none; }
         }
       `}</style>
 
       <AppHeader title="Today's recap" onBack={() => router.push("/")} withMenu />
 
-      {/* Hero stage — rings, bouncy disc, drawn check, confetti, headline */}
+      {/* Hero stage — dark cinematic backdrop, hero number explodes
+          in from huge scale, three shockwave rings expand outward,
+          starburst flare blooms behind, 80 confetti particles spray
+          on land, animated-gradient "DAY DONE" label below. */}
       <div
         style={{
-          padding: "28px 20px 20px",
-          background: `linear-gradient(180deg, ${MC.bg} 0%, ${MC.brandTint}55 100%)`,
+          padding: "44px 20px 38px",
+          background: `radial-gradient(ellipse at 50% 0%, ${MC.brandDeep} 0%, ${MC.ink} 55%, #050912 100%)`,
           textAlign: "center",
           position: "relative",
+          overflow: "hidden",
+          minHeight: 320,
         }}
       >
-        <Confetti />
+        {/* Big confetti volley — 80 particles, wider spread. */}
+        <Confetti count={80} />
+
+        {/* Starburst flare — radial gradient that explodes outward
+            behind the hero number. Pure CSS, no images. */}
+        <div
+          aria-hidden
+          className="dm-starburst"
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: 90,
+            width: 320,
+            height: 320,
+            transform: "translate(-50%, -50%)",
+            background: `radial-gradient(circle, ${MC.brand}cc 0%, ${MC.brand}55 30%, transparent 65%)`,
+            pointerEvents: "none",
+            filter: "blur(10px)",
+          }}
+        />
+
+        {/* Three shockwave rings — staggered outward expansion. */}
+        {[1, 2, 3].map((i) => (
+          <span
+            key={i}
+            className={`dm-shock dm-shock-${i}`}
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: 100,
+              width: 80,
+              height: 80,
+              borderRadius: "50%",
+              border: `2px solid ${MC.brand}`,
+              pointerEvents: "none",
+              transform: "translate(-50%, -50%)",
+            }}
+            aria-hidden
+          />
+        ))}
+
+        {/* HERO NUMBER — the lead stat at obscene size. Drops in
+            from blurry scale 0.2, overshoots, settles. */}
         <div
           style={{
             position: "relative",
-            width: 120,
-            height: 120,
-            margin: "0 auto",
+            zIndex: 2,
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
+            minHeight: 200,
           }}
         >
-          {[1, 2, 3].map((i) => (
-            <span
-              key={i}
-              className={`dm-ring dm-ring-${i}`}
-              style={{
-                position: "absolute",
-                left: "50%",
-                top: "50%",
-                width: 80,
-                height: 80,
-                borderRadius: "50%",
-                border: `2px solid ${MC.brand}`,
-                pointerEvents: "none",
-              }}
-              aria-hidden
-            />
-          ))}
           <div
-            className="dm-stage"
+            className="dm-hero-num"
             style={{
-              width: 80,
-              height: 80,
-              borderRadius: 24,
-              background: MC.card,
-              border: `1px solid ${MC.brandTint}`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: `0 10px 30px ${MC.brand}33`,
-              position: "relative",
-              overflow: "hidden",
+              fontFamily: MC.fontDisplay,
+              fontSize: 160,
+              fontWeight: 800,
+              lineHeight: 1,
+              letterSpacing: -6,
+              color: "#fff",
+              textShadow: `0 0 60px ${MC.brand}cc, 0 0 20px ${MC.brand}aa`,
             }}
           >
-            <svg
-              width={42}
-              height={42}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={MC.brand}
-              strokeWidth={2.4}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <circle cx={12} cy={12} r={10} opacity={0.18} />
-              <path className="dm-check-path" d="M5 12 L10 17 L19 8" />
-            </svg>
-            <span className="dm-shimmer" aria-hidden />
+            {loaded && stats ? stats.shiftsDone : 0}
+          </div>
+          {/* Letter-typed "SHIFTS COMPLETE" sub-label.
+              Each char animates in with a small stagger so it
+              reads like it's being printed. */}
+          <div
+            style={{
+              marginTop: 6,
+              fontFamily: MC.font,
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: 6,
+              color: `${MC.brand}`,
+              textTransform: "uppercase",
+              textShadow: `0 0 12px ${MC.brand}88`,
+            }}
+            aria-label={`${stats?.shiftsDone ?? 0} shifts complete`}
+          >
+            {"SHIFTS COMPLETE".split("").map((ch, i) => (
+              <span
+                key={i}
+                className="dm-letter"
+                style={{ animationDelay: `${0.85 + i * 0.04}s` }}
+              >
+                {ch === " " ? " " : ch}
+              </span>
+            ))}
           </div>
         </div>
 
+        {/* Animated-gradient headline. */}
         <div
-          className="dm-fade-up"
+          className="dm-rise"
           style={{
-            animationDelay: ".5s",
-            fontFamily: MC.fontDisplay,
-            fontSize: 26,
-            fontWeight: 700,
-            color: MC.ink,
-            letterSpacing: -0.6,
-            marginTop: 14,
+            animationDelay: "1.3s",
+            marginTop: 26,
+            position: "relative",
+            zIndex: 2,
           }}
         >
-          Day done
+          <div
+            className="dm-gradient"
+            style={{
+              fontFamily: MC.fontDisplay,
+              fontSize: 36,
+              fontWeight: 800,
+              letterSpacing: -1.2,
+              lineHeight: 1.05,
+            }}
+          >
+            Day done.
+          </div>
         </div>
         <div
-          className="dm-fade-up"
+          className="dm-rise"
           style={{
-            animationDelay: ".62s",
+            animationDelay: "1.5s",
             fontFamily: MC.font,
-            fontSize: 14,
-            color: MC.mute,
-            marginTop: 4,
+            fontSize: 15,
+            color: "rgba(255,255,255,.75)",
+            marginTop: 8,
+            position: "relative",
+            zIndex: 2,
+            fontWeight: 500,
           }}
         >
           {loaded && stats
             ? stats.shiftsDone === 0
               ? "No completed shifts today."
-              : `${stats.shiftsDone} ${stats.shiftsDone === 1 ? "stop" : "stops"} visited · ${formatHHMM(stats.hoursSeconds)} on the clock`
+              : `${formatHHMM(stats.hoursSeconds)} on the clock`
             : "Tallying your day…"}
         </div>
       </div>
 
-      {/* Four stat tiles in a 2×2 grid. Each animates in with a small
-          stagger + a count-up inside so the numbers feel earned. */}
-      <div style={{ padding: "16px 16px 0" }}>
+      {/* Four stat tiles in a 2×2 grid. Each animates in with a
+          staggered 3D-feel drop + a count-up inside so the numbers
+          feel earned. Delays start at 1.7s so the hero number has
+          had its full moment first. */}
+      <div style={{ padding: "20px 16px 0" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           <DayStat
             label="Shifts done"
@@ -494,7 +624,7 @@ export default function DayPage() {
             icon="check-circle"
             countTo={stats?.shiftsDone ?? 0}
             format={(n) => String(n)}
-            delay={780}
+            delay={1700}
           />
           <DayStat
             label="Hours worked"
@@ -502,7 +632,7 @@ export default function DayPage() {
             icon="clock"
             countTo={stats?.hoursSeconds ?? 0}
             format={(s) => formatHHMM(s)}
-            delay={860}
+            delay={1820}
           />
           <DayStat
             label="Tasks completed"
@@ -510,7 +640,7 @@ export default function DayPage() {
             icon="check"
             countTo={stats?.tasksCompleted ?? 0}
             format={(n) => String(n)}
-            delay={940}
+            delay={1940}
           />
           <DayStat
             label="Travel time"
@@ -518,7 +648,7 @@ export default function DayPage() {
             icon="pin"
             countTo={stats?.travelSeconds ?? 0}
             format={(s) => formatHHMM(s)}
-            delay={1020}
+            delay={2060}
           />
         </div>
       </div>
@@ -531,21 +661,21 @@ export default function DayPage() {
           <div
             className="dm-fade-up"
             style={{
-              animationDelay: "1.3s",
+              animationDelay: "2.3s",
               fontFamily: MC.font,
               fontSize: 11,
               fontWeight: 700,
               letterSpacing: 0.8,
               textTransform: "uppercase",
               color: MC.hint,
-              padding: "18px 16px 8px",
+              padding: "22px 16px 8px",
             }}
           >
             Your day
           </div>
           <div style={{ padding: "0 16px", display: "flex", flexDirection: "column", gap: 8 }}>
             {stats.shifts.map((s, i) => (
-              <DayShiftRow key={s.realId} shift={s} delay={1350 + i * 60} />
+              <DayShiftRow key={s.realId} shift={s} delay={2400 + i * 80} />
             ))}
           </div>
         </>
@@ -556,7 +686,7 @@ export default function DayPage() {
         <div
           className="dm-fade-up"
           style={{
-            animationDelay: "1.7s",
+            animationDelay: "2.7s",
             margin: "18px 16px 0",
             padding: "10px 12px",
             borderRadius: 12,
@@ -584,8 +714,8 @@ export default function DayPage() {
       <div
         className="dm-fade-up"
         style={{
-          animationDelay: "1.9s",
-          padding: "20px 16px 28px",
+          animationDelay: "2.9s",
+          padding: "24px 16px 32px",
           display: "flex",
           justifyContent: "center",
         }}
@@ -638,10 +768,34 @@ function DayStat({
   delay: number;
 }) {
   const palette = {
-    brand: { bg: MC.brandTint, border: `${MC.brand}33`, fg: MC.brandDeep, iconBg: MC.brand },
-    ok: { bg: MC.okTint, border: `${MC.ok}33`, fg: "#0d6a45", iconBg: MC.ok },
-    neutral: { bg: "#F4F6F9", border: MC.line, fg: MC.ink, iconBg: MC.ink2 },
-    travel: { bg: "#EAEFFA", border: "#2E4FB833", fg: "#1f3a8a", iconBg: "#2E4FB8" },
+    brand: {
+      bg: `linear-gradient(135deg, ${MC.brandTint} 0%, #fff 100%)`,
+      border: `${MC.brand}55`,
+      fg: MC.brandDeep,
+      iconBg: MC.brand,
+      glow: `${MC.brand}33`,
+    },
+    ok: {
+      bg: `linear-gradient(135deg, ${MC.okTint} 0%, #fff 100%)`,
+      border: `${MC.ok}55`,
+      fg: "#0d6a45",
+      iconBg: MC.ok,
+      glow: `${MC.ok}33`,
+    },
+    neutral: {
+      bg: "linear-gradient(135deg, #F4F6F9 0%, #fff 100%)",
+      border: MC.line,
+      fg: MC.ink,
+      iconBg: MC.ink2,
+      glow: "rgba(40, 50, 70, .14)",
+    },
+    travel: {
+      bg: "linear-gradient(135deg, #EAEFFA 0%, #fff 100%)",
+      border: "#2E4FB855",
+      fg: "#1f3a8a",
+      iconBg: "#2E4FB8",
+      glow: "rgba(46, 79, 184, .26)",
+    },
   }[tone];
   return (
     <div
@@ -650,32 +804,36 @@ function DayStat({
         animationDelay: `${delay}ms`,
         background: palette.bg,
         border: `1px solid ${palette.border}`,
-        borderRadius: 14,
-        padding: "14px 12px",
+        borderRadius: 16,
+        padding: "16px 14px",
         display: "flex",
         flexDirection: "column",
-        gap: 6,
+        gap: 8,
+        boxShadow: `0 10px 28px ${palette.glow}, inset 0 1px 0 rgba(255,255,255,.6)`,
+        position: "relative",
+        overflow: "hidden",
       }}
     >
       <div
         style={{
-          width: 30,
-          height: 30,
-          borderRadius: 9,
+          width: 34,
+          height: 34,
+          borderRadius: 10,
           background: palette.iconBg,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          boxShadow: `0 4px 12px ${palette.glow}`,
         }}
       >
-        <Glyph name={icon} size={16} color="#fff" strokeWidth={2.4} />
+        <Glyph name={icon} size={18} color="#fff" strokeWidth={2.4} />
       </div>
       <div
         style={{
           fontFamily: MC.font,
           fontSize: 10.5,
           fontWeight: 700,
-          letterSpacing: 0.6,
+          letterSpacing: 0.8,
           textTransform: "uppercase",
           color: palette.fg,
           opacity: 0.7,
@@ -687,13 +845,14 @@ function DayStat({
       <div
         style={{
           fontFamily: MC.fontDisplay,
-          fontSize: 22,
-          fontWeight: 700,
-          letterSpacing: -0.4,
+          fontSize: 30,
+          fontWeight: 800,
+          letterSpacing: -0.8,
           color: palette.fg,
+          lineHeight: 1,
         }}
       >
-        <CountUp to={countTo} delay={delay + 50} format={format} />
+        <CountUp to={countTo} delay={delay + 100} duration={1100} format={format} />
       </div>
     </div>
   );
