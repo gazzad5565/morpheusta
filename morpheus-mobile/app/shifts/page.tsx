@@ -1148,8 +1148,13 @@ function ShiftRow({
           {/* Leave-by pill — only the next-upcoming row gets the
               `leaveBy` prop from the parent, so this only renders on
               that one row. Same shape as the home Up Next card so
-              reps see the same number in both places. */}
-          {leaveBy && (
+              reps see the same number in both places.
+              Auto-hides when the leave-by time is in the past —
+              showing "Leave by 10:13 AM" at 12:20 PM was confusing
+              reps. The page's 30s tick (setNowTick) re-evaluates
+              this on every render so the pill disappears as soon as
+              the leave-by passes. */}
+          {leaveBy && leaveBy.leaveBy.getTime() > Date.now() && (
             <div
               style={{
                 marginTop: 6,

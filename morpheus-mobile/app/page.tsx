@@ -807,6 +807,18 @@ function UpNextCard({
   void inProgressCount; // currently unused; kept for future polish
   const [now, setNow] = useState(Date.now());
 
+  // Tick once a minute always — drives the leave-by staleness check
+  // ("Leave by 10:13" should disappear at 10:13). Pre-fix the only
+  // tick was the 1-second one below, gated on `travellingSince`, so
+  // a rep who wasn't travelling never re-evaluated the wall clock
+  // and the leave-by pill kept showing past times.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Second-granular tick only while travelling — drives the live
+  // mm:ss travel timer.
   useEffect(() => {
     if (!travellingSince) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -1113,8 +1125,17 @@ function UpNextCard({
                   hasn't started yet). Tiny single-line pill so it
                   reads as actionable info without crowding the card.
                   Same shape on the /shifts row so reps learn the
-                  pattern once. */}
-              {!isResume && nextLeaveBy && nextLeaveBy.shiftRealId === next.realId && (
+                  pattern once.
+                  Also auto-hides when the leave-by time has passed —
+                  showing "Leave by 10:13" at 12:20 PM was just
+                  noise. The minute-tick on `now` above drives the
+                  re-render so the pill disappears as soon as the
+                  leave-by time crosses. The shift's own state badge
+                  ("1H 50M LATE") still tells the urgency story. */}
+              {!isResume &&
+                nextLeaveBy &&
+                nextLeaveBy.shiftRealId === next.realId &&
+                nextLeaveBy.leaveBy.getTime() > now && (
                 <div
                   style={{
                     marginTop: 6,
