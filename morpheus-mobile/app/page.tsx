@@ -3,7 +3,7 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { MC } from "@/lib/tokens";
 import { type Shift } from "@/lib/mock-data";
 import { AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
@@ -934,6 +934,48 @@ function UpNextCard({
   void inProgressCount; // currently unused; kept for future polish
   const [now, setNow] = useState(Date.now());
 
+  // Auto-fire the directions preview for the next-up shift.
+  //
+  // Consistency with /shifts: the expanded row there shows the
+  // inline mini-route map without the rep tapping anything; the
+  // home Up Next card should do the same for the next-up shift so
+  // both screens behave the same way.
+  //
+  // Gated to only fire when:
+  //   - We have a next-up shift AND it's in a "going there" state
+  //     (scheduled / travelling / late). Skipped for in-progress /
+  //     on-break — the rep is already at the customer; a route line
+  //     would be silly.
+  //   - The site has coordinates on file (no point auto-firing for
+  //     a customer with no geocode).
+  //   - We're not already showing a preview (avoids overwriting
+  //     a deliberate dismiss + re-fire on every render).
+  // The actual planRoute fetch + polyline draw is owned by the
+  // parent's onPreviewDirections handler (the same code path the
+  // tappable Directions button used). The X on the floating map
+  // overlay still dismisses if the rep wants a clean pin view.
+  const hasAutoFired = useRef(false);
+  useEffect(() => {
+    if (!next) return;
+    if (isResume) return; // already there
+    if (next.state === "complete" || next.state === "cancelled") return;
+    if (typeof next.siteLat !== "number" || typeof next.siteLng !== "number") {
+      return;
+    }
+    if (hasAutoFired.current) return; // one-shot per mount + per next-shift change
+    hasAutoFired.current = true;
+    const url = buildDirectionsUrl(next);
+    if (!url) return;
+    onPreviewDirections({
+      lat: next.siteLat,
+      lng: next.siteLng,
+      label: next.name,
+      openUrl: url,
+    });
+    // Reset the one-shot guard whenever the up-next shift changes so
+    // the new shift's route can auto-fire too.
+  }, [next?.realId, isResume, next?.state]);  // eslint-disable-line react-hooks/exhaustive-deps
+
   // Tick once a minute always — drives the leave-by staleness check
   // ("Leave by 10:13" should disappear at 10:13). Pre-fix the only
   // tick was the 1-second one below, gated on `travellingSince`, so
@@ -1496,22 +1538,25 @@ function UpNextCard({
                   gap: 8,
                 }}
               >
-                {/* Two-button row: Directions + Start/Stop travelling.
+                {/* Start/Stop travelling button.
                     Hidden once the shift is in-progress — the rep is
                     already on-site so there's nothing to travel TO.
-                    Directions opens the device's map app pre-filled
-                    with the customer's site address; Start travelling
-                    does the same AND starts the in-app travel timer +
-                    fires the shift.travel_started audit event. */}
+                    The old "Directions" button used to sit alongside
+                    this one, but the route preview now auto-fires on
+                    mount via the useEffect above (mirroring /shifts
+                    expanded rows) so the explicit tap was redundant.
+                    Start travelling starts the in-app travel timer +
+                    fires the shift.travel_started audit event, then
+                    hands off to the OS map app. */}
                 {!isResume && (() => {
-                  // Pull the disabled state up so both buttons share
-                  // it cleanly. The disabled visual was previously
-                  // just opacity:0.5 — managers fed back it was too
-                  // subtle ("I couldn't tell it was disabled at a
-                  // glance"). Now we swap the background to a muted
-                  // tint, dim every inner colour, and keep
-                  // cursor:not-allowed so taps don't even feel like
-                  // they registered.
+                  // Pull the disabled state up so the button has a
+                  // consistent visual. The disabled visual was
+                  // previously just opacity:0.5 — managers fed back
+                  // it was too subtle ("I couldn't tell it was
+                  // disabled at a glance"). Now we swap the
+                  // background to a muted tint, dim every inner
+                  // colour, and keep cursor:not-allowed so taps
+                  // don't even feel like they registered.
                   const enabled = hasDestination(next);
                   const disabledStyle: React.CSSProperties = enabled
                     ? {}
@@ -1526,58 +1571,11 @@ function UpNextCard({
                   return (
                     <>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!enabled) return;
-                            const url = buildDirectionsUrl(next);
-                            if (!url) return;
-                            // Coords required for the in-app preview
-                            // polyline; if we only have an address
-                            // string (no lat/lng yet) we fall back
-                            // to opening Maps directly because we
-                            // can't draw the line. Most customers
-                            // have coords via the geocoder once an
-                            // address is saved.
-                            const hasCoords =
-                              typeof next.siteLat === "number" &&
-                              typeof next.siteLng === "number";
-                            if (hasCoords) {
-                              onPreviewDirections({
-                                lat: next.siteLat as number,
-                                lng: next.siteLng as number,
-                                label: next.name,
-                                openUrl: url,
-                              });
-                            } else {
-                              openMapsLink(url);
-                            }
-                          }}
-                          disabled={!enabled}
-                          style={{
-                            ...secondaryBtnStyle,
-                            flex: 1,
-                            ...disabledStyle,
-                          }}
-                          title={
-                            enabled
-                              ? "Preview the route on the map above"
-                              : "No address on this site yet"
-                          }
-                        >
-                          <Glyph
-                            name="target"
-                            size={16}
-                            color={iconColor}
-                            strokeWidth={2.2}
-                          />
-                          Directions
-                        </button>
                         {travellingSince ? (
                           <button
                             type="button"
                             onClick={() => setTravellingSince(null)}
-                            style={{ ...secondaryBtnStyle, flex: 1.4 }}
+                            style={{ ...secondaryBtnStyle, flex: 1 }}
                           >
                             <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
                             Stop · {formatTime(travellingSince)}
@@ -1600,7 +1598,7 @@ function UpNextCard({
                             disabled={!enabled}
                             style={{
                               ...secondaryBtnStyle,
-                              flex: 1.4,
+                              flex: 1,
                               ...disabledStyle,
                             }}
                             title={
