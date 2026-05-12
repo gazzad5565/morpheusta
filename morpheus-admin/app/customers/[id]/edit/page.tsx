@@ -15,6 +15,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
+import { CustomerAddressMap } from "@/components/CustomerAddressMap";
 import { Combobox } from "@/components/ui/Combobox";
 import { inputStyle } from "@/components/ui/Filters";
 import { CustomerSwatch } from "@/components/ui/Avatars";
@@ -606,6 +607,37 @@ export default function EditCustomerPage() {
                 placeholder="e.g. 1480 Riverside Way, Cape Town"
               />
             </Field>
+
+            {/* Map preview — shows whenever we have ANY coordinates
+                on file or the manager just picked a new address. We
+                prefer pickedCoords (the autocomplete selection just
+                made) over coords (the saved location) so the map
+                tracks the pending change as the manager edits. The
+                geofence circle re-renders live as the slider moves
+                below — the manager can see the radius in real metres
+                before saving. */}
+            {(pickedCoords || coords) && (
+              <div
+                style={{
+                  marginBottom: 16,
+                  borderRadius: 12,
+                  overflow: "hidden",
+                  border: `1px solid ${AC.line}`,
+                }}
+              >
+                <CustomerAddressMap
+                  lat={(pickedCoords ?? coords)!.lat}
+                  lng={(pickedCoords ?? coords)!.lng}
+                  radiusM={geofenceM}
+                  color={color}
+                  initials={
+                    (initials || deriveInitials(name) || "??").slice(0, 3)
+                  }
+                  showGeofence
+                  height={260}
+                />
+              </div>
+            )}
 
             <Field
               label={`Geofence radius · ${geofenceM} m`}

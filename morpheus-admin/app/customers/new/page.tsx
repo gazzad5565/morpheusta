@@ -13,6 +13,7 @@ import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import { createCustomer } from "@/lib/customers-store";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
+import { CustomerAddressMap } from "@/components/CustomerAddressMap";
 import type { Customer } from "@/lib/types";
 
 const SWATCHES = [
@@ -221,6 +222,33 @@ export default function NewCustomerPage() {
               placeholder="e.g. 1480 Riverside Way, Cape Town"
             />
           </Field>
+
+          {/* Map preview — appears the moment the manager picks an
+              address from the autocomplete list. Locks the
+              coordinates visually so they can confirm "yes, that's
+              the right spot" before saving. Geofence defaults to
+              100m which matches the post-create default on the
+              customer_sites head-office row. */}
+          {pickedCoords && (
+            <div
+              style={{
+                marginBottom: 16,
+                borderRadius: 12,
+                overflow: "hidden",
+                border: `1px solid ${AC.line}`,
+              }}
+            >
+              <CustomerAddressMap
+                lat={pickedCoords.lat}
+                lng={pickedCoords.lng}
+                radiusM={100}
+                color={color}
+                initials={(initials || "??").slice(0, 3)}
+                showGeofence
+                height={240}
+              />
+            </div>
+          )}
 
           <Field label="Account code" hint="Internal reference number — auto-generated, edit if needed.">
             <input
