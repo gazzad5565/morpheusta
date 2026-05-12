@@ -74,41 +74,63 @@ function formatClock(d: Date): string {
 }
 
 /**
- * "Leave by" status for a leg. Compares the cumulative travel time
- * from "now" against the rep's scheduled arrival at that stop. Three
- * buckets:
- *   - ok      → on track, more than 10 min of slack
- *   - tight   → less than 10 min of slack (or already past leave-by)
- *   - missed  → ETA is already after the scheduled time
- * Returns null when the stop has no scheduledArrival — then we just
- * show the ETA and nothing else.
+ * Schedule status for a leg. Compares the predicted arrival (now +
+ * cumulative travel) against the rep's scheduled shift start time.
+ *
+ * Returns one of four states with human copy ready for a chip:
+ *   - early   → eta is more than 10 min before scheduled (green; lots
+ *               of slack, "On time · 25 min early")
+ *   - ok      → eta is 0–10 min before scheduled (green; "On time")
+ *   - tight   → eta is within 5 min EITHER SIDE of scheduled (amber;
+ *               "Tight · leave soon")
+ *   - late    → eta is more than 5 min after scheduled (red; "Late by
+ *               12 min")
+ *
+ * Earlier this returned a "leave by" time that the UI rendered next
+ * to the ETA. The math was correct ("the latest you could leave now
+ * and still arrive on time") but the side-by-side display was
+ * confusing — a manager seeing "Arrive 11:00 · Leave by 12:00"
+ * read it as a contradiction even though both numbers were
+ * internally consistent. Replacing with a single on-time/late chip
+ * removes the ambiguity. We still expose `leaveBy` on the type for
+ * the "tight" bucket so the UI can render "Leave by 4:15 PM" as the
+ * actionable copy in that one case.
+ *
+ * Returns null when the stop has no scheduledArrival — the UI then
+ * skips the status chip entirely and just shows the ETA.
  */
-type LeaveByState =
-  | { kind: "ok"; leaveBy: Date; eta: Date; scheduledArrival: Date }
-  | { kind: "tight"; leaveBy: Date; eta: Date; scheduledArrival: Date }
-  | { kind: "missed"; leaveBy: Date; eta: Date; scheduledArrival: Date }
+type ScheduleStatus =
+  | { kind: "early"; eta: Date; scheduled: Date; minsEarly: number }
+  | { kind: "ok"; eta: Date; scheduled: Date; minsEarly: number }
+  | { kind: "tight"; eta: Date; scheduled: Date; leaveBy: Date; minsSlack: number }
+  | { kind: "late"; eta: Date; scheduled: Date; minsLate: number }
   | null;
 
-function computeLeaveBy(
+function computeScheduleStatus(
   now: Date,
   cumSecondsFromNow: number,
   scheduledArrivalISO?: string
-): LeaveByState {
+): ScheduleStatus {
   if (!scheduledArrivalISO) return null;
   const scheduled = new Date(scheduledArrivalISO);
   if (!Number.isFinite(scheduled.getTime())) return null;
-  // ETA-if-leaving-now (cumulative travel from origin):
   const eta = new Date(now.getTime() + cumSecondsFromNow * 1000);
-  // Latest acceptable departure to arrive ON TIME: scheduled - travel.
-  const leaveBy = new Date(scheduled.getTime() - cumSecondsFromNow * 1000);
-  const slackMs = leaveBy.getTime() - now.getTime();
-  if (eta.getTime() > scheduled.getTime()) {
-    return { kind: "missed", leaveBy, eta, scheduledArrival: scheduled };
+  const diffMs = scheduled.getTime() - eta.getTime();
+  const diffMin = Math.round(diffMs / 60_000);
+
+  if (diffMin < -5) {
+    return { kind: "late", eta, scheduled, minsLate: Math.abs(diffMin) };
   }
-  if (slackMs < 10 * 60 * 1000) {
-    return { kind: "tight", leaveBy, eta, scheduledArrival: scheduled };
+  if (diffMin <= 5) {
+    // Tight — within 5 minutes either side of scheduled. Compute a
+    // leave-by time for the actionable "go now" copy.
+    const leaveBy = new Date(scheduled.getTime() - cumSecondsFromNow * 1000);
+    return { kind: "tight", eta, scheduled, leaveBy, minsSlack: diffMin };
   }
-  return { kind: "ok", leaveBy, eta, scheduledArrival: scheduled };
+  if (diffMin <= 10) {
+    return { kind: "ok", eta, scheduled, minsEarly: diffMin };
+  }
+  return { kind: "early", eta, scheduled, minsEarly: diffMin };
 }
 
 export default function RoutePage() {
@@ -656,8 +678,9 @@ function LegList({
         const scheduledArrivalISO = stop.rawStartTime
           ? buildArrivalISOLocal(stop.shiftDate, stop.rawStartTime)
           : undefined;
-        const leaveBy = computeLeaveBy(now, cumSeconds, scheduledArrivalISO);
+        const status = computeScheduleStatus(now, cumSeconds, scheduledArrivalISO);
         const eta = new Date(now.getTime() + cumSeconds * 1000);
+        const scheduledStart = scheduledArrivalISO ? new Date(scheduledArrivalISO) : null;
         const legMapsUrl =
           typeof stop.siteLat === "number" && typeof stop.siteLng === "number"
             ? buildLegMapsUrl({
@@ -727,6 +750,38 @@ function LegList({
                 >
                   {stop.name}
                 </div>
+                {/* Address line — gives the rep an at-a-glance "where
+                    am I actually going" without opening Maps. Ellipsis
+                    on overflow + title attr for the full string on
+                    hover/long-press. Hidden entirely if no address is
+                    on file so the row doesn't render a blank gap. */}
+                {stop.siteAddress && (
+                  <div
+                    title={stop.siteAddress}
+                    style={{
+                      fontFamily: MC.font,
+                      fontSize: 12,
+                      color: MC.mute,
+                      marginTop: 2,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    <Glyph name="pin" size={11} color={MC.hint} strokeWidth={2.2} />
+                    <span
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {stop.siteAddress}
+                    </span>
+                  </div>
+                )}
                 <div
                   style={{
                     fontFamily: MC.font,
@@ -745,7 +800,15 @@ function LegList({
               </div>
             </div>
 
-            {/* ETA + Leave-by row */}
+            {/* Schedule row — three chips that tell the whole story
+                without contradicting each other:
+                  1. When you'll arrive if you leave now
+                  2. When the shift is scheduled to start
+                  3. A single on-time / tight / late status, derived
+                     from the comparison of the first two.
+                Replaces an earlier "Arrive X · Leave by Y" pair that
+                managers were reading as a contradiction (the math was
+                right; the framing was wrong). */}
             <div
               style={{
                 display: "flex",
@@ -755,22 +818,31 @@ function LegList({
               }}
             >
               <StatusChip tone="brand" icon="clock">
-                Arrive {formatClock(eta)}
+                Arrive ~ {formatClock(eta)}
               </StatusChip>
-              {leaveBy && (
+              {scheduledStart && (
+                <StatusChip tone="neutral" icon="check">
+                  Shift starts {formatClock(scheduledStart)}
+                </StatusChip>
+              )}
+              {status && (
                 <StatusChip
                   tone={
-                    leaveBy.kind === "missed"
+                    status.kind === "late"
                       ? "danger"
-                      : leaveBy.kind === "tight"
+                      : status.kind === "tight"
                       ? "warn"
                       : "ok"
                   }
-                  icon={leaveBy.kind === "missed" ? "warn" : "arrow-r"}
+                  icon={status.kind === "late" ? "warn" : "check-circle"}
                 >
-                  {leaveBy.kind === "missed"
-                    ? `Late · sched ${formatClock(leaveBy.scheduledArrival)}`
-                    : `Leave by ${formatClock(leaveBy.leaveBy)}`}
+                  {status.kind === "late"
+                    ? `Late by ${status.minsLate} min`
+                    : status.kind === "tight"
+                    ? `Leave by ${formatClock(status.leaveBy)}`
+                    : status.kind === "ok"
+                    ? "On time"
+                    : `On time · ${status.minsEarly} min early`}
                 </StatusChip>
               )}
             </div>
