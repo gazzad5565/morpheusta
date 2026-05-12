@@ -53,6 +53,7 @@ import {
   saveShiftOrder,
   clearShiftOrder,
   readShiftOrder,
+  readShiftOrderMeta,
   subscribeShiftOrder,
 } from "@/lib/shift-order-store";
 import { getRouteOptimizationAllowed } from "@/lib/settings-store";
@@ -262,11 +263,19 @@ export default function RoutePage() {
   const [savedOrder, setSavedOrder] = useState<string[] | null>(() =>
     typeof window === "undefined" ? null : readShiftOrder()
   );
+  // Saved-at timestamp drives the "Last optimized X min ago" line in
+  // the optimize section. Updates alongside savedOrder via the same
+  // change event so a fresh save flips both atomically.
+  const [savedAt, setSavedAt] = useState<number | null>(() =>
+    typeof window === "undefined" ? null : readShiftOrderMeta()?.savedAt ?? null
+  );
   useEffect(() => {
     // Re-read after hydration in case SSR returned null.
     setSavedOrder(readShiftOrder());
+    setSavedAt(readShiftOrderMeta()?.savedAt ?? null);
     return subscribeShiftOrder(() => {
       setSavedOrder(readShiftOrder());
+      setSavedAt(readShiftOrderMeta()?.savedAt ?? null);
     });
   }, []);
 
@@ -605,6 +614,43 @@ export default function RoutePage() {
                 ? "Re-check below for any better route with current traffic."
                 : "Re-order today's stops for the shortest drive"}
             </div>
+            {/* "Last optimized X min ago" — only shows when the rep
+                has a saved order today AND we have the savedAt
+                timestamp. Helps the rep judge whether to re-run
+                with current traffic (a 3-hour-old plan is more
+                worth re-checking than a 3-minute-old one). The
+                `now` state above ticks every minute so this label
+                refreshes without each child owning a timer. */}
+            {savedOrder && savedAt && (
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 10.5,
+                  color: MC.hint,
+                  marginTop: 3,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                <Glyph
+                  name="check-circle"
+                  size={10}
+                  color={MC.hint}
+                  strokeWidth={2.2}
+                />
+                Last optimized{" "}
+                {(() => {
+                  const ms = Math.max(0, Date.now() - savedAt);
+                  const min = Math.round(ms / 60_000);
+                  if (min < 1) return "just now";
+                  if (min < 60) return `${min} min ago`;
+                  const h = Math.floor(min / 60);
+                  const m = min % 60;
+                  return m === 0 ? `${h}h ago` : `${h}h ${m}m ago`;
+                })()}
+              </div>
+            )}
           </div>
           {/* Hidden checkbox removed (May 12).
               It used to live here "for a11y" but it actually broke the

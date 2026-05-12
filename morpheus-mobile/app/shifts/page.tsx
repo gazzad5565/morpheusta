@@ -31,7 +31,9 @@ import {
 } from "@/components/UnableToAttendSheet";
 import {
   computeNextLeaveBy,
+  computeShiftEtas,
   type NextLeaveByInfo,
+  type ShiftEtaInfo,
 } from "@/lib/route-planner";
 import {
   readShiftOrder,
@@ -108,20 +110,47 @@ export default function ShiftsListPage() {
   // Only the matching row in `mine` will render the pill — the rest
   // stay clean.
   const [nextLeaveBy, setNextLeaveBy] = useState<NextLeaveByInfo | null>(null);
+  // Per-shift ETA map — drives the "arrive HH:MM · 12 min late" pill
+  // on every scheduled-state row. Same planner pipeline as
+  // computeNextLeaveBy so the 5-min cache absorbs the call.
+  const [shiftEtas, setShiftEtas] = useState<Map<string, ShiftEtaInfo> | null>(
+    null
+  );
   useEffect(() => {
     if (!loaded) return;
     let cancelled = false;
-    computeNextLeaveBy()
-      .then((info) => {
-        if (!cancelled) setNextLeaveBy(info);
+    // Two helpers, one promise so we get both numbers in parallel
+    // (and the underlying planMyDay cache means it's still one
+    // network call per traffic mode).
+    Promise.all([computeNextLeaveBy(), computeShiftEtas()])
+      .then(([leaveBy, etas]) => {
+        if (cancelled) return;
+        setNextLeaveBy(leaveBy);
+        setShiftEtas(etas);
       })
       .catch(() => {
-        if (!cancelled) setNextLeaveBy(null);
+        if (cancelled) return;
+        setNextLeaveBy(null);
+        setShiftEtas(null);
       });
     return () => {
       cancelled = true;
     };
   }, [loaded, mine.map((s) => `${s.realId}:${s.state}`).join("|")]);
+
+  // Tracked saved-order presence — drives the header pill state
+  // ("Plan day" vs "Day planned ✓"). Mirrors the home page.
+  const [pageSavedOrder, setPageSavedOrder] = useState<string[] | null>(() =>
+    typeof window === "undefined" ? null : readShiftOrder()
+  );
+  useEffect(() => {
+    setPageSavedOrder(readShiftOrder());
+    return subscribeShiftOrder(() => setPageSavedOrder(readShiftOrder()));
+  }, []);
+  const headerDayPlanned =
+    !!pageSavedOrder &&
+    pageSavedOrder.length > 0 &&
+    mine.some((s) => pageSavedOrder.includes(s.realId));
 
   const reload = () => {
     Promise.all([
@@ -481,17 +510,22 @@ export default function ShiftsListPage() {
             point. */}
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
           {mine.filter((s) => s.state !== "complete" && s.state !== "cancelled").length >= 2 && (
+            // Pill flips state once the rep has saved a visit order
+            // (mirror of the home page chip): "Plan day" → "Planned"
+            // with a green check. Same tap target, same href, just
+            // different copy/style so the dashboard reflects the
+            // planned-state across both screens.
             <Link
               href="/route"
-              aria-label="Plan my day"
+              aria-label={headerDayPlanned ? "View today's plan" : "Plan my day"}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 5,
                 padding: "7px 11px 7px 9px",
                 borderRadius: 999,
-                background: MC.okTint,
-                border: `1px solid ${MC.ok}33`,
+                background: headerDayPlanned ? MC.okTint : MC.okTint,
+                border: `1px solid ${MC.ok}55`,
                 color: "#0d6a45",
                 textDecoration: "none",
                 fontFamily: MC.font,
@@ -500,8 +534,13 @@ export default function ShiftsListPage() {
                 letterSpacing: -0.1,
               }}
             >
-              <Glyph name="target" size={13} color={MC.ok} strokeWidth={2.4} />
-              Plan day
+              <Glyph
+                name={headerDayPlanned ? "check-circle" : "target"}
+                size={13}
+                color={MC.ok}
+                strokeWidth={2.4}
+              />
+              {headerDayPlanned ? "Planned" : "Plan day"}
             </Link>
           )}
           <button
@@ -690,6 +729,10 @@ export default function ShiftsListPage() {
                     }
                   : null
               }
+              // Per-row "if you leave now you'll arrive at X" pill.
+              // Hidden by ShiftRow itself for completed / in-progress /
+              // on-break shifts where it's not meaningful.
+              eta={shiftEtas?.get(s.realId) ?? null}
               onToggle={() =>
                 setExpandedId(expandedId === s.realId ? null : s.realId)
               }
@@ -869,6 +912,7 @@ function ShiftRow({
   navigating,
   timing,
   leaveBy,
+  eta,
   onToggle,
   onCheckIn,
   onResume,
@@ -922,6 +966,12 @@ function ShiftRow({
     driveSeconds: number;
     trafficAware: boolean;
   } | null;
+  /** Per-row "if you leave now, arrive at X" info. Same shape as
+   *  ShiftEtaInfo from the planner. Rendered as a small tone-coded
+   *  pill under the time row on scheduled (pre-check-in) rows.
+   *  Hidden for in-progress / on-break / complete / flexible-time
+   *  shifts where the ETA isn't meaningful. */
+  eta?: import("@/lib/route-planner").ShiftEtaInfo | null;
   onToggle?: () => void;
   onCheckIn?: () => void;
   onResume?: () => void;
@@ -1228,6 +1278,87 @@ function ShiftRow({
               · {Math.max(1, Math.round(leaveBy.driveSeconds / 60))} min drive
             </div>
           )}
+          {/* Per-row "if you leave now" arrival pill. Shown on
+              scheduled (pre-check-in) rows when the planner has a
+              real ETA for this stop. Tone matches the /route status
+              banner so the visual language is consistent between
+              the two pages. Hidden when:
+                - the shift is in-progress / on-break / complete /
+                  cancelled (already there or done)
+                - the shift is flexible-time (no schedule to compare)
+                - no eta info (e.g. rep denied GPS) */}
+          {eta &&
+            state !== "complete" &&
+            state !== "in-progress" &&
+            state !== "on-break" &&
+            !shift.isFlexibleTime && (
+              <div
+                style={{
+                  marginTop: 6,
+                  fontFamily: MC.font,
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                  padding: "3px 8px 3px 6px",
+                  borderRadius: 999,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  letterSpacing: 0.2,
+                  ...(eta.status === "late"
+                    ? {
+                        color: "#9c1a3c",
+                        background: MC.dangerTint,
+                        border: `1px solid ${MC.danger}33`,
+                      }
+                    : eta.status === "tight"
+                    ? {
+                        color: "#7A560A",
+                        background: MC.warnTint,
+                        border: `1px solid ${MC.warn}33`,
+                      }
+                    : {
+                        color: "#0d6a45",
+                        background: MC.okTint,
+                        border: `1px solid ${MC.ok}33`,
+                      }),
+                }}
+                title={
+                  eta.trafficAware
+                    ? "Based on live traffic"
+                    : "Estimated drive time"
+                }
+              >
+                <Glyph
+                  name={eta.status === "late" ? "warn" : "clock"}
+                  size={11}
+                  color={
+                    eta.status === "late"
+                      ? MC.danger
+                      : eta.status === "tight"
+                      ? MC.warn
+                      : MC.ok
+                  }
+                  strokeWidth={2.4}
+                />
+                {(() => {
+                  const arriveLabel = eta.eta.toLocaleTimeString(undefined, {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    hour12: true,
+                  });
+                  if (eta.status === "late") {
+                    return `Arrive ${arriveLabel} · ${Math.abs(eta.minsDelta)} min late`;
+                  }
+                  if (eta.status === "tight") {
+                    return `Arrive ${arriveLabel} · on time`;
+                  }
+                  if (eta.minsDelta > 0) {
+                    return `Arrive ${arriveLabel} · ${eta.minsDelta} min early`;
+                  }
+                  return `Arrive ${arriveLabel}`;
+                })()}
+              </div>
+            )}
         </div>
         {!unscheduled && (
           <Glyph

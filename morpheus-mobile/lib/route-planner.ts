@@ -420,6 +420,90 @@ export async function computeNextLeaveBy(): Promise<NextLeaveByInfo | null> {
 }
 
 /**
+ * Per-shift "if you leave now" arrival info for the /shifts row.
+ *
+ * Walks the planner's legs in visit order, accumulating drive time
+ * from origin → stop N to compute a predicted arrival time. Compares
+ * against each stop's scheduled start to classify early / on-time /
+ * tight / late.
+ *
+ * Returns null when the planner has no usable origin (no GPS) — same
+ * gate as computeNextLeaveBy(); a per-shift ETA against a first-
+ * stop pseudo-origin would be meaningless.
+ *
+ * Keyed by `realId` so /shifts can look up its row directly.
+ */
+export type ShiftEtaStatus = "early" | "ok" | "tight" | "late";
+export interface ShiftEtaInfo {
+  /** Predicted arrival time if the rep leaves now. */
+  eta: Date;
+  /** The shift's scheduled start (may be null for flexible-time shifts
+   *  or shifts with no recorded start). */
+  scheduledAt: Date | null;
+  /** Tone bucket relative to scheduledAt.
+   *  early  → eta is more than 10 min before scheduled
+   *  ok     → eta is 0–10 min before scheduled
+   *  tight  → eta is within 5 min either side (or none for flex)
+   *  late   → eta is more than 5 min after scheduled */
+  status: ShiftEtaStatus;
+  /** Signed minute delta: positive = early, negative = late. */
+  minsDelta: number;
+  /** True when the planner answered with Google traffic-aware data. */
+  trafficAware: boolean;
+}
+
+export async function computeShiftEtas(): Promise<Map<string, ShiftEtaInfo> | null> {
+  const result = await planMyDay({ traffic: readTrafficPref() });
+  if (result.originFromFirstStop) return null;
+  if (result.stopsInOrder.length === 0) return null;
+
+  const map = new Map<string, ShiftEtaInfo>();
+  const now = Date.now();
+  let cumSec = 0;
+  for (let i = 0; i < result.route.legs.length; i++) {
+    const leg = result.route.legs[i];
+    const stop = result.stopsInOrder[i];
+    if (!leg || !stop) continue;
+    cumSec += leg.driveSeconds;
+    const eta = new Date(now + cumSec * 1000);
+
+    let scheduledAt: Date | null = null;
+    if (stop.rawStartTime && stop.shiftDate && !stop.isFlexibleTime) {
+      const [Y, M, D] = stop.shiftDate.split("-").map((n) => parseInt(n, 10));
+      const [h, m] = stop.rawStartTime.split(":").map((n) => parseInt(n, 10));
+      if ([Y, M, D, h, m].every(Number.isFinite)) {
+        scheduledAt = new Date(Y, M - 1, D, h, m, 0, 0);
+      }
+    }
+
+    let status: ShiftEtaStatus;
+    let minsDelta = 0;
+    if (!scheduledAt) {
+      // No specific scheduled time → just label as "ok" so callers
+      // can render a neutral "arrive HH:MM" pill if they want.
+      status = "ok";
+    } else {
+      const diffMin = Math.round(
+        (scheduledAt.getTime() - eta.getTime()) / 60_000
+      );
+      minsDelta = diffMin;
+      if (diffMin < -5) status = "late";
+      else if (diffMin <= 5) status = "tight";
+      else if (diffMin <= 10) status = "ok";
+      else status = "early";
+    }
+    map.set(stop.realId, {
+      eta,
+      scheduledAt,
+      status,
+      minsDelta,
+      trafficAware: result.route.trafficAware,
+    });
+  }
+  return map;
+}
+
+/**
  * Direct-link helper for "Open the whole day in Maps" — Google Maps
  * URL with multiple waypoints. iOS routes maps.google.com URLs into
  * Apple Maps; Android opens Google Maps app if installed.

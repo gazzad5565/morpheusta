@@ -24,10 +24,20 @@
 import { todayLocalISO } from "./format";
 
 const LS_KEY_PREFIX = "morpheus.shift_order.";
+const LS_META_KEY_PREFIX = "morpheus.shift_order.meta.";
 const CHANGE_EVENT = "morpheus.shift_order.changed";
 
 function todayKey(): string {
   return LS_KEY_PREFIX + todayLocalISO();
+}
+function todayMetaKey(): string {
+  return LS_META_KEY_PREFIX + todayLocalISO();
+}
+
+interface OrderMeta {
+  /** ms-epoch when the rep saved this order. Drives the "Last
+   *  optimized X min ago" line on /route. */
+  savedAt: number;
 }
 
 /** Persist the visit order. Fires a window event so other parts of
@@ -37,6 +47,10 @@ export function saveShiftOrder(shiftRealIds: string[]): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(todayKey(), JSON.stringify(shiftRealIds));
+    window.localStorage.setItem(
+      todayMetaKey(),
+      JSON.stringify({ savedAt: Date.now() } satisfies OrderMeta)
+    );
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
   } catch {
     /* quota / disabled — fail silently. Loss of preference is
@@ -59,12 +73,34 @@ export function readShiftOrder(): string[] | null {
   }
 }
 
+/** Read the metadata (savedAt) for today's order, or null if none
+ *  saved. Used by /route to show "Last optimized X min ago". */
+export function readShiftOrderMeta(): OrderMeta | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(todayMetaKey());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.savedAt === "number"
+    ) {
+      return { savedAt: parsed.savedAt };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Clear the saved order — fires the same change event so consumers
  *  flip back to chronological in real time. */
 export function clearShiftOrder(): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.removeItem(todayKey());
+    window.localStorage.removeItem(todayMetaKey());
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
   } catch {
     /* noop */
