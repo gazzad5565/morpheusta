@@ -278,7 +278,12 @@ export default function RoutePage() {
         flexDirection: "column",
       }}
     >
-      <AppHeader title="Plan my day" onBack={() => router.push("/")} withMenu />
+      {/* Back goes to /shifts (Today's Shifts), not the dashboard.
+          The two pages are conceptually the same workflow — /shifts
+          is the roster, /route is the optimised planning view of
+          the same shifts — so back-navigation should stay inside
+          that workflow rather than punt to the home screen. */}
+      <AppHeader title="Plan my day" onBack={() => router.push("/shifts")} withMenu />
 
       {/* Sticky summary band — provider, ETA totals, Refresh + Optimize toggles */}
       <div
