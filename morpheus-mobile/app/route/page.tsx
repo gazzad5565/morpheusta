@@ -51,7 +51,6 @@ import {
 } from "@/lib/route-planner";
 import {
   saveShiftOrder,
-  clearShiftOrder,
   readShiftOrder,
   readShiftOrderMeta,
   subscribeShiftOrder,
@@ -666,39 +665,35 @@ export default function RoutePage() {
         </label>
         )}
 
-        {/* Save / Clear order button.
-            Three states:
-              - No saved order, optimize is OFF or the order matches
-                chronological → don't render (nothing meaningful to
-                save).
-              - Order currently displayed differs from chronological
-                AND nothing saved yet (OR saved order doesn't match
-                current) → "Save this order" — green pill, primary.
-              - Saved order matches the currently displayed order →
-                "Order saved ✓ · Clear" — neutral pill with a clear
-                action.
-            Honours Option A: this is a per-rep view preference. It
-            never touches shifts.start_time so the manager's
-            calendar stays exactly as scheduled. */}
+        {/* Save / Re-check button.
+            Three states (one button, three labels):
+              - chronological on screen AND nothing saved → hide
+                (nothing useful to do; the toggle handles re-ordering)
+              - non-chrono order on screen AND nothing saved yet →
+                "Save this order" (primary brand button)
+              - non-chrono on screen AND saved order != current view
+                → "Update saved order" (primary brand button)
+              - non-chrono on screen AND saved order == current view
+                → "Re-check route" (neutral; refreshes the planner so
+                the rep can see if traffic has shifted savings)
+            The old "Order saved ✓ · Clear" pill set was removed —
+            saved-state is already communicated by the "Last
+            optimized X min ago" caption above + the home page's
+            Planned chip. Honours Option A: this is a per-rep view
+            preference. It never touches shifts.start_time so the
+            manager's calendar stays exactly as scheduled. */}
         {(() => {
           if (!result || result.route.legs.length < 2) return null;
           const currentOrder = result.stopsInOrder.map((s) => s.realId);
           if (currentOrder.length < 2) return null;
-          // The chronological-comparison data sits in `comparison`.
-          // If we don't have it yet, suppress the save UI to avoid
-          // flashing "Save" before we know whether it's even
-          // meaningful.
           if (!comparison) return null;
           const chronoSame =
             comparison.chronologicalOrder.join("|") === currentOrder.join("|");
-          // Saved-order presence + match against what's on screen.
           const savedMatchesCurrent =
             !!savedOrder &&
             savedOrder.length === currentOrder.length &&
             savedOrder.join("|") === currentOrder.join("|");
           const savedExists = !!savedOrder && savedOrder.length > 0;
-          // Hide the button entirely when chronological is on screen
-          // AND nothing is saved — nothing useful to do.
           if (chronoSame && !savedExists) return null;
           return (
             <div
@@ -711,50 +706,38 @@ export default function RoutePage() {
               }}
             >
               {savedMatchesCurrent ? (
-                <>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 5,
-                      padding: "6px 11px",
-                      borderRadius: 999,
-                      background: MC.okTint,
-                      border: `1px solid ${MC.ok}33`,
-                      color: "#0d6a45",
-                      fontFamily: MC.font,
-                      fontSize: 11.5,
-                      fontWeight: 700,
-                      letterSpacing: 0.3,
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    <Glyph
-                      name="check-circle"
-                      size={12}
-                      color={MC.ok}
-                      strokeWidth={2.4}
-                    />
-                    Order saved
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => clearShiftOrder()}
-                    style={{
-                      padding: "6px 11px",
-                      borderRadius: 999,
-                      background: "#fff",
-                      border: `1px solid ${MC.line}`,
-                      color: MC.mute,
-                      fontFamily: MC.font,
-                      fontSize: 11.5,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Clear
-                  </button>
-                </>
+                // Saved order matches what's on screen → nothing to
+                // save. Surface a re-check affordance so the rep can
+                // refresh and see if traffic conditions have moved
+                // the optimum since they saved.
+                <button
+                  type="button"
+                  onClick={() => void reload()}
+                  disabled={loading}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "7px 12px",
+                    borderRadius: 999,
+                    background: "#fff",
+                    color: MC.ink2,
+                    border: `1px solid ${MC.line}`,
+                    fontFamily: MC.font,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    letterSpacing: -0.1,
+                    cursor: loading ? "wait" : "pointer",
+                  }}
+                >
+                  <Glyph
+                    name="refresh"
+                    size={13}
+                    color={MC.ink2}
+                    strokeWidth={2.2}
+                  />
+                  {loading ? "Re-checking…" : "Re-check route"}
+                </button>
               ) : (
                 <button
                   type="button"
@@ -805,8 +788,9 @@ export default function RoutePage() {
                   lineHeight: 1.35,
                 }}
               >
-                Reorders your shifts list to match — doesn&apos;t change
-                customer scheduled times.
+                {savedMatchesCurrent
+                  ? "Refresh with current traffic to see if a faster route is available."
+                  : "Reorders your shifts list to match — doesn't change customer scheduled times."}
               </span>
             </div>
           );

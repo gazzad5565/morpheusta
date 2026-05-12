@@ -1282,16 +1282,18 @@ function ShiftRow({
               scheduled (pre-check-in) rows when the planner has a
               real ETA for this stop. Tone matches the /route status
               banner so the visual language is consistent between
-              the two pages. Hidden when:
-                - the shift is in-progress / on-break / complete /
-                  cancelled (already there or done)
-                - the shift is flexible-time (no schedule to compare)
-                - no eta info (e.g. rep denied GPS) */}
+              the two pages.
+              Flex-time shifts ("Anytime today") render the pill too,
+              but neutrally — no late/early comparison since there's
+              no specific start time to be late against. Detected via
+              `eta.scheduledAt === null` from computeShiftEtas.
+              Hidden when the shift is in-progress / on-break /
+              complete / cancelled (already there or done) or when
+              we have no eta info (e.g. GPS denied). */}
           {eta &&
             state !== "complete" &&
             state !== "in-progress" &&
-            state !== "on-break" &&
-            !shift.isFlexibleTime && (
+            state !== "on-break" && (
               <div
                 style={{
                   marginTop: 6,
@@ -1304,7 +1306,16 @@ function ShiftRow({
                   alignItems: "center",
                   gap: 5,
                   letterSpacing: 0.2,
-                  ...(eta.status === "late"
+                  ...(eta.scheduledAt === null
+                    ? // Flex / no scheduled time → neutral okTint
+                      // (rep is on time by definition since the
+                      // shift has no specific start).
+                      {
+                        color: "#0d6a45",
+                        background: MC.okTint,
+                        border: `1px solid ${MC.ok}33`,
+                      }
+                    : eta.status === "late"
                     ? {
                         color: "#9c1a3c",
                         background: MC.dangerTint,
@@ -1329,10 +1340,18 @@ function ShiftRow({
                 }
               >
                 <Glyph
-                  name={eta.status === "late" ? "warn" : "clock"}
+                  name={
+                    eta.scheduledAt === null
+                      ? "clock"
+                      : eta.status === "late"
+                      ? "warn"
+                      : "clock"
+                  }
                   size={11}
                   color={
-                    eta.status === "late"
+                    eta.scheduledAt === null
+                      ? MC.ok
+                      : eta.status === "late"
                       ? MC.danger
                       : eta.status === "tight"
                       ? MC.warn
@@ -1346,16 +1365,23 @@ function ShiftRow({
                     minute: "2-digit",
                     hour12: true,
                   });
+                  // Every variant leads with "Leave now →" so the rep
+                  // doesn't have to mentally hold the "this is right
+                  // this second" assumption. Flex-time shifts get the
+                  // neutral form (no schedule to compare against).
+                  if (eta.scheduledAt === null) {
+                    return `Leave now → arrive ${arriveLabel}`;
+                  }
                   if (eta.status === "late") {
-                    return `Arrive ${arriveLabel} · ${Math.abs(eta.minsDelta)} min late`;
+                    return `Leave now → arrive ${arriveLabel} · ${Math.abs(eta.minsDelta)} min late`;
                   }
                   if (eta.status === "tight") {
-                    return `Arrive ${arriveLabel} · on time`;
+                    return `Leave now → arrive ${arriveLabel} · on time`;
                   }
                   if (eta.minsDelta > 0) {
-                    return `Arrive ${arriveLabel} · ${eta.minsDelta} min early`;
+                    return `Leave now → arrive ${arriveLabel} · ${eta.minsDelta} min early`;
                   }
-                  return `Arrive ${arriveLabel}`;
+                  return `Leave now → arrive ${arriveLabel}`;
                 })()}
               </div>
             )}
