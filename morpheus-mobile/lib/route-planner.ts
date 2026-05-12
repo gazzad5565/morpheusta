@@ -146,10 +146,38 @@ export async function planRoute(
  * (8s timeout, low-accuracy, 60s cache) so the latency profile
  * matches.
  */
+// Module-level GPS cache. Returning from /route to home re-runs the
+// home page's computeNextLeaveBy(), which calls this helper, which
+// would otherwise re-acquire the GPS fix (up to 8s on iOS Safari
+// even when permission is already granted). With a short-lived cache
+// the second call inside the TTL resolves instantly, so the back-
+// nav UX feels snappy. The browser already does some caching via
+// `maximumAge`, but the prompt + permission check round-trips still
+// run; this guards the WHOLE helper.
+const _GPS_CACHE_TTL_MS = 60_000;
+let _gpsCache: { lat: number; lng: number; expiresAt: number } | null = null;
+
+/** Clear the GPS cache. Useful when the rep explicitly requests a
+ *  refresh (e.g. tapping "Refresh route"). */
+export function clearGpsCache(): void {
+  _gpsCache = null;
+}
+
 export async function requestGeolocationOnce(
   opts?: { highAccuracy?: boolean; timeoutMs?: number; maxAgeMs?: number }
 ): Promise<LatLng | null> {
   if (typeof window === "undefined" || !navigator.geolocation) return null;
+
+  // Cache hit — instant return. Skips the Permissions API round-trip
+  // and the getCurrentPosition wait. Skipped when `highAccuracy` is
+  // explicitly requested (those callers want a fresh, precise fix).
+  if (
+    _gpsCache &&
+    _gpsCache.expiresAt > Date.now() &&
+    !opts?.highAccuracy
+  ) {
+    return { lat: _gpsCache.lat, lng: _gpsCache.lng };
+  }
 
   const options: PositionOptions = {
     enableHighAccuracy: opts?.highAccuracy ?? false,
@@ -160,8 +188,11 @@ export async function requestGeolocationOnce(
   const fetchNow = () =>
     new Promise<LatLng | null>((resolve) => {
       navigator.geolocation.getCurrentPosition(
-        (pos) =>
-          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        (pos) => {
+          const out = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          _gpsCache = { ...out, expiresAt: Date.now() + _GPS_CACHE_TTL_MS };
+          resolve(out);
+        },
         () => resolve(null),
         options
       );

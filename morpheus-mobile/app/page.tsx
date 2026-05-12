@@ -507,14 +507,14 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-          {/* Action cluster — Plan my day (when relevant) + View all.
-              Plan my day moved here from a stand-alone row below Up
-              Next so the day-summary actions sit together in one
-              top-row cluster. It only renders when the rep has 2+
-              REMAINING (non-completed) stops, otherwise hides.
-              When the rep has already saved an order today the pill
-              flips to "Day planned · view" with an ink-filled style
-              so the dashboard reflects the planned state. */}
+          {/* Action cluster — View all is the primary destination
+              (always visible). Plan my day is a SECONDARY affordance:
+              smaller, lighter, sits next to View all as a quiet
+              option, not a competing pill. Only renders when the rep
+              has 2+ remaining stops. Planned-state replaces the
+              "target" glyph with a small green check + " Planned"
+              label so the dashboard still reflects state without
+              shouting. */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {(() => {
               const remainingStops = shifts.filter(
@@ -526,34 +526,33 @@ export default function DashboardPage() {
                 <Link
                   href="/route"
                   aria-label={planned ? "View today's plan" : "Plan my day"}
+                  // Tiny ghost-style pill — minimal chrome, sits as a
+                  // quiet companion to View all rather than another
+                  // big tappable button. Slightly muted text colour
+                  // + transparent background + thin border.
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
-                    gap: 5,
-                    padding: "9px 12px",
-                    borderRadius: 10,
-                    background: planned ? MC.ink : MC.okTint,
-                    border: planned
-                      ? `1px solid ${MC.ink}`
-                      : `1px solid ${MC.ok}33`,
-                    color: planned ? "#fff" : "#0d6a45",
+                    gap: 4,
+                    padding: "5px 9px 5px 7px",
+                    borderRadius: 999,
+                    background: "transparent",
+                    border: `1px solid ${MC.line}`,
+                    color: planned ? "#0d6a45" : MC.mute,
                     textDecoration: "none",
                     fontFamily: MC.font,
-                    fontSize: 13.5,
-                    fontWeight: 700,
-                    letterSpacing: -0.1,
-                    boxShadow: planned
-                      ? `0 2px 6px rgba(10,15,30,.18)`
-                      : `0 2px 6px ${MC.ok}22`,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    letterSpacing: 0.1,
                   }}
                 >
                   <Glyph
                     name={planned ? "check-circle" : "target"}
-                    size={14}
-                    color={planned ? "#fff" : MC.ok}
+                    size={11}
+                    color={planned ? MC.ok : MC.mute}
                     strokeWidth={2.4}
                   />
-                  {planned ? "Day planned" : "Plan my day"}
+                  {planned ? "Planned" : "Plan day"}
                 </Link>
               );
             })()}

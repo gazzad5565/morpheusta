@@ -41,6 +41,7 @@ import { Glyph } from "@/components/Glyph";
 import {
   planMyDay,
   clearRouteCache,
+  clearGpsCache,
   buildDayMapsUrl,
   buildLegMapsUrl,
   openMapsLink,
@@ -223,6 +224,7 @@ export default function RoutePage() {
     setError(null);
     try {
       clearRouteCache(); // user explicitly asked for fresh
+      clearGpsCache(); // and a fresh GPS fix while we're at it
       const r = await planMyDay({ optimize, traffic: useTraffic });
       setResult(r);
     } catch (e) {
@@ -575,6 +577,11 @@ export default function RoutePage() {
             />
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Copy flips based on whether the rep has a saved
+                order. The "Optimize stop order" verb only really
+                makes sense BEFORE a save; afterwards the order is
+                already chosen, so we reframe it as
+                "Already optimized" + a re-check prompt. */}
             <div
               style={{
                 fontFamily: MC.font,
@@ -584,7 +591,7 @@ export default function RoutePage() {
                 letterSpacing: -0.1,
               }}
             >
-              Optimize stop order
+              {savedOrder ? "Order optimized" : "Optimize stop order"}
             </div>
             <div
               style={{
@@ -594,7 +601,9 @@ export default function RoutePage() {
                 marginTop: 1,
               }}
             >
-              Re-order today's stops for the shortest drive
+              {savedOrder
+                ? "Re-check below for any better route with current traffic."
+                : "Re-order today's stops for the shortest drive"}
             </div>
           </div>
           {/* Hidden checkbox removed (May 12).
@@ -876,7 +885,9 @@ export default function RoutePage() {
                     }}
                   >
                     {optimizeOn
-                      ? `Optimized order saves ${savedMin > 0 ? `${savedMin} min` : "drive time"}${savedKm > 0.5 ? ` · ${savedKm.toFixed(1)} km less` : ""}`
+                      ? savedOrder
+                        ? `Saved order saves ${savedMin > 0 ? `${savedMin} min` : "drive time"}${savedKm > 0.5 ? ` · ${savedKm.toFixed(1)} km less` : ""}`
+                        : `Optimized order saves ${savedMin > 0 ? `${savedMin} min` : "drive time"}${savedKm > 0.5 ? ` · ${savedKm.toFixed(1)} km less` : ""}`
                       : `Could save ${savedMin > 0 ? `${savedMin} min` : "drive time"} by reordering`}
                   </div>
                   <div
@@ -887,7 +898,9 @@ export default function RoutePage() {
                     }}
                   >
                     {optimizeOn
-                      ? "Compared with visiting your stops in scheduled-time order."
+                      ? savedOrder
+                        ? "Compared with visiting in scheduled-time order. Re-run with current traffic above if you want to update."
+                        : "Compared with visiting your stops in scheduled-time order."
                       : "Flip 'Optimize stop order' above to use the shorter route."}
                   </div>
                 </div>
