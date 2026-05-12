@@ -26,8 +26,30 @@ import {
   compressCustomerLogo,
   deleteCustomer,
 } from "@/lib/customers-store";
+import {
+  listCustomerContacts,
+  createContact,
+  updateContact,
+  removeContact,
+  type CustomerContact,
+} from "@/lib/customer-contacts-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import type { Customer } from "@/lib/types";
+
+/** Tabs across the top of the customer edit page. Order chosen so the
+ *  most-edited area sits first (Identity) and the per-customer
+ *  override toggles sit last (managers rarely touch them after the
+ *  initial setup). "Contacts" is its own first-class tab because
+ *  it's the section with the most variable amount of data
+ *  (1–N rows per customer) and benefits from a dedicated workspace
+ *  rather than fighting with the other fields for vertical room. */
+type EditTab = "identity" | "location" | "contacts" | "exceptions";
+const TABS: { key: EditTab; label: string }[] = [
+  { key: "identity", label: "Identity" },
+  { key: "location", label: "Location" },
+  { key: "contacts", label: "Contacts" },
+  { key: "exceptions", label: "Check-in exceptions" },
+];
 
 const SWATCHES = [
   "#D9493D",
@@ -51,6 +73,32 @@ export default function EditCustomerPage() {
 
   const [original, setOriginal] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<EditTab>("identity");
+
+  // Contacts tab state. Loaded lazily on first switch to the tab so
+  // the rest of the page isn't blocked on the extra query.
+  const [contacts, setContacts] = useState<CustomerContact[] | null>(null);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  useEffect(() => {
+    if (tab !== "contacts" || contacts !== null) return;
+    let cancelled = false;
+    setContactsLoading(true);
+    listCustomerContacts(id)
+      .then((rows) => {
+        if (!cancelled) setContacts(rows);
+      })
+      .finally(() => {
+        if (!cancelled) setContactsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, contacts, id]);
+
+  const refreshContacts = async () => {
+    const rows = await listCustomerContacts(id);
+    setContacts(rows);
+  };
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [initials, setInitials] = useState("");
@@ -276,7 +324,16 @@ export default function EditCustomerPage() {
           alignItems: "start",
         }}
       >
-        {/* Left column — stacked Cards, one per concern area.
+        {/* Left column — tabbed workspace. Each tab is one Card so
+            managers focus on one concern at a time; the row at the
+            top of the column is the tab bar. Form-state tabs
+            (Identity / Location / Exceptions) share the page-level
+            Save / Delete row at the bottom. Contacts is its own
+            sub-workflow with per-row immediate saves, so the page-
+            level Save doesn't apply to it (but doesn't break
+            anything either — switching tabs after editing a contact
+            row keeps everything consistent).
+
             Earlier this page was a single giant Card with twelve
             fields jammed into it; the per-customer exception
             overrides (which are conceptually layered on top of the
@@ -293,7 +350,57 @@ export default function EditCustomerPage() {
               4. Action row    — Delete / Cancel / Save (outside any
                                  card so it doesn't look like a field). */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* ───── Tab bar ─────────────────────────────────────────
+              Pill-style tab bar that lives ABOVE the card stack.
+              Active tab gets the brand-tint background + ink-coloured
+              text. Inactive tabs stay quiet so the active one reads
+              as clearly "selected".  */}
+          <div
+            role="tablist"
+            aria-label="Customer edit sections"
+            style={{
+              display: "flex",
+              gap: 6,
+              flexWrap: "wrap",
+              padding: 6,
+              background: AC.bg,
+              border: `1px solid ${AC.line}`,
+              borderRadius: 12,
+            }}
+          >
+            {TABS.map((t) => {
+              const on = tab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={on}
+                  onClick={() => setTab(t.key)}
+                  style={{
+                    padding: "7px 13px",
+                    borderRadius: 8,
+                    background: on ? "#fff" : "transparent",
+                    color: on ? AC.ink : AC.mute,
+                    border: `1px solid ${on ? AC.line : "transparent"}`,
+                    boxShadow: on
+                      ? "0 1px 0 rgba(10,15,30,.04), 0 1px 2px rgba(10,15,30,.04)"
+                      : "none",
+                    fontFamily: AC.font,
+                    fontSize: 12.5,
+                    fontWeight: on ? 700 : 600,
+                    letterSpacing: -0.1,
+                    cursor: "pointer",
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* ───── 1. Identity ───────────────────────────────────── */}
+          {tab === "identity" && (
           <Card padding={20}>
             <SectionTitle>Identity</SectionTitle>
 
@@ -460,8 +567,10 @@ export default function EditCustomerPage() {
               )}
             </Field>
           </Card>
+          )}
 
           {/* ───── 2. Location ───────────────────────────────────── */}
+          {tab === "location" && (
           <Card padding={20}>
             <SectionTitle>Location</SectionTitle>
 
@@ -535,8 +644,19 @@ export default function EditCustomerPage() {
               </div>
             </Field>
           </Card>
+          )}
 
-          {/* ───── 3. Check-in exceptions ────────────────────────── */}
+          {/* ───── 3. Contacts ───────────────────────────────────── */}
+          {tab === "contacts" && (
+            <ContactsTab
+              customerId={id}
+              contacts={contacts}
+              loading={contactsLoading}
+              onRefresh={refreshContacts}
+            />
+          )}
+
+          {/* ───── 4. Check-in exceptions ────────────────────────── */}
           {/* Conceptually separate from the rest of the form: these
               are per-customer OVERRIDES on top of the org-wide
               defaults at Settings → Check-in rules. Inherit (the
@@ -545,6 +665,7 @@ export default function EditCustomerPage() {
               explainer paragraph below the section title makes that
               hierarchy explicit so a manager scanning the page
               doesn't think these are standalone toggles. */}
+          {tab === "exceptions" && (
           <Card padding={20}>
             <SectionTitle>Check-in exceptions</SectionTitle>
             <div
@@ -583,8 +704,9 @@ export default function EditCustomerPage() {
               />
             </Field>
           </Card>
+          )}
 
-          {/* ───── 4. Status messages + action row ───────────────── */}
+          {/* ───── 5. Status messages + action row ───────────────── */}
           {note && (
             <div
               style={{
@@ -777,6 +899,441 @@ function Field({
           {hint}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── Contacts tab ────────────────────────────────────────────────
+ *
+ * Card-level workspace for the multi-contact list. Each contact is
+ * a row with inline edit fields (name / role label / phone / email
+ * / notes); the bottom row is "+ Add contact" which spawns an empty
+ * draft. Saves are per-row, immediate (Save button on the row, or
+ * blur — we go with Save button so the manager has explicit
+ * commit semantics).
+ *
+ * Lifecycle:
+ *   - Contacts list comes from listCustomerContacts (active=true).
+ *   - Add: createContact() → on success, refresh the list.
+ *   - Edit: updateContact() per row → refresh.
+ *   - Remove: soft-delete via removeContact() → refresh.
+ *
+ * No drag-to-reorder yet — sort_order is preserved in the DB but
+ * the UI exposes it via the "Move up / Move down" affordance which
+ * we'll add when reps ask for it. For now, contacts render in
+ * sort_order then name order.
+ */
+function ContactsTab({
+  customerId,
+  contacts,
+  loading,
+  onRefresh,
+}: {
+  customerId: string;
+  contacts: CustomerContact[] | null;
+  loading: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  return (
+    <Card padding={20}>
+      <SectionTitle>Contacts</SectionTitle>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 12.5,
+          color: AC.mute,
+          lineHeight: 1.5,
+          marginBottom: 14,
+          marginTop: -4,
+        }}
+      >
+        Anyone the rep might need to reach at this customer — ops
+        lead, accounts, security, etc. Reps see contacts for the
+        customers they're scheduled at. Each contact saves on its
+        own.
+      </div>
+
+      {loading && (
+        <div style={{ color: AC.mute, fontFamily: AC.font, fontSize: 13, padding: 12 }}>
+          Loading…
+        </div>
+      )}
+
+      {!loading && contacts && contacts.length === 0 && (
+        <div
+          style={{
+            padding: "16px 14px",
+            border: `1px dashed ${AC.line}`,
+            borderRadius: 12,
+            background: AC.bg,
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            color: AC.mute,
+            marginBottom: 12,
+          }}
+        >
+          No contacts yet. Add the first one below.
+        </div>
+      )}
+
+      {!loading && contacts && contacts.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+          {contacts.map((c) => (
+            <ContactRow
+              key={c.id}
+              contact={c}
+              onSaved={onRefresh}
+              onRemoved={onRefresh}
+            />
+          ))}
+        </div>
+      )}
+
+      <NewContactRow customerId={customerId} onAdded={onRefresh} />
+    </Card>
+  );
+}
+
+/** Single existing contact — inline edit, Save / Remove buttons. */
+function ContactRow({
+  contact,
+  onSaved,
+  onRemoved,
+}: {
+  contact: CustomerContact;
+  onSaved: () => Promise<void>;
+  onRemoved: () => Promise<void>;
+}) {
+  const [name, setName] = useState(contact.name);
+  const [roleLabel, setRoleLabel] = useState(contact.role_label || "");
+  const [phone, setPhone] = useState(contact.phone || "");
+  const [email, setEmail] = useState(contact.email || "");
+  const [notes, setNotes] = useState(contact.notes || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Dirty flag so the Save button only lights up after a real edit
+  // (avoids the manager wondering why the button is always green).
+  const dirty =
+    name !== contact.name ||
+    roleLabel !== (contact.role_label || "") ||
+    phone !== (contact.phone || "") ||
+    email !== (contact.email || "") ||
+    notes !== (contact.notes || "");
+
+  async function onSave() {
+    if (!dirty || busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await updateContact(contact.id, {
+      name,
+      role_label: roleLabel,
+      phone,
+      email,
+      notes,
+    });
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't save.");
+      return;
+    }
+    await onSaved();
+  }
+
+  async function onRemove() {
+    if (busy) return;
+    if (!confirm(`Remove ${contact.name}? Reps will no longer see this contact.`)) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const r = await removeContact(contact.id);
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't remove.");
+      return;
+    }
+    await onRemoved();
+  }
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${AC.line}`,
+        borderRadius: 12,
+        padding: 14,
+        background: "#fff",
+      }}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <ContactField label="Name" required>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={inputStyle}
+          />
+        </ContactField>
+        <ContactField label="Role">
+          <input
+            value={roleLabel}
+            onChange={(e) => setRoleLabel(e.target.value)}
+            placeholder="Ops lead, Accounts, …"
+            style={inputStyle}
+          />
+        </ContactField>
+        <ContactField label="Phone">
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            inputMode="tel"
+            style={inputStyle}
+          />
+        </ContactField>
+        <ContactField label="Email">
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            inputMode="email"
+            style={inputStyle}
+          />
+        </ContactField>
+      </div>
+      <ContactField label="Notes">
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          style={{ ...inputStyle, fontFamily: AC.font, resize: "vertical" }}
+        />
+      </ContactField>
+      {error && (
+        <div
+          style={{
+            padding: "8px 10px",
+            background: AC.dangerTint,
+            color: "#9c1a3c",
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 500,
+            marginBottom: 10,
+          }}
+        >
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <Btn kind="danger" size="sm" onClick={onRemove} disabled={busy}>
+          Remove
+        </Btn>
+        <Btn
+          kind={dirty ? "primary" : undefined}
+          size="sm"
+          icon="check"
+          onClick={onSave}
+          disabled={!dirty || busy || !name.trim()}
+        >
+          {busy ? "Saving…" : dirty ? "Save" : "Saved"}
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
+/** Bottom-of-list "+ Add contact" affordance.
+ *  Click → expands into the same row layout as ContactRow but with
+ *  the create flow. */
+function NewContactRow({
+  customerId,
+  onAdded,
+}: {
+  customerId: string;
+  onAdded: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [roleLabel, setRoleLabel] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function reset() {
+    setName("");
+    setRoleLabel("");
+    setPhone("");
+    setEmail("");
+    setNotes("");
+    setError(null);
+  }
+
+  async function onAdd() {
+    if (busy) return;
+    if (!name.trim()) {
+      setError("Name is required.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const r = await createContact({
+      customer_id: customerId,
+      name,
+      role_label: roleLabel,
+      phone,
+      email,
+      notes,
+    });
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error || "Couldn't add.");
+      return;
+    }
+    reset();
+    setOpen(false);
+    await onAdded();
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        style={{
+          width: "100%",
+          padding: "12px 14px",
+          border: `1px dashed ${AC.line}`,
+          borderRadius: 12,
+          background: AC.bg,
+          color: AC.ink2,
+          fontFamily: AC.font,
+          fontSize: 13,
+          fontWeight: 600,
+          letterSpacing: -0.1,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+        }}
+      >
+        <AGlyph name="plus" size={14} color={AC.ink2} strokeWidth={2.4} />
+        Add contact
+      </button>
+    );
+  }
+  return (
+    <div
+      style={{
+        border: `1px solid ${AC.brand}55`,
+        background: AC.brandTint,
+        borderRadius: 12,
+        padding: 14,
+      }}
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <ContactField label="Name" required>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={inputStyle}
+            autoFocus
+          />
+        </ContactField>
+        <ContactField label="Role">
+          <input
+            value={roleLabel}
+            onChange={(e) => setRoleLabel(e.target.value)}
+            placeholder="Ops lead, Accounts, …"
+            style={inputStyle}
+          />
+        </ContactField>
+        <ContactField label="Phone">
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            inputMode="tel"
+            style={inputStyle}
+          />
+        </ContactField>
+        <ContactField label="Email">
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            inputMode="email"
+            style={inputStyle}
+          />
+        </ContactField>
+      </div>
+      <ContactField label="Notes">
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          style={{ ...inputStyle, fontFamily: AC.font, resize: "vertical" }}
+        />
+      </ContactField>
+      {error && (
+        <div
+          style={{
+            padding: "8px 10px",
+            background: AC.dangerTint,
+            color: "#9c1a3c",
+            borderRadius: 8,
+            fontSize: 12,
+            fontWeight: 500,
+            marginBottom: 10,
+          }}
+        >
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <Btn
+          size="sm"
+          onClick={() => {
+            reset();
+            setOpen(false);
+          }}
+          disabled={busy}
+        >
+          Cancel
+        </Btn>
+        <Btn kind="primary" size="sm" icon="plus" onClick={onAdd} disabled={busy}>
+          {busy ? "Adding…" : "Add contact"}
+        </Btn>
+      </div>
+    </div>
+  );
+}
+
+/** Tighter field wrapper for the contact rows — half the vertical
+ *  rhythm of the page-level Field component so a row doesn't take
+ *  up the screen. */
+function ContactField({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 10.5,
+          color: AC.mute,
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          marginBottom: 4,
+        }}
+      >
+        {label}
+        {required && <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>}
+      </div>
+      {children}
     </div>
   );
 }
