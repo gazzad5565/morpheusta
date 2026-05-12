@@ -481,6 +481,96 @@ Per-shift `/summary` fired after EVERY check-out — too much.
 `/day` fires at most once a day, when the work's done. One
 celebration, real payoff.
 
+##### `/day` cinematic iterations (`e3e00e2` → `c8bff98` → `1206990` → `0d354bc`)
+
+Four follow-up commits to make the entry actually feel like a
+moment, not a transition. Gary's testing rounds drove each fix:
+
+- **`e3e00e2`** — reduced-motion override scoped to only the
+  `.dm-gradient` class. Playwright at iPhone 14 reduced-motion
+  viewport caught that the universal `.dm-*` rule was killing
+  tile backgrounds and label colours alongside the gradient
+  text. Fix: keep `animation: none` global, restrict the
+  `-webkit-text-fill-color` + `background: none` overrides to
+  the gradient headline only.
+- **`c8bff98`** — Gary feedback: "almost fell asleep." Wrapped
+  the hero number in a `CountUp` so the digit visibly ticks from
+  0 → N over 1.5s instead of just appearing; bumped tile label
+  opacity from 0.7 → 1.0 (real iOS Safari was rendering the
+  compounded opacity near-invisible); extended hero entry from
+  0.9s → 1.8s with bigger overshoot; added a second
+  `<SecondaryConfetti>` (48 particles) that fires from the tile
+  area as the tiles drop to give the cinematic a "phase 2" hit;
+  re-timed the whole arc with discrete beats.
+- **`1206990`** — Gary feedback: "no movement, no nothing
+  besides the start." Added SIX continuous ambient animations
+  that loop forever after the entry settles, so the screen
+  never goes static:
+    · `dm-flash` — bright radial white-out at t=0 (one-shot)
+    · `dm-glow-breathe` — hero number text-shadow pulses (3.4s loop)
+    · `dm-bob` — hero number micro-bobs (4.5s loop)
+    · 18 ambient floating particles drifting up forever
+    · `dm-shimmer-loop` — diagonal light wash (5.5s loop)
+    · `dm-tile-glow` — each tile's box-shadow breathes (3.2s loop)
+- **`0d354bc`** — Gary feedback: "still no animation when it
+  starts." Root cause: three CSS animations (entry, bob,
+  glow-breathe) stacked on the same DOM element were competing
+  for the `transform` property — iOS Safari's composite resolver
+  was letting the looping `bob` bleed into the entry window and
+  suppressing the entry arc entirely. Fix: split into THREE
+  nested wrappers so each transform owns its own element:
+    · outer `.dm-impact-shake` — one-shot screen-shake at 0.55s
+    · middle `.dm-hero-bob` — infinite bob (transform)
+    · inner `.dm-hero-num` — entry drop + count-up (transform +
+      filter + opacity) and glow-breathe (text-shadow, doesn't
+      conflict)
+  Also made the entry MUCH more dramatic: number now drops from
+  `translateY(-280px)` at scale 0.3 with -22° rotation and 50px
+  motion blur, crashes down through a 3-stage bounce. Tiles now
+  slide in from the SIDES (left from -80px, right from +80px)
+  instead of straight-drop. Added `will-change: transform,
+  opacity, filter` + `backface-visibility: hidden` for iOS GPU
+  acceleration.
+
+##### Verified by Playwright
+
+A live-fire test (`/Users/gary/Claude/qa/day-record-test.mjs`,
+since deleted after success) stubs Supabase auth + REST queries
+and drives `/day` at iPhone 14 + Pixel 7 viewports with frame
+snapshots every 150ms. The recording confirms:
+  - 0ms: "TALLYING YOUR DAY…" pulse on dark backdrop
+  - 150ms: "0" appears with bright radial flash behind, confetti
+    firing outward
+  - 300ms: count-up has ticked to "2", number scaled in fully
+  - 600ms: settled on final number, "Day done." headline rises
+  - 2400-3000ms: 4 tiles slide in from sides with their own
+    count-ups
+  - 3100ms+: per-stop timeline cascades, exception banner,
+    CTA fades in
+  - Continuous: ambient particles drift, hero glow breathes,
+    shimmer sweeps, tile shadows pulse — forever.
+
+##### iOS PWA cache-busting note (for the next debugger)
+
+Recurring symptom Gary hit: "I just pushed and I'm still seeing
+the old animation." iOS PWAs cache the JS bundle aggressively
+through the service worker — Vercel deploying does NOT
+immediately update what the installed PWA serves.
+
+To force-bust on iPhone:
+  1. Swipe up + swipe up on the Morpheus tile to fully kill the
+     PWA from the app switcher (not just minimise).
+  2. Wait ~10s so the service worker can check for updates on
+     next launch.
+  3. Reopen from the home screen — fresh bundle should load.
+  4. Nuclear option if the above fails: delete the PWA from the
+     home screen, reopen the URL in Safari, Share → Add to Home
+     Screen. Forces a completely fresh install.
+
+This is iOS-specific. Android Chrome PWAs honour the
+Service-Worker-Allowed cache headers more aggressively and
+usually pick up the new bundle within a minute.
+
 #### Files changed today
 
 `app/page.tsx`, `app/shifts/page.tsx`, `app/route/page.tsx`,
