@@ -346,18 +346,20 @@ function CheckOutPage() {
     //    broadcast fires before the user navigates away.
     await clearRepLocation();
 
-    const params = new URLSearchParams({
-      ...(offsiteReason ? { offsiteReason, offsiteNote } : {}),
-      ...(earlyReason ? { earlyReason, earlyNote } : {}),
-      ...(shift?.name ? { customer: shift.name } : {}),
-    });
-    // Land on the "done" phase so the celebratory frame
-    // ("You're checked out!" + green tick) registers for ~550 ms
-    // before we route. router.push is prefetched, so the
-    // navigation itself feels instant once it fires.
+    // Land on the "done" phase so the wrap-up animation finishes
+    // with "You're checked out!" + green tick fully visible, then
+    // route the rep STRAIGHT BACK TO HOME (May 12 — Gary).
+    //
+    // /summary used to be the next stop with stat tiles + an
+    // activity timeline, but Gary called it redundant: the rep
+    // just filed all the exceptions on /check-out, the wrap-up
+    // overlay already says "Checked out · Quayside Hardware", and
+    // the dashboard is where they want to land to pick up the
+    // next shift. ~1200 ms on the "done" frame is long enough to
+    // read the headline without feeling stalled.
     setCheckOutPhase("done");
-    await new Promise((r) => window.setTimeout(r, 550));
-    router.push(`/summary?${params.toString()}`);
+    await new Promise((r) => window.setTimeout(r, 1200));
+    router.push("/");
   };
 
   // No active shift to check out of — guide the rep back. Also covers the

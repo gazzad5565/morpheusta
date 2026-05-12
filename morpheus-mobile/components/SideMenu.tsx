@@ -42,11 +42,14 @@ const ITEMS: Item[] = [
 // the menu tight.
 
 // "Today" covers the dashboard plus every page the rep flows through
-// during an active shift (check-in, active, check-out, summary) — they
-// all roll up to the dashboard conceptually. /shifts is its own
-// destination (the list view), so it stays out of this set and gets
-// highlighted independently via a startsWith match on its own item.
-const TODAY_PATHS = ["/", "/check-in", "/active", "/check-out", "/summary", "/add-shift"];
+// during an active shift (check-in, active, check-out) — they all
+// roll up to the dashboard conceptually. /summary was removed
+// (May 12) since /check-out's wrap-up overlay now ends on the
+// "Checked out!" frame and routes straight back to home — no
+// intermediate summary page. /shifts is its own destination (the
+// list view), so it stays out of this set and gets highlighted
+// independently via a startsWith match on its own item.
+const TODAY_PATHS = ["/", "/check-in", "/active", "/check-out", "/add-shift"];
 
 function isTodayCurrent(pathname: string): boolean {
   return TODAY_PATHS.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p)));
