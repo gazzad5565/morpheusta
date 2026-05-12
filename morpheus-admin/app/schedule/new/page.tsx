@@ -120,11 +120,16 @@ function NewShiftPage() {
   const [customerScope, setCustomerScope] = useState<CustomerScope>([]);
   // Rep scope mirrors the customer pattern:
   //   null = unassigned (rep_id = NULL on the created shift)
-  //   []   = none picked yet (caller treats as invalid)
+  //   []   = Specific picker active, nothing chosen yet (caller
+  //          treats as invalid until at least one rep is picked)
   //   [id, ...] = these reps; cartesian product with customers + dates
-  // Default is null (single shift, claimable) which preserves the
-  // previous form's "leave it blank" behaviour.
-  const [repScope, setRepScope] = useState<RepScope>(null);
+  // Default is [] (Specific, awaiting pick) — matches the
+  // customer-scope default. Reasoning: most shifts are for a
+  // specific rep, not claimable by anyone. Forcing an explicit pick
+  // avoids a misclick creating an unassigned shift when the manager
+  // meant to assign one. Reps creating intentionally-claimable
+  // shifts flip to "Unassigned" via the picker (one tap).
+  const [repScope, setRepScope] = useState<RepScope>([]);
 
   // Claim-radius for unassigned shifts. NULL = no restriction (the
   // shift is visible to every rep — current default). Setting a
