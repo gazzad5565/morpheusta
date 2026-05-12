@@ -274,6 +274,24 @@ export default function RoutePage() {
     });
   }, []);
 
+  // "Re-checked at HH:MM" — the wall-clock time the planner last
+  // computed this route. Gary's been explicit: he wants a TIME
+  // visible on every visit to /route, regardless of whether the
+  // rep has saved an order. Persisted in localStorage so a cold-
+  // load shows the previous check time until the fresh fetch
+  // lands; once `result` populates we sync from `route.computedAt`.
+  const LAST_CHECKED_LS_KEY = "morpheus.route.last_checked_at";
+  const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(LAST_CHECKED_LS_KEY);
+      const n = raw ? parseInt(raw, 10) : NaN;
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
+  });
+
   // Background fetch of the OTHER mode so we can compare totals and
   // show concrete proof that "Optimize stop order" is doing something.
   // Without this comparison the rep flicks the toggle, sees the same
@@ -334,6 +352,25 @@ export default function RoutePage() {
   const warning = route?.warning;
   const originFromFirstStop = result?.originFromFirstStop ?? false;
 
+  // Whenever a fresh route lands, snapshot its computedAt as the
+  // new "re-checked at" timestamp and persist it. This is what
+  // drives the always-visible "Re-checked at HH:MM" caption — the
+  // page's stamp of "the data you're looking at is this fresh".
+  useEffect(() => {
+    if (!route?.computedAt) return;
+    setLastCheckedAt(route.computedAt);
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          LAST_CHECKED_LS_KEY,
+          String(route.computedAt)
+        );
+      }
+    } catch {
+      /* private mode */
+    }
+  }, [route?.computedAt]);
+
   // "Open whole day in Maps" URL builder was removed (May 12 —
   // Gary). The dayMapsUrl useMemo + the CTA that consumed it are
   // gone, so buildDayMapsUrl / buildLegMapsUrl / PlannerStop are no
@@ -366,6 +403,19 @@ export default function RoutePage() {
           padding: "12px 14px",
         }}
       >
+        {/* Header layout (May 12 rev — Gary):
+            The previous one-row layout (LIVE pill + total drive +
+            Re-check button all on the same flex line) wrapped the
+            "LIVE TRAFFIC" label to two lines on iPhone widths and
+            squashed the totals.
+            New 2-row stack:
+              Row 1: LIVE / ESTIMATE chip — | — Re-check button
+              Row 2: "Total drive time: 16 min · 8.3 km" — full
+                     width, heavier weight (this is the lead number)
+            Below the band: an always-visible "Re-checked at HH:MM"
+            line so the rep can tell how fresh the figure is, plus
+            the "Order saved at HH:MM" banner when a save is on
+            file. */}
         <div
           style={{
             display: "flex",
@@ -374,7 +424,7 @@ export default function RoutePage() {
             gap: 10,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
             {/* Live traffic toggle. Tap flips between the Google
                 provider (traffic-aware ETAs) and the mock provider
                 (haversine × 1.4 × 30 km/h urban estimate). State is
@@ -399,7 +449,7 @@ export default function RoutePage() {
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 6,
-                padding: "4px 9px",
+                padding: "4px 10px",
                 borderRadius: 999,
                 background: useTraffic ? MC.okTint : "#EEF0F3",
                 color: useTraffic ? "#0d6a45" : MC.ink2,
@@ -410,6 +460,7 @@ export default function RoutePage() {
                 letterSpacing: 0.3,
                 textTransform: "uppercase",
                 cursor: "pointer",
+                whiteSpace: "nowrap",
               }}
             >
               <Glyph
@@ -418,11 +469,7 @@ export default function RoutePage() {
                 color={useTraffic ? MC.ok : MC.ink2}
                 strokeWidth={2.2}
               />
-              {useTraffic
-                ? provider === "google" && trafficAware
-                  ? "Live traffic"
-                  : "Live traffic"
-                : "Estimated"}
+              {useTraffic ? "Live traffic" : "Estimated"}
             </button>
             {/* When the toggle says "Live traffic" but the server is
                 actually serving mock (no API key configured), show a
@@ -440,26 +487,6 @@ export default function RoutePage() {
                 using estimate
               </span>
             )}
-            <div
-              style={{
-                fontFamily: MC.font,
-                fontSize: 13.5,
-                color: MC.ink,
-                fontWeight: 600,
-                letterSpacing: -0.1,
-              }}
-            >
-              {/* Whole-day total: cumulative drive time + distance
-                  across every leg in the visit order. Renamed from a
-                  bare "20 min · 8.8 km" to lead with "Total drive"
-                  so the rep doesn't have to guess what number they're
-                  looking at. */}
-              {loading
-                ? "Planning…"
-                : legs.length === 0
-                ? "No stops"
-                : `Total drive: ${formatDuration(totalSeconds)} · ${formatMeters(totalMeters)}`}
-            </div>
           </div>
           {/* Single re-check action. Was labelled "Refresh" — renamed
               so the verb matches the action ("re-check route with
@@ -492,6 +519,55 @@ export default function RoutePage() {
             {loading ? "Checking…" : "Re-check"}
           </button>
         </div>
+
+        {/* Row 2: total drive time — lead number, full width, slightly
+            heavier than the chip row so the eye lands here first. */}
+        <div
+          style={{
+            marginTop: 8,
+            fontFamily: MC.font,
+            fontSize: 15,
+            fontWeight: 700,
+            color: MC.ink,
+            letterSpacing: -0.2,
+          }}
+        >
+          {loading
+            ? "Planning…"
+            : legs.length === 0
+            ? "No stops"
+            : `Total drive time: ${formatDuration(totalSeconds)} · ${formatMeters(totalMeters)}`}
+        </div>
+
+        {/* Row 3: always-visible "Re-checked at HH:MM" caption.
+            Hydrated from localStorage so revisiting the page shows
+            the previous check time instantly, then updates as soon
+            as the fresh route lands. Gary's been explicit: he wants
+            a TIME on the page every visit, not only when there's a
+            saved order. */}
+        {lastCheckedAt && (
+          <div
+            style={{
+              marginTop: 4,
+              fontFamily: MC.font,
+              fontSize: 12,
+              color: MC.hint,
+              letterSpacing: 0,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+            title="The wall-clock time this route was last computed against current data"
+          >
+            <Glyph name="refresh" size={11} color={MC.hint} strokeWidth={2.2} />
+            Re-checked at{" "}
+            {new Date(lastCheckedAt).toLocaleTimeString(undefined, {
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            })}
+          </div>
+        )}
 
         {/* Optimized-at banner.
             Promoted to its own row (was tucked inside the toggle's
@@ -1241,9 +1317,19 @@ function LegList({
                     gap: 8,
                   }}
                 >
-                  <span>{formatDuration(leg.driveSeconds)} drive</span>
-                  <span style={{ color: MC.line }}>·</span>
-                  <span>{formatMeters(leg.driveMeters)}</span>
+                  {/* Same-address legs (two stops at the same site)
+                      have driveSeconds≈0 / driveMeters≈0 → the old
+                      "— drive · —" line read as broken. Show a clean
+                      "Same address as previous stop" label instead. */}
+                  {leg.driveSeconds < 30 && leg.driveMeters < 50 ? (
+                    <span>Same address as previous stop</span>
+                  ) : (
+                    <>
+                      <span>{formatDuration(leg.driveSeconds)} drive</span>
+                      <span style={{ color: MC.line }}>·</span>
+                      <span>{formatMeters(leg.driveMeters)}</span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
