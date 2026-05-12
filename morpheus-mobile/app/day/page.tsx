@@ -421,12 +421,33 @@ export default function DayPage() {
            breathe — the user actually SEES the number tick from
            0 to its final value instead of just appearing. */
         @keyframes dm-hero-num {
-          0%   { transform: scale(0.15) rotate(-8deg); opacity: 0; filter: blur(28px); }
-          25%  { opacity: 1; filter: blur(8px); }
-          50%  { transform: scale(1.24) rotate(3deg); filter: blur(0); }
-          70%  { transform: scale(0.93) rotate(-1.5deg); }
-          85%  { transform: scale(1.04) rotate(0.5deg); }
-          100% { transform: scale(1) rotate(0); opacity: 1; filter: blur(0); }
+          /* Number ENTERS from above the screen at huge scale +
+             heavy rotation + 50px motion blur, then crashes down
+             into position with overshoot. Total 2.2s so the
+             entrance is unmistakeable on every device.
+             Crucially: transform is ONLY animated here. The
+             outer .dm-hero-bob owns the looping bob, so the
+             two never compete on the transform property — that
+             was the bug. */
+          0%   { transform: translateY(-280px) scale(0.3) rotate(-22deg); opacity: 0; filter: blur(50px); }
+          20%  { opacity: 1; }
+          50%  { transform: translateY(20px) scale(1.42) rotate(8deg); filter: blur(0); }
+          65%  { transform: translateY(-8px) scale(0.86) rotate(-3deg); }
+          80%  { transform: translateY(4px) scale(1.08) rotate(1.5deg); }
+          92%  { transform: translateY(-2px) scale(0.98) rotate(-0.5deg); }
+          100% { transform: translateY(0) scale(1) rotate(0); opacity: 1; filter: blur(0); }
+        }
+        /* Impact shake — fires when the hero number hits the
+           bottom of its drop (around t=0.5s). Quick horizontal
+           rumble of the whole hero region to sell the LAND. */
+        @keyframes dm-impact-shake {
+          0%, 100% { transform: translate(0, 0); }
+          10% { transform: translate(-6px, 2px); }
+          20% { transform: translate(7px, -2px); }
+          30% { transform: translate(-5px, 1px); }
+          40% { transform: translate(4px, -1px); }
+          50% { transform: translate(-2px, 1px); }
+          60% { transform: translate(1px, 0); }
         }
         /* Starburst flare — radial gradient that explodes outward
            behind the hero number. Pure CSS, no images. */
@@ -569,19 +590,66 @@ export default function DayPage() {
         .dm-backdrop-drift {
           animation: dm-backdrop-drift 9s ease-in-out infinite;
         }
-        /* The hero number gets THREE layered animations: the
-           entrance arc, the glow breathe (loops forever after 2s),
-           and the micro-bob (loops forever after 2.2s). */
+        /* Hero is structured with TWO wrapper elements so the
+           entry transform and the looping bob transform don't
+           fight each other (the bug Gary reported as "no
+           animation when it starts" — iOS Safari was resolving
+           the composite badly).
+             .dm-hero-bob     → outer, owns the infinite bob
+             .dm-hero-num     → inner, owns the entry + glow
+           text-shadow is animated separately by dm-glow-breathe
+           on the inner — text-shadow doesn't conflict with
+           transform so this composite is safe. */
+        .dm-hero-bob {
+          display: inline-block;
+          animation: dm-bob 4.5s ease-in-out 2.4s infinite;
+          will-change: transform;
+        }
         .dm-hero-num {
+          display: inline-block;
           animation:
-            dm-hero-num 1.8s cubic-bezier(.18, 1.5, .35, 1) both,
-            dm-glow-breathe 3.4s ease-in-out 2s infinite,
-            dm-bob 4.5s ease-in-out 2.2s infinite;
+            dm-hero-num 2.2s cubic-bezier(.18, 1.55, .35, 1) both,
+            dm-glow-breathe 3.4s ease-in-out 2.4s infinite;
+          will-change: transform, opacity, filter;
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+        }
+        /* Impact shake is applied to the hero region wrapper as
+           a one-shot 0.4s after the number lands (~0.7s in). */
+        .dm-impact-shake {
+          animation: dm-impact-shake .5s cubic-bezier(.4, 0, .2, 1) .55s both;
+          will-change: transform;
         }
         .dm-tile {
           animation:
             dm-tile-drop .65s cubic-bezier(.18, 1.3, .35, 1) both,
             dm-tile-glow 3.2s ease-in-out 3.4s infinite;
+          will-change: transform, opacity;
+        }
+        /* Tile-slide variants — left tiles enter from the left
+           edge, right tiles from the right edge. Much more
+           visible than the previous straight-down drop. */
+        @keyframes dm-tile-slide-l {
+          0%   { opacity: 0; transform: translateX(-80px) scale(.92); }
+          70%  { opacity: 1; transform: translateX(8px) scale(1.02); }
+          100% { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        @keyframes dm-tile-slide-r {
+          0%   { opacity: 0; transform: translateX(80px) scale(.92); }
+          70%  { opacity: 1; transform: translateX(-8px) scale(1.02); }
+          100% { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        .dm-tile-l {
+          animation:
+            dm-tile-slide-l .7s cubic-bezier(.18, 1.3, .35, 1) both,
+            dm-tile-glow 3.2s ease-in-out 3.6s infinite;
+          will-change: transform, opacity;
+        }
+        .dm-tile-r {
+          animation:
+            dm-tile-slide-r .7s cubic-bezier(.18, 1.3, .35, 1) both,
+            dm-tile-glow 3.2s ease-in-out 3.6s infinite;
+          will-change: transform, opacity;
         }
 
         /* Note: .dm-hero-num and .dm-tile got composite
@@ -818,9 +886,18 @@ export default function DayPage() {
           />
         ))}
 
-        {/* HERO NUMBER — the lead stat at obscene size. Drops in
-            from blurry scale 0.2, overshoots, settles. */}
+        {/* HERO NUMBER — drops in from above the screen at huge
+            scale + heavy rotation + 50px motion blur, crashes
+            down into position with an overshoot, then sits in
+            its forever-bob. The outer .dm-impact-shake fires a
+            quick screen-shake at the moment of impact (~0.6s).
+            Three nested elements so the transforms never compete:
+              [shake wrapper]   one-shot shake on impact
+                [bob wrapper]   infinite bob (transform)
+                  [num inner]   entry drop + count-up (transform + filter + opacity)
+            text-shadow glow-breathe runs on the innermost. */}
         <div
+          className="dm-impact-shake"
           style={{
             position: "relative",
             zIndex: 2,
@@ -831,6 +908,7 @@ export default function DayPage() {
             minHeight: 200,
           }}
         >
+          <div className="dm-hero-bob">
           <div
             className="dm-hero-num"
             style={{
@@ -853,8 +931,9 @@ export default function DayPage() {
             <CountUp
               to={loaded && stats ? stats.shiftsDone : 0}
               duration={1500}
-              delay={400}
+              delay={600}
             />
+          </div>
           </div>
           {/* Letter-typed "SHIFTS COMPLETE" sub-label.
               Each char animates in with a small stagger so it
@@ -943,6 +1022,7 @@ export default function DayPage() {
         <SecondaryConfetti count={48} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, position: "relative", zIndex: 2 }}>
           <DayStat
+            side="left"
             label="Shifts done"
             tone="brand"
             icon="check-circle"
@@ -951,6 +1031,7 @@ export default function DayPage() {
             delay={2400}
           />
           <DayStat
+            side="right"
             label="Hours worked"
             tone="ok"
             icon="clock"
@@ -959,6 +1040,7 @@ export default function DayPage() {
             delay={2560}
           />
           <DayStat
+            side="left"
             label="Tasks completed"
             tone="neutral"
             icon="check"
@@ -967,6 +1049,7 @@ export default function DayPage() {
             delay={2720}
           />
           <DayStat
+            side="right"
             label="Travel time"
             tone="travel"
             icon="pin"
@@ -1084,6 +1167,7 @@ function DayStat({
   countTo,
   format,
   delay,
+  side = "left",
 }: {
   label: string;
   tone: "brand" | "ok" | "neutral" | "travel";
@@ -1091,6 +1175,10 @@ function DayStat({
   countTo: number;
   format: (n: number) => string;
   delay: number;
+  /** Which edge the tile slides in from on entry. Left-column
+   *  tiles slide from the left, right-column tiles from the
+   *  right — much more visible than the previous straight-drop. */
+  side?: "left" | "right";
 }) {
   const palette = {
     brand: {
@@ -1128,7 +1216,7 @@ function DayStat({
   }[tone];
   return (
     <div
-      className="dm-tile"
+      className={side === "right" ? "dm-tile-r" : "dm-tile-l"}
       style={
         {
           animationDelay: `${delay}ms`,
