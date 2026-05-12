@@ -308,6 +308,174 @@ Done as one push, in narrative order:
 
 Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`).
 
+### Today's session — what shipped (May 12, 2026)
+
+A long iteration day on Plan-my-day, the /shifts list, and the
+end-of-shift flow — mostly driven by live testing rounds from Gary.
+Net effect: one less screen (/summary deleted), a much calmer /route
+page, consistent timestamps everywhere a saved order is referenced,
+and a Plan-route pill that's always reachable.
+
+#### Plan-my-day overhaul (mobile `/route`)
+
+`/route` is now a pure ordering view. Stripped out:
+- Per-leg "Leave now / X min late / X min early" schedule banners
+- Per-leg "Open in Maps" buttons
+- "Open whole day in Maps" CTA at the bottom
+- "Update saved order" button (Gary asked for this multiple times)
+- The 60s `nowTick` + `dayMapsUrl` memo + `computeScheduleStatus` +
+  `buildArrivalISOLocal` + `formatClock` helpers that fed those views
+
+Added:
+- Prominent **"Order optimized at HH:MM"** banner under the totals
+  (was a 10.5px hint line tucked inside the toggle subtitle —
+  Gary's flagged this 10+ times).
+- Always-visible **"Re-checked at HH:MM"** caption, hydrated from
+  localStorage on mount and refreshed whenever the planner returns
+  a route. Independent of saved-order state — visible every visit.
+- Same-address legs (two stops at one site → driveSeconds≈0) now
+  show "Same address as previous stop" instead of broken
+  "— drive · —".
+- Header restructured into clean rows so nothing wraps on iPhone
+  widths: Row 1 LIVE chip + Re-check button, Row 2 "Total drive
+  time: 16 min · 8.3 km", Row 3 "Re-checked at 3:26 PM".
+- "Total drive" → "Total drive time" (lead number, own row, 15px/700).
+
+All timing affordances (Leave-now / ETA / Maps handoff / Start
+travelling) now live on /shifts only — two screens can no longer
+disagree about the same number.
+
+#### /shifts Plan-route pill
+
+The pill is now the ONLY link to /route (the Plan-my-day side-menu
+entry was removed earlier). Old rule hid it when remaining stops
+< 2 — that stranded reps with "1 of 2 done · 1 left" on a page
+with zero entry to /route. New rule: render whenever the rep has
+any shifts today. Three states:
+
+| State | Label | Look |
+|---|---|---|
+| All shifts done/cancelled | `Day complete` | okTint + green check |
+| Saved order + work remaining | `Optimized · 2:42 PM` | okTint + green check |
+| No saved order + work remaining | `Plan route` | brand-deep CTA + target |
+
+Icon pair (`check-circle` / `target`) and size (15px) match the
+home segmented pill exactly so the affordance reads as one feature
+from either screen.
+
+#### /shifts claimable card layout
+
+The "Unscheduled · available" card was being squeezed — time
+wrapping, AVAILABLE pill + distance on different lines, full
+address sprawling across 4 lines — because the Claim button sat
+in-line on the right and took half the card. Restructured: for
+claimable rows the outer flex is now COLUMN. Tile + content take
+a top row at full width; Claim button drops to a footer row
+right-aligned. Non-claimable rows use `display:contents` on the
+wrapper so their layout is unchanged.
+
+Also added: **"3.2 km away"** distance pill on claimable rows
+(crow-flies haversine from rep GPS, computed client-side — fast,
+zero API calls, hidden when GPS denied), and the full street/
+suburb wraps to two lines instead of single-line truncating.
+
+#### /summary deleted, check-out routes home
+
+The post-shift `/summary` page (stat tiles, activity timeline,
+recorded exceptions recap) was redundant: the rep filed every
+exception on `/check-out`, the wrap-up overlay already says
+"Checked out · Highmark Retail", and the dashboard is where they
+want to land to pick up the next shift.
+
+New flow: tap Check out → exception form → wrap-up overlay plays
+Saving → Logging → Done → **"You're checked out!"** frame visible
+~1.2s (bumped from 0.55s) → `router.push("/")`.
+
+Deleted:
+- `app/summary/` directory (718 lines)
+- `/summary` path from `SideMenu`'s `TODAY_PATHS`
+- URL-param construction in `/check-out` that fed the deleted page
+
+The wrap-up overlay animation (the one Gary loves — pulsing brand
+circle, SAVING/LOGGING/READY stepper, "Logging the details… ·
+Closing out your shift at Highmark Retail") is untouched. That's
+the entire end-of-shift celebration now.
+
+#### /active task accordion defaults
+
+When `/active` mounts, the Tasks section now auto-opens **only**
+if the customer has compulsory tasks. No compulsory (or no tasks
+at all) → stays collapsed. Optional + Breaks accordions stay
+collapsed in both cases. Guarded by a `useRef` so once the rep
+manually toggles, the rule never overrides them again.
+
+#### Home Up Next + segmented pill
+
+- Auto-fire of the directions preview on the home Up Next card
+  was reverted. Explicit Directions button back next to Start
+  travelling. Per Gary: the home map should default to a clean
+  day-overview pin view, not a route line. /shifts kept the
+  auto-fire on expanded rows because expanding is itself a
+  deliberate "show me this stop" gesture — different surfaces,
+  different defaults.
+- Home segmented pill (View all + plan icon) now renders the
+  plan slot whenever there are any shifts today (was hidden
+  under remaining < 2). When unplanned, the target glyph sits
+  on a solid brand-deep fill (was transparent — Gary said it
+  wasn't loud enough as a CTA). When planned, okTint + check.
+
+#### Migrations to run for May 12
+
+Three new migrations — all idempotent, all wrapped in
+`BEGIN; … COMMIT;`:
+
+- `2026_05_12_customer_contacts.sql` — `customer_contacts` table
+  for multi-contact support per customer (Identity tab on admin
+  customer edit). RLS matches the rest of the schema.
+- `2026_05_12_shifts_claim_radius.sql` — `shifts.claim_radius_m
+  integer` for the "rep must be within N metres to claim"
+  filter on unscheduled shifts.
+- `2026_05_12_shifts_flexible_time.sql` — `shifts.is_flexible_time
+  boolean` for the "Anytime today" toggle on /schedule/new.
+  When true, mobile renders "Anytime today" instead of a
+  start–end range, and the countdown pill is suppressed.
+
+#### Files changed today
+
+`app/page.tsx`, `app/shifts/page.tsx`, `app/route/page.tsx`,
+`app/active/page.tsx`, `app/check-out/page.tsx`,
+`app/summary/page.tsx` (**deleted**), `components/SideMenu.tsx`.
+
+Mobile build green (`npm run build`), admin build still green
+(no admin files changed today), working tree clean. All commits
+on `origin/main`, both Vercel projects auto-deployed.
+
+#### QA audit summary
+
+Full regression review at end of day (via `/qa-audit`). No
+blockers, no high-severity issues. Two medium nits:
+
+1. `saveShiftOrder` writes order + meta in two sequential
+   `setItem` calls — not strictly atomic if localStorage quota
+   is hit between them. UI handles gracefully (shows
+   "Optimized" without time when meta missing). Worth tightening
+   someday: combine into one `{ order, savedAt }` payload.
+2. Home segmented pill has no "Day complete" calm state — when
+   all shifts are done AND no saved order, the plan slot still
+   shows the brand-deep CTA with target glyph. Cosmetic
+   inconsistency with /shifts. 5-line fix: mirror the
+   `dayComplete` logic.
+
+Verified end-to-end: shift-order-store consistency, localStorage
+namespace, subscribeShiftOrder propagation across home / /shifts
+/ /route, applySavedOrder edge cases (deleted customer mid-day,
+quota miss), /shifts column-vs-row layout via `display:contents`,
+/active accordion useRef guard, /summary fully removed from
+code, /check-out submit flow + DB writes, openMapsLink
+iOS/Android branching, _gpsCache module-level sharing. No new
+DB migrations needed for any May 12 *code* change beyond the
+three already listed above.
+
 ### Today's session — what shipped (May 11, 2026)
 
 The longest session to date — eighteen commits across two themes that
@@ -716,6 +884,22 @@ Big day. Roughly in order:
 
 ### Migrations applied today (cloud status)
 
+May 12 — **all need running** in Supabase SQL Editor before the
+corresponding features work in prod. Each is wrapped in
+`BEGIN; … COMMIT;` and uses `ADD COLUMN IF NOT EXISTS` /
+`CREATE TABLE IF NOT EXISTS`, safe to re-run:
+
+- `2026_05_12_customer_contacts.sql` — multi-contact support per
+  customer (admin /customers/[id]/edit Identity tab). Without
+  this, save throws "relation customer_contacts does not exist".
+- `2026_05_12_shifts_claim_radius.sql` — `shifts.claim_radius_m
+  integer`. Without this, claimable-shift distance filtering on
+  mobile is a no-op.
+- `2026_05_12_shifts_flexible_time.sql` — `shifts.is_flexible_time
+  boolean`. Without this, the "Anytime today" toggle on
+  /schedule/new fails silently and mobile renders the sentinel
+  06:00–18:00 range instead of "Anytime today".
+
 May 11 — **all need running** in Supabase SQL Editor before the
 corresponding features work in prod. Each is wrapped in
 `BEGIN; … COMMIT;` and uses `ADD COLUMN IF NOT EXISTS` /
@@ -747,35 +931,22 @@ May 6 (already in cloud):
 
 Top of the queue (in priority order):
 
-1. **🆕 Calendar — allow adding a second shift to an already-occupied
-   slot (May 12 ask).** Right now on the admin calendar's weekly view,
-   clicking a time slot that already has a shift opens the existing
-   shift's quick-info popover (View / Edit / Delete via `c028b0a` /
-   `e16a08f`). There's no path to add a SECOND shift in that same
-   slot. Concrete case the user hit: a rep needed a shift for a
-   different customer at the same time as an existing shift — two
-   parallel shifts, same time, different customer (or different rep).
-   The user's wording: "I should be allowed to create another shift
-   from that time slot … those other options are making it too
-   complicated."
-   - Suggested approach: in the existing quick-info popover (the
-     `createPortal` modal centred on click), add an "Add another
-     shift at this time" action alongside View / Edit / Delete.
-     Pre-fills `/schedule/new` with the clicked day + time, same
-     pattern as click-on-empty-slot (`2f9c7f3`, `6282384`).
-   - Keep the existing View / Edit / Delete intact — the user said
-     "those other options are making it too complicated" but in
-     context I think they meant the empty-slot vs occupied-slot
-     paths are inconsistent, not that View/Edit/Delete should go.
-     Confirm with the user before deleting any of them.
-   - File: `morpheus-admin/components/screens/calendar/` (the quick-
-     info popover component).
-2. **Run the May 7 + May 11 migrations** in Supabase Editor — full list is under "Migrations applied today (cloud status)" above. The May 11 batch has seven files; nothing's destructive but the features won't work until they run. Most urgent for new prod traffic: `2026_05_11_customers_logo.sql` (without it, admin logo upload throws "column does not exist"); `2026_05_11_shifts_attention.sql` + `_resolution.sql` (without them, "Can't make this shift" UI silently fails).
+1. **Run the May 7 + May 11 + May 12 migrations** in Supabase Editor — full list is under "Migrations applied today (cloud status)" above. The combined batch has ten files; nothing's destructive but the features won't work until they run. Most urgent for new prod traffic:
+   - **May 12:** `2026_05_12_customer_contacts.sql` (admin customer-edit "Identity" tab throws "relation does not exist" without it), `2026_05_12_shifts_claim_radius.sql` (claimable-shift distance filter is a no-op without it), `2026_05_12_shifts_flexible_time.sql` ("Anytime today" toggle silently fails without it).
+   - **May 11:** `2026_05_11_customers_logo.sql` (admin logo upload throws "column does not exist"); `2026_05_11_shifts_attention.sql` + `_resolution.sql` ("Can't make this shift" UI silently fails).
+2. **Address the two QA-audit medium nits** from May 12 EOD:
+   - `saveShiftOrder` atomicity: combine order + meta into one JSON payload written via a single `setItem`. Touch `lib/shift-order-store.ts` and the two read sites on /route + /shifts. ~30 minute change with backward-compat read for one release.
+   - Home segmented pill needs a "Day complete" calm state: mirror the `dayComplete` logic from `/shifts` into `app/page.tsx` around the segmented-pill block. ~5 lines.
 3. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
-4. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-5. **Cinematic check-out animation** — user reported it's "missing". The `/summary` page code is intact; need to reproduce the rep's flow end-to-end and confirm whether it's actually firing.
+4. **Refresh `qa/QA_PLAN.md`** — §1.2 still lists deleted routes `M5 /check-in/success` and `M8 /summary`, and the `M-CHECKOUT-OK` test ID asserts "summary shows" which can never pass anymore. 10-min fix.
+5. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
 6. **Capacitor wrap** if background GPS is the priority.
 7. **Custom report builder** if reporting is the priority.
+
+The May 11 "calendar — add second shift to occupied slot" ask
+shipped on May 12 (commits `adc7ed6`, `8197bf1`, `2bf4e8a`): the
+quick popover now has "Add another here" + "Edit here" inline
+actions alongside Delete + Full edit. ✅
 
 Open the `/reports` hub to see what works visually, the Timesheet report to see how the events log + new `check_out_at` column come together for payroll, and `/schedule/new` to see the multi-rep × multi-customer × recurrence pattern.
 

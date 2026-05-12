@@ -72,17 +72,20 @@ Legend: **L**=loading, **E**=empty, **ER**=error.
 | # | Route | Purpose | Critical actions | DB tables touched |
 |---|-------|---------|------------------|-------------------|
 | M1 | `/login` | Rep sign-in | Submit, error | `auth.users`, `profiles` |
-| M2 | `/` | Today + map + travel/break controls | Start travel, start break | `shifts`, `rep_locations`, `shift_events` |
-| M3 | `/shifts` | All shifts list w/ filters & countdown | Claim, request, search | `shifts`, `requested_shifts` |
-| M4 | `/check-in` | Geo-validated check-in + exception capture | Submit (with reason if exception) | `shifts` UPDATE, `shift_events` INSERT, `rep_locations` |
-| M5 | `/check-in/success` | Confirmation + next shift preview | Continue → `/active` | none |
-| M6 | `/active` | Tasks, break, travel, check-out | Toggle task complete, start/end break, check-out gate | `task_completions`, `shifts`, `shift_events` |
-| M7 | `/check-out` | Validation gate + capture | Submit (compulsory tasks block) | `shifts` UPDATE, `shift_events` INSERT |
-| M8 | `/summary` | Animated post-shift stats | Continue | none |
-| M9 | `/add-shift` | Request a shift | Submit request | `requested_shifts` INSERT |
-| M10 | `/profile` | Name edit, sign-out | Save, sign-out | `profiles` UPDATE |
-| M11 | `/library` | Manager docs | Open file | `library_files`, `storage.objects` |
-| M12 | `/support` | Static help | n/a | none |
+| M2 | `/` | Today dashboard, Up Next card, map, travel/break, segmented View-all+plan pill | Start travel, start break, preview directions | `shifts`, `rep_locations`, `shift_events` |
+| M3 | `/shifts` | All shifts list w/ filters + countdown + per-row ETA + Plan-route pill + claimable distance | Claim, request, search, Start travelling on expanded row | `shifts`, `requested_shifts` |
+| M4 | `/check-in` | Geo-validated check-in + exception capture. **Routes straight to `/active`** (no `/check-in/success` interstitial — removed May 11) | Submit (with reason if exception) | `shifts` UPDATE, `shift_events` INSERT, `rep_locations` |
+| M5 | `/active` | Tasks, break, travel, check-out. Tasks accordion auto-opens iff compulsory tasks exist | Toggle task complete, start/end break, check-out gate | `task_completions`, `shifts`, `shift_events` |
+| M6 | `/check-out` | Validation gate + capture; wrap-up overlay then **routes home `/`** (no `/summary` page — removed May 12) | Submit (compulsory tasks block) | `shifts` UPDATE (state=complete, check_out_at), `shift_events` INSERT, `rep_locations` DELETE |
+| M7 | `/route` | Plan-my-day ordering view. No per-leg Maps / Leave-now (May 12 strip). Persistent "Re-checked at HH:MM" caption | Toggle optimize, Re-check, Save this order | none (Option A — localStorage only) |
+| M8 | `/add-shift` | Request a shift | Submit request | `requested_shifts` INSERT |
+| M9 | `/profile` | Name edit, sign-out | Save, sign-out | `profiles` UPDATE |
+| M10 | `/library` | Manager docs | Open file | `library_files`, `storage.objects` |
+| M11 | `/support` | Static help | n/a | none |
+
+Routes removed:
+- `/check-in/success` — interstitial deleted May 11. /check-in now routes directly to /active on success.
+- `/summary` — post-shift stats page deleted May 12. /check-out's wrap-up overlay is the entire confirmation moment; routes to home after ~1.2s.
 
 ---
 
@@ -172,10 +175,16 @@ Each item is one Playwright `test()`. **All-caps** items are mandatory before an
 - [ ] M-CHECKIN-EARLY-OK Before grace window → blocked or warns
 - [ ] **M-TASK-COMPLETE** Toggle compulsory task → row in `task_completions`
 - [ ] **M-CHECKOUT-BLOCKED** Compulsory task incomplete → check-out disabled
-- [ ] **M-CHECKOUT-OK** All compulsory done → state='complete', summary shows
+- [ ] **M-CHECKOUT-OK** All compulsory done → state='complete', `check_out_at` set, wrap-up overlay reaches "Done" frame, then **routes to `/`** (home). NOT `/summary` (deleted May 12).
 - [ ] M-BREAK Start/end break → timestamps persisted; localStorage cleared on end
-- [ ] M-CLAIM Claim a claimable shift → `rep_id` set; reappears on Today
+- [ ] M-CLAIM Claim a claimable shift → `rep_id` set; reappears on Today; pre-claim `claim_radius_m` distance gate filtered list correctly
 - [ ] M-REQUEST Submit shift request → row in `requested_shifts`; admin sees it (cross-app)
+- [ ] **M-PLAN-PILL-STATES** Plan-route pill on /shifts header renders correctly across all four states: hidden (0 shifts), "Plan route" (no saved order + ≥1 shift), "Optimized · HH:MM" (saved order + work remaining), "Day complete" (all shifts done/cancelled). Same on home segmented pill except home doesn't have a "Day complete" variant yet (queued nit).
+- [ ] **M-PLAN-SYNC** Tap Save on /route → both home segmented pill AND /shifts header pill flip to "Optimized · HH:MM" within the same render. Wall-clock timestamp matches the "Order optimized at HH:MM" banner on /route.
+- [ ] **M-PLAN-PERSIST** "Re-checked at HH:MM" caption on /route is hydrated from localStorage on cold open (visible before fresh fetch lands), refreshed by `route.computedAt` once the fetch completes.
+- [ ] **M-PLAN-LOCAL-ONLY** `saveShiftOrder` writes ONLY to localStorage (no DB write). Confirm by snapshotting `shifts.start_time` before + after — must be unchanged.
+- [ ] **M-ACTIVE-TASKS-ACCORDION** Customer with compulsory tasks → Tasks section auto-opens on mount. Customer with no compulsory → stays collapsed. Manual rep toggle is preserved on re-render.
+- [ ] **M-FLEX-TIME** Shift with `is_flexible_time=true` → mobile shows "Anytime today" instead of start–end range; countdown pill suppressed; ETA pill renders neutrally (`scheduledAt === null`).
 
 ### 2.11 Cross-app journeys (the "golden path")
 - [ ] **GOLD-1** Admin creates customer → admin creates shift for rep tomorrow → rep logs in tomorrow → checks in on time/on site → completes tasks → checks out → admin sees shift state='complete' with timesheet hours
