@@ -451,10 +451,22 @@ export default function DayPage() {
         }
 
         @media (prefers-reduced-motion: reduce) {
+          /* Cancel every keyframe animation so the page renders in
+             its final state instantly. */
           .dm-hero-num, .dm-starburst, .dm-shock, .dm-rise,
           .dm-tile, .dm-confetti-piece, .dm-fade-up, .dm-letter,
           .dm-gradient {
             animation: none !important;
+          }
+          /* The gradient text uses background-clip + transparent
+             fill to render the gradient as the text glyphs. Under
+             reduced-motion we kill the animation but ALSO need to
+             collapse the gradient back to a solid colour or the
+             headline would render as transparent over the dark
+             backdrop. Scoped to just .dm-gradient — previously
+             this rule was applied to every .dm-* class which
+             erased the stat-tile backgrounds + label colours. */
+          .dm-gradient {
             -webkit-text-fill-color: #fff !important;
             background: none !important;
           }
