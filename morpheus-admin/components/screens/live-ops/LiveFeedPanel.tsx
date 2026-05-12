@@ -92,20 +92,25 @@ function relativeAgo(iso: string | null | undefined): string {
 }
 
 type TabKey = "needs-action" | "all";
-type RangeKey = "today" | "7d" | "30d" | "all";
+type RangeKey = "today" | "7d" | "30d";
 
 const RANGE_LABEL: Record<RangeKey, string> = {
   today: "Today",
   "7d": "Last 7 days",
   "30d": "Last 30 days",
-  all: "All time",
 };
 
+// "All time" used to be an option but was removed: on a long-lived
+// org the count climbs into the tens of thousands and the list query
+// gets expensive without giving the manager actionable info. Three
+// bounded windows (today / 7d / 30d) cover the realistic look-back
+// for an ops console. If a true audit ever needs to span longer
+// than 30 days, the events-store queries are still SQL-accessible.
+
 /** ISO timestamp threshold for a given range — events with
- *  created_at >= threshold pass the filter. `all` returns null
- *  meaning no filter. */
-function rangeStart(range: RangeKey): number | null {
-  if (range === "all") return null;
+ *  created_at >= threshold pass the filter. Always returns a real
+ *  threshold; there is no "no filter" option anymore. */
+function rangeStart(range: RangeKey): number {
   const now = new Date();
   if (range === "today") {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -253,13 +258,38 @@ export function LiveFeedPanel() {
         if (prev.some((e) => e.id === newEvent.id)) return prev;
         return [newEvent, ...prev].slice(0, 50);
       });
-      setEventsTotal((n) => n + 1);
+      // The total is range-scoped (see effect below). Only bump it
+      // here if the incoming event is within the current range —
+      // otherwise we'd over-count by one whenever a stale event
+      // arrived (e.g. an event from yesterday landing while range
+      // is "Today").
+      const newEventMs = new Date(newEvent.created_at).getTime();
+      if (newEventMs >= rangeStart(range)) {
+        setEventsTotal((n) => n + 1);
+      }
     });
     return () => {
       cancelled = true;
       unsub();
     };
-  }, []);
+    // Realtime sub re-evaluates against the live `range` value, so
+    // we need it in the dependency array.
+  }, [range]);
+
+  // Re-count whenever the range changes so the "All activity N" pill
+  // tracks the dropdown. Previously the count was always all-time
+  // and the dropdown only filtered the visible list — the pill said
+  // 555 even when the list showed 12, which was misleading.
+  useEffect(() => {
+    let cancelled = false;
+    const sinceIso = new Date(rangeStart(range)).toISOString();
+    countRecentEvents({ since: sinceIso }).then((total) => {
+      if (!cancelled) setEventsTotal(total);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [range]);
 
   // Schedule = open the form pre-filled, manager picks date/time/etc.
   const onSchedule = (r: PendingRequest) => {
@@ -940,12 +970,13 @@ function AllActivityList({
 }) {
   // Apply the date filter client-side. The events array is already
   // capped to 50 server-side; once the log gets bigger this branches
-  // into a server-side window with cursoring.
+  // into a server-side window with cursoring. rangeStart() always
+  // returns a real threshold now that the "All time" option is
+  // gone.
   const startMs = rangeStart(range);
-  const filtered =
-    startMs === null
-      ? events
-      : events.filter((e) => new Date(e.created_at).getTime() >= startMs);
+  const filtered = events.filter(
+    (e) => new Date(e.created_at).getTime() >= startMs
+  );
 
   // The "Show today" picker that used to live here moved up to the
   // panel header (see LiveFeedPanel render). The "50 events" count

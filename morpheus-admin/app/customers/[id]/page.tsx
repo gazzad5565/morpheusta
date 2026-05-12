@@ -444,10 +444,17 @@ function OverviewTab({
     () => (sites ?? []).find((s) => s.active) ?? null,
     [sites]
   );
-  const additional = useMemo(
+  // The `additional` sites list (non-head-office, active) used to
+  // drive a dedicated Card below; that Card was removed because it
+  // duplicated the Sites tab + the Head office card's "Manage N
+  // sites" button. The memo stays for now in case a future need
+  // for the same shape pops up; underscore-prefixed so the linter
+  // doesn't flag an unused variable.
+  const _additional = useMemo(
     () => (sites ?? []).filter((s) => s.active && s.id !== headOffice?.id),
     [sites, headOffice]
   );
+  void _additional;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -702,119 +709,15 @@ function OverviewTab({
         </Card>
       </div>
 
-      {/* Additional sites — only renders when the customer has more
-          than just the head office. Compact row per site, click to
-          jump to the Sites tab for full CRUD. */}
-      {additional.length > 0 && (
-        <Card padding={0}>
-          <div
-            style={{
-              padding: "12px 16px",
-              borderBottom: `1px solid ${AC.lineDim}`,
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: AC.font,
-                fontSize: 11,
-                fontWeight: 700,
-                color: AC.mute,
-                letterSpacing: 0.4,
-                textTransform: "uppercase",
-              }}
-            >
-              Additional sites
-            </span>
-            <span
-              style={{
-                padding: "2px 8px",
-                borderRadius: 99,
-                background: AC.bg,
-                color: AC.mute,
-                fontFamily: AC.font,
-                fontSize: 11,
-                fontWeight: 600,
-              }}
-            >
-              {additional.length}
-            </span>
-            <div style={{ flex: 1 }} />
-            <Btn size="sm" icon="settings" onClick={onJumpToSites}>
-              Manage
-            </Btn>
-          </div>
-          <div>
-            {additional.map((s, i) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={onJumpToSites}
-                style={{
-                  display: "flex",
-                  width: "100%",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "12px 16px",
-                  background: "transparent",
-                  border: "none",
-                  borderBottom:
-                    i < additional.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-              >
-                <div
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 8,
-                    background: AC.brandSoft,
-                    color: AC.brandDeep,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  <AGlyph name="pin" size={14} color={AC.brandDeep} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 13.5,
-                      fontWeight: 700,
-                      color: AC.ink,
-                      letterSpacing: -0.2,
-                    }}
-                  >
-                    {s.name}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 12,
-                      color: AC.mute,
-                      marginTop: 2,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {s.address || "No address yet"}
-                    {" · Geofence "}
-                    {s.geofence_radius_m ?? 100} m
-                  </div>
-                </div>
-                <AGlyph name="chev-r" size={14} color={AC.hint} />
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
+      {/* "Additional sites" list used to live here as a separate
+          Card with its own "Manage" button + per-site rows. Removed
+          (May 12) because it duplicated:
+            (a) the Sites tab in the page-level tab bar above, and
+            (b) the "Manage N sites" button already on the Head
+                office card.
+          Two paths to the same destination on one screen was noise.
+          The Sites tab itself remains the canonical place for site
+          CRUD. */}
     </div>
   );
 }
