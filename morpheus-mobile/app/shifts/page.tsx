@@ -41,9 +41,36 @@ import {
   computeNextLeaveBy,
   computeShiftEtas,
   openMapsLink,
+  requestGeolocationOnce,
+  type LatLng,
   type NextLeaveByInfo,
   type ShiftEtaInfo,
 } from "@/lib/route-planner";
+
+/** Crow-flies distance between two points in metres. Used to label
+ *  claimable shifts with "3.2 km away" so reps can pick the closest
+ *  customer without firing N driving-distance API calls. Driving
+ *  distance is more accurate but for a pick-list of unscheduled
+ *  shifts a quick crow-flies estimate is good enough — the rep gets
+ *  the precise drive time on the home Up Next card once they claim. */
+function haversineMeters(a: LatLng, b: LatLng): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function formatDistance(meters: number): string {
+  if (meters < 100) return "right here";
+  if (meters < 1000) return `${Math.round(meters / 10) * 10} m away`;
+  const km = meters / 1000;
+  return `${km < 10 ? km.toFixed(1) : Math.round(km)} km away`;
+}
 import {
   readShiftOrder,
   applySavedOrder,
@@ -145,6 +172,23 @@ function writeTravelling(t: TravellingState | null): void {
 export default function ShiftsListPage() {
   const router = useRouter();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Rep's current GPS, used to label claimable shifts with "X km
+  // away" so reps can pick the closest customer without expanding.
+  // Uses requestGeolocationOnce so we share the module-level cache
+  // with the home page + /route — no duplicate prompts. If the rep
+  // denies permission the helper resolves to null and distance
+  // pills hide gracefully.
+  const [repOrigin, setRepOrigin] = useState<LatLng | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    requestGeolocationOnce().then((p) => {
+      if (!cancelled) setRepOrigin(p);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // "Currently travelling" pointer, hoisted to the page so only one
   // shift is in transit at a time + survives navigation via
@@ -936,17 +980,29 @@ export default function ShiftsListPage() {
             }
           />
         ) : (
-          unassignedFiltered.map((s) => (
-            <ShiftRow
-              key={s.realId}
-              shift={s}
-              expanded={false}
-              unscheduled
-              claimable
-              claiming={claiming === s.realId}
-              onClaim={() => onClaim(s.realId)}
-            />
-          ))
+          unassignedFiltered.map((s) => {
+            // Crow-flies distance from the rep's GPS to the site, in
+            // metres. Null when we don't yet have GPS OR the site
+            // has no coords — ShiftRow hides the pill in both cases.
+            const distanceMeters =
+              repOrigin &&
+              typeof s.siteLat === "number" &&
+              typeof s.siteLng === "number"
+                ? haversineMeters(repOrigin, { lat: s.siteLat, lng: s.siteLng })
+                : null;
+            return (
+              <ShiftRow
+                key={s.realId}
+                shift={s}
+                expanded={false}
+                unscheduled
+                claimable
+                claiming={claiming === s.realId}
+                onClaim={() => onClaim(s.realId)}
+                distanceMeters={distanceMeters}
+              />
+            );
+          })
         )}
       </div>
 
@@ -1097,6 +1153,7 @@ function ShiftRow({
   travellingSince,
   onStartTravelling,
   onStopTravelling,
+  distanceMeters,
 }: {
   shift: Shift & {
     siteId?: string | null;
@@ -1180,6 +1237,12 @@ function ShiftRow({
   onStartTravelling?: () => void;
   /** Clear the travel timer. Defined only for "Mine" rows. */
   onStopTravelling?: () => void;
+  /** Crow-flies distance from the rep's current GPS to the shift's
+   *  site, in metres. Set ONLY on claimable rows (Unscheduled ·
+   *  available) so the rep can see at a glance which customers are
+   *  nearby before picking one. Null when GPS is denied or the site
+   *  has no coords. */
+  distanceMeters?: number | null;
 }) {
   const isComplete = state === "complete";
   // "Live" means the rep is AT the customer — either actively working
@@ -1330,6 +1393,25 @@ function ShiftRow({
                     >
                       Available
                     </span>
+                    {/* Distance from the rep's GPS — only renders
+                        when we have a fix AND the site is geocoded.
+                        Crow-flies, not driving — fine for a pick-
+                        list: the rep gets the precise drive time
+                        once they claim and the home Up Next card
+                        kicks in. */}
+                    {typeof distanceMeters === "number" && (
+                      <span
+                        style={{
+                          color: MC.ink2,
+                          fontWeight: 500,
+                          fontSize: 12,
+                          letterSpacing: 0,
+                        }}
+                        title="Approximate distance from your current location"
+                      >
+                        · {formatDistance(distanceMeters)}
+                      </span>
+                    )}
                   </>
                 ) : requested ? (
                   <>
@@ -1398,10 +1480,16 @@ function ShiftRow({
             )}
           </div>
           {/* Small address line under the time row so the rep knows
-              WHERE the shift is without expanding. Truncates with
-              ellipsis on overflow. Only renders when the site has
-              an address — single-address customers in particular
-              benefit from the explicit street line. */}
+              WHERE the shift is without expanding. Only renders when
+              the site has an address — single-address customers in
+              particular benefit from the explicit street line.
+
+              For claimable rows we let the address wrap to two lines
+              so the rep sees the FULL street/suburb before deciding
+              to request the shift. For their own scheduled rows we
+              keep the single-line truncate — the rep already knows
+              the customer and the full address is one tap away on
+              expand. */}
           {shift.siteAddress && (
             <div
               style={{
@@ -1411,20 +1499,30 @@ function ShiftRow({
                 color: MC.hint,
                 letterSpacing: 0,
                 display: "flex",
-                alignItems: "center",
+                alignItems: claimable ? "flex-start" : "center",
                 gap: 4,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
+                ...(claimable
+                  ? {}
+                  : {
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }),
               }}
               title={shift.siteAddress}
             >
-              <Glyph name="pin" size={11} color={MC.hint} strokeWidth={2} />
+              <Glyph
+                name="pin"
+                size={11}
+                color={MC.hint}
+                strokeWidth={2}
+              />
               <span
-                style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
+                style={
+                  claimable
+                    ? { lineHeight: 1.35 }
+                    : { overflow: "hidden", textOverflow: "ellipsis" }
+                }
               >
                 {shift.siteAddress}
               </span>

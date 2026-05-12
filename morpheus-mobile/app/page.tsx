@@ -3,7 +3,7 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { MC } from "@/lib/tokens";
 import { type Shift } from "@/lib/mock-data";
 import { AppFooter, CustomerTile, StatusChip, PrimaryButton } from "@/components/Chrome";
@@ -944,47 +944,14 @@ function UpNextCard({
   void inProgressCount; // currently unused; kept for future polish
   const [now, setNow] = useState(Date.now());
 
-  // Auto-fire the directions preview for the next-up shift.
-  //
-  // Consistency with /shifts: the expanded row there shows the
-  // inline mini-route map without the rep tapping anything; the
-  // home Up Next card should do the same for the next-up shift so
-  // both screens behave the same way.
-  //
-  // Gated to only fire when:
-  //   - We have a next-up shift AND it's in a "going there" state
-  //     (scheduled / travelling / late). Skipped for in-progress /
-  //     on-break — the rep is already at the customer; a route line
-  //     would be silly.
-  //   - The site has coordinates on file (no point auto-firing for
-  //     a customer with no geocode).
-  //   - We're not already showing a preview (avoids overwriting
-  //     a deliberate dismiss + re-fire on every render).
-  // The actual planRoute fetch + polyline draw is owned by the
-  // parent's onPreviewDirections handler (the same code path the
-  // tappable Directions button used). The X on the floating map
-  // overlay still dismisses if the rep wants a clean pin view.
-  const hasAutoFired = useRef(false);
-  useEffect(() => {
-    if (!next) return;
-    if (isResume) return; // already there
-    if (next.state === "complete" || next.state === "cancelled") return;
-    if (typeof next.siteLat !== "number" || typeof next.siteLng !== "number") {
-      return;
-    }
-    if (hasAutoFired.current) return; // one-shot per mount + per next-shift change
-    hasAutoFired.current = true;
-    const url = buildDirectionsUrl(next);
-    if (!url) return;
-    onPreviewDirections({
-      lat: next.siteLat,
-      lng: next.siteLng,
-      label: next.name,
-      openUrl: url,
-    });
-    // Reset the one-shot guard whenever the up-next shift changes so
-    // the new shift's route can auto-fire too.
-  }, [next?.realId, isResume, next?.state]);  // eslint-disable-line react-hooks/exhaustive-deps
+  // Note: the home Up Next card used to auto-fire the directions
+  // preview on mount (mirroring /shifts inline mini-map). Reverted
+  // 2026-05-12 per Gary's feedback — on home the map should default
+  // to the day-overview pin view; reps who want directions tap the
+  // explicit button. /shifts kept the auto-fire because expanding a
+  // row there is a deliberate "I want to see this stop" action, so
+  // showing the route immediately is the right call. Different
+  // surfaces, different defaults — kept intentional.
 
   // Tick once a minute always — drives the leave-by staleness check
   // ("Leave by 10:13" should disappear at 10:13). Pre-fix the only
@@ -1548,25 +1515,33 @@ function UpNextCard({
                   gap: 8,
                 }}
               >
-                {/* Start/Stop travelling button.
+                {/* Two-button row: Directions + Start/Stop travelling.
                     Hidden once the shift is in-progress — the rep is
                     already on-site so there's nothing to travel TO.
-                    The old "Directions" button used to sit alongside
-                    this one, but the route preview now auto-fires on
-                    mount via the useEffect above (mirroring /shifts
-                    expanded rows) so the explicit tap was redundant.
-                    Start travelling starts the in-app travel timer +
-                    fires the shift.travel_started audit event, then
-                    hands off to the OS map app. */}
+                    Directions opens the in-app route preview on the
+                    dashboard map (or hands straight to the OS map
+                    app when we don't have coords on file); Start
+                    travelling does the same AND starts the in-app
+                    travel timer + fires the shift.travel_started
+                    audit event.
+
+                    Earlier iteration auto-fired the directions
+                    preview on mount to match /shifts inline mini-
+                    map behaviour. Reverted 2026-05-12 per Gary:
+                    home defaults to a clean day-overview pin view,
+                    and reps who want the route tap the explicit
+                    Directions button. /shifts kept the auto-fire
+                    because expanding a row there is already a
+                    deliberate "show me this stop" gesture. */}
                 {!isResume && (() => {
-                  // Pull the disabled state up so the button has a
-                  // consistent visual. The disabled visual was
-                  // previously just opacity:0.5 — managers fed back
-                  // it was too subtle ("I couldn't tell it was
-                  // disabled at a glance"). Now we swap the
-                  // background to a muted tint, dim every inner
-                  // colour, and keep cursor:not-allowed so taps
-                  // don't even feel like they registered.
+                  // Pull the disabled state up so both buttons share
+                  // it cleanly. The disabled visual was previously
+                  // just opacity:0.5 — managers fed back it was too
+                  // subtle ("I couldn't tell it was disabled at a
+                  // glance"). Now we swap the background to a muted
+                  // tint, dim every inner colour, and keep
+                  // cursor:not-allowed so taps don't even feel like
+                  // they registered.
                   const enabled = hasDestination(next);
                   const disabledStyle: React.CSSProperties = enabled
                     ? {}
@@ -1581,11 +1556,58 @@ function UpNextCard({
                   return (
                     <>
                       <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!enabled) return;
+                            const url = buildDirectionsUrl(next);
+                            if (!url) return;
+                            // Coords required for the in-app preview
+                            // polyline; if we only have an address
+                            // string (no lat/lng yet) we fall back
+                            // to opening Maps directly because we
+                            // can't draw the line. Most customers
+                            // have coords via the geocoder once an
+                            // address is saved.
+                            const hasCoords =
+                              typeof next.siteLat === "number" &&
+                              typeof next.siteLng === "number";
+                            if (hasCoords) {
+                              onPreviewDirections({
+                                lat: next.siteLat as number,
+                                lng: next.siteLng as number,
+                                label: next.name,
+                                openUrl: url,
+                              });
+                            } else {
+                              openMapsLink(url);
+                            }
+                          }}
+                          disabled={!enabled}
+                          style={{
+                            ...secondaryBtnStyle,
+                            flex: 1,
+                            ...disabledStyle,
+                          }}
+                          title={
+                            enabled
+                              ? "Preview the route on the map above"
+                              : "No address on this site yet"
+                          }
+                        >
+                          <Glyph
+                            name="target"
+                            size={16}
+                            color={iconColor}
+                            strokeWidth={2.2}
+                          />
+                          Directions
+                        </button>
                         {travellingSince ? (
                           <button
                             type="button"
                             onClick={() => setTravellingSince(null)}
-                            style={{ ...secondaryBtnStyle, flex: 1 }}
+                            style={{ ...secondaryBtnStyle, flex: 1.4 }}
                           >
                             <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
                             Stop · {formatTime(travellingSince)}
@@ -1608,7 +1630,7 @@ function UpNextCard({
                             disabled={!enabled}
                             style={{
                               ...secondaryBtnStyle,
-                              flex: 1,
+                              flex: 1.4,
                               ...disabledStyle,
                             }}
                             title={
