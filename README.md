@@ -440,15 +440,85 @@ Three new migrations — all idempotent, all wrapped in
   When true, mobile renders "Anytime today" instead of a
   start–end range, and the countdown pill is suppressed.
 
+#### /day · End-of-day recap (late-evening addition — `b5cc77e`)
+
+After EOD QA, added the **wow feature**: a cinematic end-of-day
+recap page reached from the home dashboard's "All shifts done —
+nice work" card once every shift today is in a terminal state.
+
+The recap (`app/day/page.tsx` — 766 lines):
+- Cinematic hero — 3 pulsing rings, bouncy stage, stroke-drawn
+  check, 36-particle CSS confetti burst, shimmer sweep. Same
+  animation grammar recovered from the deleted /summary page so
+  the visual language stays consistent.
+- 2×2 stat tile grid with count-up animations:
+  · **Shifts done** (sum of complete shifts)
+  · **Hours worked** (sum of check_in_at → check_out_at)
+  · **Tasks completed** (count of shift_task_completions joined by shift_id)
+  · **Travel time** (paired shift.travel_started / shift.travel_ended events)
+- "Your day" timeline — each completed shift shows customer logo,
+  check-in → check-out clock window, green tick.
+- Exception count banner (only if there were any: off-site, late,
+  early check-out, unable-to-attend).
+- Single "Back to dashboard" CTA.
+
+Wiring:
+- Home "All shifts done — nice work" card is now a `<Link>` to
+  `/day`. Subtitle gains "· tap to see your recap" cue, right-side
+  chevron makes the affordance discoverable.
+- New ShiftWithMeta field: `checkOutAt: string | null`. Column
+  already in the DB since May 6 (`2026_05_06_shifts_check_out_at`),
+  just exposed it on the TS type + rowToShift mapper.
+
+No new DB migrations. Pure aggregation over existing tables.
+Cross-platform: pure React + Supabase + CSS — identical on iOS
+Safari/PWA, Android Chrome/PWA, desktop. Respects
+`prefers-reduced-motion`: every animation short-circuits and
+the end-state renders instantly.
+
+This replaces the per-shift `/summary` we deleted earlier today.
+Per-shift `/summary` fired after EVERY check-out — too much.
+`/day` fires at most once a day, when the work's done. One
+celebration, real payoff.
+
 #### Files changed today
 
 `app/page.tsx`, `app/shifts/page.tsx`, `app/route/page.tsx`,
 `app/active/page.tsx`, `app/check-out/page.tsx`,
-`app/summary/page.tsx` (**deleted**), `components/SideMenu.tsx`.
+`app/summary/page.tsx` (**deleted**), `app/day/page.tsx` (**new**),
+`lib/shifts-store.ts`, `components/SideMenu.tsx`.
 
 Mobile build green (`npm run build`), admin build still green
 (no admin files changed today), working tree clean. All commits
 on `origin/main`, both Vercel projects auto-deployed.
+
+#### Web push notifications — answered for the next chat
+
+User asked: "can you only do push notifications with native apps?"
+Answer: **no**, Web Push works from the PWA on both iOS and
+Android.
+- Android Chrome / PWA: full Web Push (banner + action buttons).
+- iOS Safari **as a home-screen PWA** since iOS 16.4 (March 2023):
+  banner + sound. **Not** available in iOS Safari without
+  installing to home screen.
+- Implementation outline when this becomes a build:
+  1. Generate VAPID keys (one pair, server-side secret).
+  2. Service worker that handles `push` events.
+  3. On first launch after install, `Notification.requestPermission()`
+     + `PushManager.subscribe({ userVisibleOnly: true,
+     applicationServerKey: VAPID_PUBLIC })`.
+  4. Persist the subscription endpoint per-rep in Supabase
+     (new `push_subscriptions` table: `rep_id`, `endpoint`,
+     `p256dh`, `auth`, `created_at`).
+  5. Send pushes from a Supabase Edge Function (or a tiny Vercel
+     route) using the `web-push` npm package.
+- iOS gotcha: build a "Install to home screen for notifications"
+  nudge on first launch when the user-agent is iOS Safari and
+  `window.matchMedia('(display-mode: standalone)').matches` is
+  false. One-screen onboarding, not a Capacitor wrap.
+- Capacitor wrap stays on the deferred list — it's about
+  **background GPS** when the app is closed (PWAs sleep), not
+  push. Don't conflate the two when scoping.
 
 #### QA audit summary
 
@@ -940,8 +1010,9 @@ Top of the queue (in priority order):
 3. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
 4. **Refresh `qa/QA_PLAN.md`** — §1.2 still lists deleted routes `M5 /check-in/success` and `M8 /summary`, and the `M-CHECKOUT-OK` test ID asserts "summary shows" which can never pass anymore. 10-min fix.
 5. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-6. **Capacitor wrap** if background GPS is the priority.
-7. **Custom report builder** if reporting is the priority.
+6. **Web Push notifications (PWA-native, no Capacitor)** — works on Android Chrome + iOS Safari-as-PWA since iOS 16.4. Scope: VAPID key pair, service worker `push` handler, `push_subscriptions` table on Supabase (rep_id, endpoint, p256dh, auth), Edge Function or Vercel route sending via `web-push`. On iOS, prompt "Install to home screen for notifications" when `display-mode: standalone` is false. Triggers worth wiring: shift assigned, shift cancelled, "you're running late", manager left a note, end-of-day "Don't forget to check out". 2–3 days of work.
+7. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
+8. **Custom report builder** if reporting is the priority.
 
 The May 11 "calendar — add second shift to occupied slot" ask
 shipped on May 12 (commits `adc7ed6`, `8197bf1`, `2bf4e8a`): the

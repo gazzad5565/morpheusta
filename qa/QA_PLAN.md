@@ -78,10 +78,11 @@ Legend: **L**=loading, **E**=empty, **ER**=error.
 | M5 | `/active` | Tasks, break, travel, check-out. Tasks accordion auto-opens iff compulsory tasks exist | Toggle task complete, start/end break, check-out gate | `task_completions`, `shifts`, `shift_events` |
 | M6 | `/check-out` | Validation gate + capture; wrap-up overlay then **routes home `/`** (no `/summary` page — removed May 12) | Submit (compulsory tasks block) | `shifts` UPDATE (state=complete, check_out_at), `shift_events` INSERT, `rep_locations` DELETE |
 | M7 | `/route` | Plan-my-day ordering view. No per-leg Maps / Leave-now (May 12 strip). Persistent "Re-checked at HH:MM" caption | Toggle optimize, Re-check, Save this order | none (Option A — localStorage only) |
-| M8 | `/add-shift` | Request a shift | Submit request | `requested_shifts` INSERT |
-| M9 | `/profile` | Name edit, sign-out | Save, sign-out | `profiles` UPDATE |
-| M10 | `/library` | Manager docs | Open file | `library_files`, `storage.objects` |
-| M11 | `/support` | Static help | n/a | none |
+| M8 | `/day` | **End-of-day recap (NEW May 12)**. Reached from home "All shifts done" card. Cinematic hero + 4 stat tiles (shifts/hours/tasks/travel) + per-stop timeline + exception banner. Read-only | None — display only | `shifts` SELECT, `shift_task_completions` SELECT, `shift_events` SELECT (all batched on mount) |
+| M9 | `/add-shift` | Request a shift | Submit request | `requested_shifts` INSERT |
+| M10 | `/profile` | Name edit, sign-out | Save, sign-out | `profiles` UPDATE |
+| M11 | `/library` | Manager docs | Open file | `library_files`, `storage.objects` |
+| M12 | `/support` | Static help | n/a | none |
 
 Routes removed:
 - `/check-in/success` — interstitial deleted May 11. /check-in now routes directly to /active on success.
@@ -185,6 +186,11 @@ Each item is one Playwright `test()`. **All-caps** items are mandatory before an
 - [ ] **M-PLAN-LOCAL-ONLY** `saveShiftOrder` writes ONLY to localStorage (no DB write). Confirm by snapshotting `shifts.start_time` before + after — must be unchanged.
 - [ ] **M-ACTIVE-TASKS-ACCORDION** Customer with compulsory tasks → Tasks section auto-opens on mount. Customer with no compulsory → stays collapsed. Manual rep toggle is preserved on re-render.
 - [ ] **M-FLEX-TIME** Shift with `is_flexible_time=true` → mobile shows "Anytime today" instead of start–end range; countdown pill suppressed; ETA pill renders neutrally (`scheduledAt === null`).
+- [ ] **M-DAY-ENTRY** Home dashboard with every shift in terminal state → "All shifts done" card shows chevron + "tap to see your recap" cue; tap navigates to `/day`.
+- [ ] **M-DAY-NUMBERS** /day aggregates correctly: shiftsDone = count of `state='complete'` rows today, hoursWorked = sum of (check_out_at - check_in_at), tasksCompleted = count of `shift_task_completions` rows with shift_id in today's complete set, travelTime = sum of paired travel_started/travel_ended events from `shift_events`.
+- [ ] **M-DAY-EXCEPTIONS** /day exception banner shows count of `shift.checked_in_offsite|late|early` + `shift.checked_out_offsite|early` + `shift.rep_unable_to_attend` events for today's shifts. Hidden when 0.
+- [ ] **M-DAY-EMPTY** Direct nav to `/day` with no completed shifts today → renders calm empty state ("No completed shifts today"), no crash.
+- [ ] **M-DAY-REDUCED-MOTION** Enable prefers-reduced-motion in OS settings → confetti hidden, all keyframe animations replaced with end-state instant render; count-ups short-circuit.
 
 ### 2.11 Cross-app journeys (the "golden path")
 - [ ] **GOLD-1** Admin creates customer → admin creates shift for rep tomorrow → rep logs in tomorrow → checks in on time/on site → completes tasks → checks out → admin sees shift state='complete' with timesheet hours
