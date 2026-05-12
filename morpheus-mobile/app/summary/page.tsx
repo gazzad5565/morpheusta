@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import {
@@ -60,84 +60,11 @@ function CountUp({
   return <>{format(n)}</>;
 }
 
-/**
- * One-shot confetti burst. Particles are pure CSS — each gets its own
- * randomized translation (tx, ty), rotation, colour, and shape via
- * inline style + CSS variables. The keyframes drive everything.
- *
- * Tuned for a B2B work app: 36 particles, brand-aligned palette, ~1.8s
- * lifespan, gentle gravity arc. Not a kids-party explosion.
- *
- * Skipped entirely when prefers-reduced-motion is on.
- */
-function Confetti({ count = 36 }: { count?: number }) {
-  const particles = useMemo(() => {
-    const palette = [
-      MC.brand,
-      MC.brandDeep,
-      "#5b3da5", // purple from break tile
-      "#2E4FB8", // blue from travel tile
-      MC.ok,
-      "#E5A017", // warn yellow
-    ];
-    return Array.from({ length: count }, (_, i) => {
-      // Random angle in the upper hemisphere (-180° to 0° from down,
-      // roughly -120° to -60° for an upward burst)
-      const angle = (Math.random() * 140 - 110) * (Math.PI / 180);
-      const speed = 80 + Math.random() * 140; // distance in px
-      const tx = Math.cos(angle) * speed;
-      const ty = Math.sin(angle) * speed; // negative = upward
-      // Add gravity-ish fall (final ty drifts back down a bit)
-      const tyFinal = ty + 60 + Math.random() * 40;
-      const rot = (Math.random() - 0.5) * 720; // up to ±360°
-      const color = palette[i % palette.length];
-      const isCircle = Math.random() > 0.55;
-      const w = isCircle ? 6 + Math.random() * 4 : 4 + Math.random() * 4;
-      const h = isCircle ? w : 8 + Math.random() * 6;
-      const delay = Math.random() * 80; // small jitter
-      return { tx, tyFinal, rot, color, w, h, isCircle, delay, key: i };
-    });
-  }, [count]);
-
-  return (
-    <div
-      aria-hidden
-      style={{
-        position: "absolute",
-        left: "50%",
-        top: 56, // approx centre of the hero icon
-        width: 0,
-        height: 0,
-        pointerEvents: "none",
-        zIndex: 5,
-      }}
-      className="sm-confetti-host"
-    >
-      {particles.map((p) => (
-        <span
-          key={p.key}
-          className="sm-confetti-piece"
-          style={
-            {
-              position: "absolute",
-              left: 0,
-              top: 0,
-              width: p.w,
-              height: p.h,
-              borderRadius: p.isCircle ? "50%" : 2,
-              background: p.color,
-              opacity: 0,
-              ["--tx" as never]: `${p.tx}px`,
-              ["--ty" as never]: `${p.tyFinal}px`,
-              ["--rot" as never]: `${p.rot}deg`,
-              animationDelay: `${p.delay}ms`,
-            } as React.CSSProperties
-          }
-        />
-      ))}
-    </div>
-  );
-}
+// The Confetti component used to live here (36 brand-coloured CSS
+// particles, gravity-arc burst). Removed (May 12 — Gary) along with
+// the bouncy hero check + pulsing rings — the wrap-up overlay on
+// /check-out already plays the celebration. /summary is now the
+// calm receipt that follows.
 
 export default function SummaryPageWrapper() {
   return (
@@ -171,36 +98,25 @@ function SummaryPage() {
   return (
     <div style={{ background: MC.bg, minHeight: "100%", overflow: "hidden" }}>
       {/*
-        Cinematic celebration sequence on mount. Six layers, staggered
-        into a ~3s arc that pays off the whole shift.
-
-          1. Hero icon            →  bouncy scale-in with overshoot
-          2. Three pulsing rings  →  expand outward, fade
-          3. Stroke-drawn check   →  draws itself in 380ms
-          4. Confetti burst       →  36 brand-coloured particles,
-                                      gravity-ish arc, fade out
-          5. Title + subtitle     →  fade-up stagger
-          6. Stat tiles cascade   →  scale .96→1 + fade up, +
-                                      number count-up inside each
-          7. Activity timeline    →  vertical line draws downward,
-                                      dots pop in as the line passes,
-                                      labels fade alongside
-          8. Tail content fades   →  exceptions, "What's next", CTA
+        Calm receipt that follows the wrap-up overlay from /check-out.
+        The big celebratory animation lived here previously (hero
+        check, pulsing rings, confetti burst). Gary asked to combine
+        the two screens — the wrap-up overlay is the celebration, so
+        this page now just gracefully fades up the headline, the
+        stat tiles, and the activity timeline. No second confetti
+        moment.
 
         prefers-reduced-motion: every animation is disabled and the
         end-state renders instantly. Numbers also short-circuit.
       */}
       <style>{`
-        @keyframes sm-pop {
-          0%   { transform: scale(0); opacity: 0; }
-          60%  { transform: scale(1.12); opacity: 1; }
-          100% { transform: scale(1); opacity: 1; }
-        }
-        @keyframes sm-ring {
-          0%   { transform: translate(-50%, -50%) scale(0.7); opacity: 0.65; }
-          100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
-        }
-        @keyframes sm-draw { to { stroke-dashoffset: 0; } }
+        /* Trimmed (May 12) — the bouncy hero + 3 rings + drawn check
+           + confetti + shimmer overlay all lived here. Removed along
+           with the markup that consumed them; the wrap-up overlay on
+           /check-out is the celebration moment. /summary now only
+           needs gentle fade-ups for the stat tiles and activity
+           timeline so the receipt feels alive without competing
+           with the overlay. */
         @keyframes sm-fade-up {
           0%   { opacity: 0; transform: translateY(12px); }
           100% { opacity: 1; transform: translateY(0); }
@@ -208,11 +124,6 @@ function SummaryPage() {
         @keyframes sm-tile {
           0%   { opacity: 0; transform: translateY(14px) scale(.96); }
           100% { opacity: 1; transform: translateY(0)    scale(1); }
-        }
-        @keyframes sm-confetti {
-          0%   { opacity: 0; transform: translate(0,0) rotate(0); }
-          12%  { opacity: 1; }
-          100% { opacity: 0; transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); }
         }
         @keyframes sm-line-grow {
           0%   { transform: scaleY(0); transform-origin: top; }
@@ -223,44 +134,12 @@ function SummaryPage() {
           70%  { opacity: 1; transform: scale(1.25); }
           100% { opacity: 1; transform: scale(1); }
         }
-        @keyframes sm-shimmer {
-          0%   { transform: translateX(-120%); opacity: 0; }
-          25%  { opacity: .4; }
-          100% { transform: translateX(220%); opacity: 0; }
-        }
-        .sm-stage  { animation: sm-pop .5s cubic-bezier(.34, 1.6, .64, 1) both; }
-        .sm-ring   { animation: sm-ring 1.6s cubic-bezier(.16, 1, .3, 1) .15s both; }
-        .sm-ring-2 { animation-delay: .4s; }
-        .sm-ring-3 { animation-delay: .65s; }
-        .sm-check-path {
-          stroke-dasharray: 28;
-          stroke-dashoffset: 28;
-          animation: sm-draw .42s cubic-bezier(.65, 0, .35, 1) .35s both;
-        }
-        .sm-confetti-piece {
-          animation: sm-confetti 1.7s cubic-bezier(.22, .61, .36, 1) both;
-        }
         .sm-fade-up { animation: sm-fade-up .5s cubic-bezier(.22, 1, .36, 1) both; }
         .sm-tile    { animation: sm-tile .55s cubic-bezier(.22, 1, .36, 1) both; }
-        .sm-shimmer-overlay {
-          position: absolute; inset: 0;
-          background: linear-gradient(
-            105deg,
-            transparent 35%,
-            rgba(255,255,255,.55) 50%,
-            transparent 65%
-          );
-          mix-blend-mode: overlay;
-          pointer-events: none;
-          animation: sm-shimmer 1.4s ease-out 1.1s both;
-        }
         @media (prefers-reduced-motion: reduce) {
-          .sm-stage, .sm-ring, .sm-check-path, .sm-confetti-piece,
-          .sm-fade-up, .sm-tile, .sm-shimmer-overlay {
+          .sm-fade-up, .sm-tile {
             animation: none !important;
           }
-          .sm-check-path { stroke-dashoffset: 0; }
-          .sm-confetti-host { display: none; }
         }
       `}</style>
 
@@ -274,82 +153,23 @@ function SummaryPage() {
           position: "relative",
         }}
       >
-        {/* Confetti — absolutely positioned, fires once on mount */}
-        <Confetti />
-
-        {/* Hero icon stage: pulsing rings + bouncy disc + drawn check + shimmer sweep */}
-        <div
-          style={{
-            position: "relative",
-            width: 120,
-            height: 120,
-            margin: "0 auto",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          {[1, 2, 3].map((i) => (
-            <span
-              key={i}
-              className={`sm-ring sm-ring-${i}`}
-              style={{
-                position: "absolute",
-                left: "50%",
-                top: "50%",
-                width: 80,
-                height: 80,
-                borderRadius: "50%",
-                border: `2px solid ${MC.brand}`,
-                pointerEvents: "none",
-              }}
-              aria-hidden
-            />
-          ))}
-          <div
-            className="sm-stage"
-            style={{
-              width: 80,
-              height: 80,
-              borderRadius: 24,
-              background: MC.card,
-              border: `1px solid ${MC.brandTint}`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: `0 10px 30px ${MC.brand}33`,
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <svg
-              width={42}
-              height={42}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={MC.brand}
-              strokeWidth={2.4}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <circle cx={12} cy={12} r={10} opacity={0.18} />
-              <path className="sm-check-path" d="M5 12 L10 17 L19 8" />
-            </svg>
-            <span className="sm-shimmer-overlay" aria-hidden />
-          </div>
-        </div>
-
+        {/* Hero celebration (rings + bouncy check + confetti) was
+            removed (May 12 — Gary). The wrap-up overlay on /check-out
+            ("Logging the details… · Closing out your shift at
+            Highmark Retail") already plays a celebratory animation
+            during the DB writes — having a second confetti burst the
+            instant we land here was "too much information" in
+            Gary's words. /summary is now the calm receipt that
+            follows the wrap-up moment: just the headline, time on
+            shift, and the stat / timeline content below. */}
         <div
           className="sm-fade-up"
           style={{
-            animationDelay: ".5s",
             fontFamily: MC.fontDisplay,
             fontSize: 24,
             fontWeight: 700,
             color: MC.ink,
             letterSpacing: -0.6,
-            marginTop: 14,
           }}
         >
           Checked out
@@ -357,7 +177,7 @@ function SummaryPage() {
         <div
           className="sm-fade-up"
           style={{
-            animationDelay: ".62s",
+            animationDelay: ".12s",
             fontFamily: MC.font,
             fontSize: 14,
             color: MC.mute,
