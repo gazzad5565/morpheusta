@@ -40,6 +40,7 @@ import {
 import {
   computeNextLeaveBy,
   computeShiftEtas,
+  openMapsLink,
   type NextLeaveByInfo,
   type ShiftEtaInfo,
 } from "@/lib/route-planner";
@@ -83,9 +84,114 @@ type DbShift = Shift & {
   attentionResolvedAt?: string | null;
 };
 
+/** Build the OS-map deep link for a single shift. Mirrors the home
+ *  page's helper of the same name — pulled out here so the
+ *  "Start travelling" button on an expanded row can hand off to the
+ *  device's preferred map app. Returns null when there's no
+ *  destination (no coords AND no address). */
+function buildDirectionsUrlForShift(s: {
+  siteLat?: number | null;
+  siteLng?: number | null;
+  siteAddress?: string | null;
+}): string | null {
+  if (typeof s.siteLat === "number" && typeof s.siteLng === "number") {
+    return `https://www.google.com/maps/dir/?api=1&destination=${s.siteLat},${s.siteLng}&travelmode=driving`;
+  }
+  if (s.siteAddress) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+      s.siteAddress
+    )}&travelmode=driving`;
+  }
+  return null;
+}
+
+/** localStorage key for the "currently travelling" pointer. Survives
+ *  navigation so flipping to /route or the home dashboard and back
+ *  preserves the Stop timer. Single key (not per-shift) because only
+ *  one shift can be travelling at a time. Shape: { shiftId, since }. */
+const TRAVELLING_LS_KEY = "morpheus.travelling";
+interface TravellingState {
+  shiftId: string;
+  since: number;
+}
+function readTravelling(): TravellingState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(TRAVELLING_LS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed.shiftId === "string" &&
+      typeof parsed.since === "number"
+    ) {
+      return { shiftId: parsed.shiftId, since: parsed.since };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function writeTravelling(t: TravellingState | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (!t) window.localStorage.removeItem(TRAVELLING_LS_KEY);
+    else window.localStorage.setItem(TRAVELLING_LS_KEY, JSON.stringify(t));
+  } catch {
+    /* private mode */
+  }
+}
+
 export default function ShiftsListPage() {
   const router = useRouter();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // "Currently travelling" pointer, hoisted to the page so only one
+  // shift is in transit at a time + survives navigation via
+  // localStorage. The expanded row reads from this to swap its
+  // "Start travelling" button for a live "Stop · 5m" timer.
+  const [travelling, setTravelling] = useState<TravellingState | null>(() =>
+    typeof window === "undefined" ? null : readTravelling()
+  );
+  // Re-read on focus so if the rep starts travelling on /shifts then
+  // hops to home and back, the timer doesn't reset. The home page
+  // doesn't currently write to this key (it has its own local state
+  // for legacy reasons), so the sync is one-way for now.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        setTravelling(readTravelling());
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+  // Helpers wired to the button onClicks below — keep all
+  // localStorage writes inside these so the persistence layer is in
+  // one place.
+  const onStartTravelling = (
+    shiftId: string,
+    shift: { siteLat?: number | null; siteLng?: number | null; siteAddress?: string | null }
+  ) => {
+    const url = buildDirectionsUrlForShift(shift);
+    const next: TravellingState = { shiftId, since: Date.now() };
+    setTravelling(next);
+    writeTravelling(next);
+    if (url) openMapsLink(url);
+  };
+  const onStopTravelling = () => {
+    setTravelling(null);
+    writeTravelling(null);
+  };
+  // 30s tick to keep the "Stop · 5m" timer label fresh without
+  // re-rendering every second. ShiftRow reads `travelling` from
+  // props so its own render is driven by this state update.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!travelling) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, [travelling]);
 
   // Three lists, three sources:
   // - mine:        shifts where rep_id = me, today (from shifts table)
@@ -510,47 +616,89 @@ export default function ShiftsListPage() {
           )}
         </div>
         {/* Action pills (right-aligned in the header row).
-            "Plan my day" only surfaces when the rep has 2+ REMAINING
-            stops (anything not complete) — single-stop or all-done
-            days are covered by the dashboard's Up Next CTAs.
-            Same okTint colourway as the home-page pill so the
-            affordance reads as the same feature from either entry
-            point. */}
+            The Plan-route pill only surfaces when the rep has 2+
+            REMAINING stops (anything not complete) — single-stop or
+            all-done days are covered by the dashboard's Up Next CTAs.
+
+            Unplanned state: BRAND-SOLID fill (white text + icon) so
+              it reads as a clear CTA on this operational screen.
+              Concrete copy: "Plan route · 5 stops" tells the rep
+              exactly what's about to happen + the scope of the
+              optimisation.
+            Planned state:   subtle okTint surface, "Planned · 5
+              stops" with a check glyph — confirmation tone, no
+              competing for attention since the work's done.
+
+            Earlier iteration used the same okTint surface for both
+            states with only the glyph + label flipping; Gary fed
+            back that the unplanned state didn't read as a strong
+            enough call-to-action on this list view. The home page
+            stays calmer (segmented View-all pill, target glyph)
+            because it's a glance screen — /shifts is the do screen
+            so the CTA pulls more weight here. */}
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-          {mine.filter((s) => s.state !== "complete" && s.state !== "cancelled").length >= 2 && (
-            // Pill flips state once the rep has saved a visit order
-            // (mirror of the home page chip): "Plan day" → "Planned"
-            // with a green check. Same tap target, same href, just
-            // different copy/style so the dashboard reflects the
-            // planned-state across both screens.
-            <Link
-              href="/route"
-              aria-label={headerDayPlanned ? "View today's plan" : "Plan my day"}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                padding: "7px 11px 7px 9px",
-                borderRadius: 999,
-                background: headerDayPlanned ? MC.okTint : MC.okTint,
-                border: `1px solid ${MC.ok}55`,
-                color: "#0d6a45",
-                textDecoration: "none",
-                fontFamily: MC.font,
-                fontSize: 12.5,
-                fontWeight: 700,
-                letterSpacing: -0.1,
-              }}
-            >
-              <Glyph
-                name={headerDayPlanned ? "check-circle" : "target"}
-                size={13}
-                color={MC.ok}
-                strokeWidth={2.4}
-              />
-              {headerDayPlanned ? "Planned" : "Plan day"}
-            </Link>
-          )}
+          {(() => {
+            const remainingStops = mine.filter(
+              (s) => s.state !== "complete" && s.state !== "cancelled"
+            ).length;
+            if (remainingStops < 2) return null;
+            const planned = headerDayPlanned;
+            return (
+              <Link
+                href="/route"
+                aria-label={
+                  planned
+                    ? `Today's route is planned (${remainingStops} stops) — view or re-optimize`
+                    : `Plan today's route (${remainingStops} stops)`
+                }
+                title={
+                  planned
+                    ? "Route is planned — tap to view or re-optimize"
+                    : "Optimize the order of today's stops"
+                }
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "8px 12px 8px 10px",
+                  borderRadius: 999,
+                  // Solid brand-deep fill when unplanned (CTA);
+                  // subtle okTint when planned (status).
+                  background: planned ? MC.okTint : MC.brandDeep,
+                  border: planned
+                    ? `1px solid ${MC.ok}55`
+                    : `1px solid ${MC.brandDeep}`,
+                  color: planned ? "#0d6a45" : "#fff",
+                  textDecoration: "none",
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  letterSpacing: -0.1,
+                  boxShadow: planned
+                    ? "none"
+                    : `0 2px 6px ${MC.brand}55`,
+                }}
+              >
+                <Glyph
+                  name={planned ? "check-circle" : "target"}
+                  size={13}
+                  color={planned ? MC.ok : "#fff"}
+                  strokeWidth={2.4}
+                />
+                {planned ? "Planned" : "Plan route"}
+                <span
+                  style={{
+                    opacity: planned ? 0.75 : 0.85,
+                    fontWeight: 500,
+                    fontSize: 11.5,
+                    marginLeft: 1,
+                  }}
+                >
+                  · {remainingStops} stops
+                </span>
+              </Link>
+            );
+          })()}
           <button
             type="button"
             onClick={() => {
@@ -751,6 +899,22 @@ export default function ShiftsListPage() {
               }
               onWithdrawUnable={() => handleWithdrawUnable(s.realId)}
               unableBusy={unableBusyFor === s.realId}
+              // Travelling pointer — only meaningful for "Mine" rows
+              // (you can't be travelling to a shift you haven't
+              // claimed). Triggers the swap of "Start travelling"
+              // → "Stop · 5m" timer inside the expanded row.
+              isTravelling={travelling?.shiftId === s.realId}
+              travellingSince={
+                travelling?.shiftId === s.realId ? travelling.since : null
+              }
+              onStartTravelling={() =>
+                onStartTravelling(s.realId, {
+                  siteLat: s.siteLat,
+                  siteLng: s.siteLng,
+                  siteAddress: s.siteAddress,
+                })
+              }
+              onStopTravelling={onStopTravelling}
             />
           ))
         )}
@@ -929,6 +1093,10 @@ function ShiftRow({
   onUnableToAttend,
   onWithdrawUnable,
   unableBusy,
+  isTravelling,
+  travellingSince,
+  onStartTravelling,
+  onStopTravelling,
 }: {
   shift: Shift & {
     siteId?: string | null;
@@ -999,6 +1167,19 @@ function ShiftRow({
   onWithdrawUnable?: () => void;
   /** True while the parent is sending raise/withdraw to the DB. */
   unableBusy?: boolean;
+  /** True when THIS shift is the currently-travelling one (page-
+   *  level state). Drives the Start ↔ Stop button swap on the
+   *  expanded row. */
+  isTravelling?: boolean;
+  /** Epoch ms when the rep tapped Start travelling for THIS shift.
+   *  Used to render the live "Stop · 5m" timer label. Only set when
+   *  isTravelling is true. */
+  travellingSince?: number | null;
+  /** Start the travel timer + hand off to the device's map app.
+   *  Defined only for "Mine" rows. */
+  onStartTravelling?: () => void;
+  /** Clear the travel timer. Defined only for "Mine" rows. */
+  onStopTravelling?: () => void;
 }) {
   const isComplete = state === "complete";
   // "Live" means the rep is AT the customer — either actively working
@@ -1758,44 +1939,91 @@ function ShiftRow({
               </button>
             </div>
           ) : (
-            // Same reasoning as above — dead Directions button removed.
-            // Check-in is the single action on a not-yet-started row.
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={onCheckIn}
-                disabled={navigating}
-                style={{
-                  ...secondaryBtn,
-                  flex: 1,
-                  opacity: navigating ? 0.7 : 1,
-                  cursor: navigating ? "wait" : "pointer",
-                }}
-              >
-                <span
-                  style={{
-                    background: MC.brand,
-                    color: "#fff",
-                    width: 24,
-                    height: 24,
-                    borderRadius: 6,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginRight: 6,
-                  }}
-                >
-                  {navigating ? (
-                    <NavSpinner />
-                  ) : (
-                    <Glyph name="log" size={14} color="#fff" strokeWidth={2.2} />
+            // Pre-check-in row (scheduled / late / travelling). The
+            // home page Up Next card had a Start-travelling button
+            // for these states but /shifts previously didn't, leaving
+            // a rep with no way to fire the route + start the travel
+            // timer without going back to home. Now we surface both
+            // affordances side by side:
+            //   - Start travelling (or live "Stop · 5m" timer if
+            //     already in transit for THIS shift) — opens OS Maps,
+            //     persists the travelling pointer page-wide
+            //   - Check in — unchanged primary action
+            // We render Start travelling ONLY when the row has a
+            // destination AND the parent provided the handler (it
+            // does for "Mine" rows; claimable + requested rows skip
+            // the handler so the button is hidden there).
+            (() => {
+              const hasDest =
+                typeof shift.siteLat === "number" &&
+                typeof shift.siteLng === "number";
+              const canTravel = !!onStartTravelling && (hasDest || !!shift.siteAddress);
+              return (
+                <div style={{ display: "flex", gap: 8 }}>
+                  {canTravel && (
+                    isTravelling ? (
+                      <button
+                        type="button"
+                        onClick={onStopTravelling}
+                        style={{ ...secondaryBtn, flex: 1 }}
+                        title="Stop the travel timer"
+                      >
+                        <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
+                        <span style={{ color: MC.brandDeep, fontWeight: 600 }}>
+                          Stop · {formatTravelDuration(travellingSince ?? Date.now())}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={onStartTravelling}
+                        style={{ ...secondaryBtn, flex: 1 }}
+                        title="Start the travel timer and open directions in your map app"
+                      >
+                        <Glyph name="pin" size={16} color={MC.brandDeep} strokeWidth={2.2} />
+                        <span style={{ color: MC.brandDeep, fontWeight: 600 }}>
+                          Start travelling
+                        </span>
+                      </button>
+                    )
                   )}
-                </span>
-                <span style={{ color: MC.brandDeep, fontWeight: 600 }}>
-                  {navigating ? "Opening…" : "Check in"}
-                </span>
-              </button>
-            </div>
+                  <button
+                    type="button"
+                    onClick={onCheckIn}
+                    disabled={navigating}
+                    style={{
+                      ...secondaryBtn,
+                      flex: canTravel ? 1.1 : 1,
+                      opacity: navigating ? 0.7 : 1,
+                      cursor: navigating ? "wait" : "pointer",
+                    }}
+                  >
+                    <span
+                      style={{
+                        background: MC.brand,
+                        color: "#fff",
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        marginRight: 6,
+                      }}
+                    >
+                      {navigating ? (
+                        <NavSpinner />
+                      ) : (
+                        <Glyph name="log" size={14} color="#fff" strokeWidth={2.2} />
+                      )}
+                    </span>
+                    <span style={{ color: MC.brandDeep, fontWeight: 600 }}>
+                      {navigating ? "Opening…" : "Check in"}
+                    </span>
+                  </button>
+                </div>
+              );
+            })()
           )}
 
           {/* "Can't make this shift?" — friction-by-design.
@@ -1899,6 +2127,19 @@ function NavSpinner() {
       <style>{`@keyframes shift-spin{to{transform:rotate(360deg)}}`}</style>
     </span>
   );
+}
+
+/** "Stop · 5m" style elapsed-time formatter for the travel timer.
+ *  Returns "<1m" for <60s, "Nm" up to 60min, then "Hh Mm". Page-
+ *  level 30s tick keeps the label fresh without per-second renders. */
+function formatTravelDuration(since: number): string {
+  const sec = Math.max(0, Math.round((Date.now() - since) / 1000));
+  if (sec < 60) return "<1m";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
 const secondaryBtn: React.CSSProperties = {

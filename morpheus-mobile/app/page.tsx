@@ -560,13 +560,23 @@ export default function DashboardPage() {
                         justifyContent: "center",
                         padding: "0 11px",
                         textDecoration: "none",
-                        background: planned ? MC.okTint : "transparent",
+                        // Visual weight reflects whether there's
+                        // work to do:
+                        //  - planned    → okTint surface (confirmation)
+                        //  - unplanned  → solid brand-deep fill so
+                        //    the icon pops as a real CTA. Earlier
+                        //    iteration sat on transparent and Gary
+                        //    flagged it "not clear or strong enough
+                        //    when there's a day to optimize" — solid
+                        //    fill + white glyph fixes that without
+                        //    inflating the pill width.
+                        background: planned ? MC.okTint : MC.brandDeep,
                       }}
                     >
                       <Glyph
                         name={planned ? "check-circle" : "target"}
                         size={15}
-                        color={planned ? MC.ok : MC.brandDeep}
+                        color={planned ? MC.ok : "#fff"}
                         strokeWidth={2.4}
                       />
                     </Link>
