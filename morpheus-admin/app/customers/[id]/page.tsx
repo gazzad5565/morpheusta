@@ -55,14 +55,30 @@ import {
   type LibraryFile,
 } from "@/lib/library-store";
 import { listShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
+import {
+  listCustomerContacts,
+  type CustomerContact,
+} from "@/lib/customer-contacts-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
 
-type TabKey = "overview" | "sites" | "reps" | "tasks" | "library" | "shifts" | "custom";
+type TabKey =
+  | "overview"
+  | "sites"
+  | "contacts"
+  | "reps"
+  | "tasks"
+  | "library"
+  | "shifts"
+  | "custom";
 
 const TABS: { key: TabKey; label: string; glyph: GlyphName }[] = [
   { key: "overview", label: "Overview", glyph: "info" },
   { key: "sites", label: "Sites", glyph: "pin" },
+  // Contacts sits between Sites (their place) and Reps (our people)
+  // so the "who is involved" cluster reads in one sweep. Read-only
+  // here — full CRUD lives on /customers/[id]/edit → Contacts tab.
+  { key: "contacts", label: "Contacts", glyph: "reps" },
   { key: "reps", label: "Reps", glyph: "reps" },
   { key: "tasks", label: "Tasks", glyph: "tasks" },
   { key: "library", label: "Library", glyph: "lib" },
@@ -356,6 +372,8 @@ export default function CustomerDetailPage() {
         )}
 
         {activeTab === "sites" && <SitesTab customer={c} />}
+
+        {activeTab === "contacts" && <ContactsTab customerId={id} />}
 
         {activeTab === "reps" && (
           <RepsTab
@@ -798,6 +816,181 @@ function OverviewTab({
         </Card>
       )}
     </div>
+  );
+}
+
+
+/**
+ * Customer contacts (read-only). Mirror of the Contacts tab on the
+ * EDIT page minus the CRUD affordances — the detail page surfaces
+ * who's on file so a manager can scan the customer at a glance,
+ * with click-to-call / click-to-email tap targets on phone + email.
+ * Edits live on /customers/[id]/edit → Contacts tab.
+ */
+function ContactsTab({ customerId }: { customerId: string }) {
+  const [contacts, setContacts] = useState<CustomerContact[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    listCustomerContacts(customerId)
+      .then((rows) => {
+        if (!cancelled) setContacts(rows);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  return (
+    <Card padding={0}>
+      <div
+        style={{
+          padding: "12px 16px",
+          borderBottom: `1px solid ${AC.lineDim}`,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <SectionTitle>Contacts</SectionTitle>
+        <div style={{ flex: 1 }} />
+        <Btn
+          size="sm"
+          icon="edit"
+          onClick={() => router.push(`/customers/${customerId}/edit`)}
+        >
+          Manage contacts
+        </Btn>
+      </div>
+      {loading && (
+        <div style={{ padding: 18, color: AC.mute, fontFamily: AC.font, fontSize: 13 }}>
+          Loading…
+        </div>
+      )}
+      {!loading && contacts && contacts.length === 0 && (
+        <div
+          style={{
+            padding: "18px 16px",
+            color: AC.mute,
+            fontFamily: AC.font,
+            fontSize: 13,
+          }}
+        >
+          No contacts on file yet.{" "}
+          <button
+            type="button"
+            onClick={() => router.push(`/customers/${customerId}/edit`)}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              color: AC.brandDeep,
+              cursor: "pointer",
+              fontFamily: AC.font,
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: "underline",
+            }}
+          >
+            Add the first one →
+          </button>
+        </div>
+      )}
+      {!loading && contacts && contacts.length > 0 && (
+        <div>
+          {contacts.map((c, i) => (
+            <div
+              key={c.id}
+              style={{
+                padding: "14px 16px",
+                borderTop: i === 0 ? "none" : `1px solid ${AC.lineDim}`,
+                display: "grid",
+                gridTemplateColumns: "1fr auto",
+                gap: 12,
+                alignItems: "start",
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: AC.ink,
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  {c.name}
+                  {c.role_label && (
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 11.5,
+                        fontWeight: 600,
+                        color: AC.mute,
+                        background: AC.bg,
+                        border: `1px solid ${AC.line}`,
+                        borderRadius: 99,
+                        padding: "2px 8px",
+                        verticalAlign: "middle",
+                      }}
+                    >
+                      {c.role_label}
+                    </span>
+                  )}
+                </div>
+                {c.notes && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontFamily: AC.font,
+                      fontSize: 12.5,
+                      color: AC.ink2,
+                      lineHeight: 1.45,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {c.notes}
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                  textAlign: "right",
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                }}
+              >
+                {c.phone && (
+                  <a
+                    href={`tel:${c.phone}`}
+                    style={{ color: AC.brandDeep, textDecoration: "none", fontWeight: 600 }}
+                  >
+                    {c.phone}
+                  </a>
+                )}
+                {c.email && (
+                  <a
+                    href={`mailto:${c.email}`}
+                    style={{ color: AC.brandDeep, textDecoration: "none" }}
+                  >
+                    {c.email}
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }
 
