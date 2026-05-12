@@ -486,10 +486,107 @@ export default function DayPage() {
           0%, 100% { opacity: .4; }
           50%      { opacity: 1; }
         }
+        /* ── CONTINUOUS / AMBIENT MOTION ──────────────────────────
+           These keyframes loop FOREVER (after the initial arc) so
+           the page never feels static. Each is intentionally
+           subtle on its own — together they give the screen a
+           living-and-breathing quality without distracting from
+           the data. Gary's "no movement, no nothing besides the
+           start" feedback was that the entry plays then the page
+           dies. The block below keeps it alive. */
 
-        .dm-hero-num {
-          animation: dm-hero-num 1.8s cubic-bezier(.18, 1.5, .35, 1) both;
+        /* Initial screen flash — a bright white-out behind the
+           hero that fires once at t=0. Adds bass-line PUNCH to
+           the entry. */
+        @keyframes dm-flash {
+          0%   { opacity: 0; transform: scale(0.5); }
+          15%  { opacity: 0.95; transform: scale(1.4); }
+          100% { opacity: 0; transform: scale(2.5); }
         }
+        /* Hero number glow that breathes forever. text-shadow
+           transitions smoothly so it looks like the number is
+           radiating energy. */
+        @keyframes dm-glow-breathe {
+          0%, 100% {
+            text-shadow:
+              0 0 60px ${MC.brand}cc,
+              0 0 30px ${MC.brand}aa,
+              0 0 12px ${MC.brand}88;
+          }
+          50% {
+            text-shadow:
+              0 0 110px ${MC.brand}ff,
+              0 0 60px ${MC.brand}dd,
+              0 0 25px ${MC.brand};
+          }
+        }
+        /* Hero number micro-bob — 1.0 ↔ 1.03 over 4s. Imperceptible
+           consciously but the page feels alive. */
+        @keyframes dm-bob {
+          0%, 100% { transform: translateY(0) scale(1); }
+          50%      { transform: translateY(-4px) scale(1.025); }
+        }
+        /* Ambient floating particles — slow vertical drift from
+           the bottom of the hero stage upward, fade in then out.
+           12-second loop, ~15 particles across the stage. Gives
+           the dark backdrop a starry feel. */
+        @keyframes dm-float {
+          0%   { transform: translate(0, 0); opacity: 0; }
+          10%  { opacity: var(--peak); }
+          90%  { opacity: var(--peak); }
+          100% { transform: translate(var(--drift, 0px), -340px); opacity: 0; }
+        }
+        /* Continuous diagonal shimmer across the hero region. */
+        @keyframes dm-shimmer-loop {
+          0%   { transform: translateX(-180%) skewX(-12deg); opacity: 0; }
+          15%  { opacity: 0.18; }
+          85%  { opacity: 0.18; }
+          100% { transform: translateX(180%) skewX(-12deg); opacity: 0; }
+        }
+        /* Tile glow pulse — each tile's box-shadow breathes once
+           per 3 seconds. */
+        @keyframes dm-tile-glow {
+          0%, 100% { box-shadow: 0 10px 28px var(--glow), inset 0 1px 0 rgba(255,255,255,.6); }
+          50%      { box-shadow: 0 16px 40px var(--glow-bright), inset 0 1px 0 rgba(255,255,255,.6); }
+        }
+        /* Slow radial rotation on the backdrop — the lighting
+           "moves" around the hero, very subtly. */
+        @keyframes dm-backdrop-drift {
+          0%   { background-position: 50% 0%; }
+          50%  { background-position: 50% 8%; }
+          100% { background-position: 50% 0%; }
+        }
+
+        .dm-flash {
+          animation: dm-flash 1.2s cubic-bezier(.16, 1, .3, 1) both;
+        }
+        .dm-ambient-particle {
+          animation: dm-float var(--dur, 12s) linear infinite;
+        }
+        .dm-shimmer-loop {
+          animation: dm-shimmer-loop 5.5s ease-in-out 2.8s infinite;
+        }
+        .dm-backdrop-drift {
+          animation: dm-backdrop-drift 9s ease-in-out infinite;
+        }
+        /* The hero number gets THREE layered animations: the
+           entrance arc, the glow breathe (loops forever after 2s),
+           and the micro-bob (loops forever after 2.2s). */
+        .dm-hero-num {
+          animation:
+            dm-hero-num 1.8s cubic-bezier(.18, 1.5, .35, 1) both,
+            dm-glow-breathe 3.4s ease-in-out 2s infinite,
+            dm-bob 4.5s ease-in-out 2.2s infinite;
+        }
+        .dm-tile {
+          animation:
+            dm-tile-drop .65s cubic-bezier(.18, 1.3, .35, 1) both,
+            dm-tile-glow 3.2s ease-in-out 3.4s infinite;
+        }
+
+        /* Note: .dm-hero-num and .dm-tile got composite
+           animations (entry + ambient) defined further up in
+           the stylesheet; don't redefine them here. */
         .dm-starburst {
           animation: dm-starburst 1.1s cubic-bezier(.16, 1, .3, 1) .05s both;
         }
@@ -514,7 +611,6 @@ export default function DayPage() {
           animation: dm-gradient-sweep 3.5s linear infinite;
         }
         .dm-rise { animation: dm-rise-bouncy .7s cubic-bezier(.18, 1.4, .35, 1) both; }
-        .dm-tile { animation: dm-tile-drop .65s cubic-bezier(.18, 1.3, .35, 1) both; }
         .dm-confetti-piece { animation: dm-confetti 2.2s cubic-bezier(.22, .61, .36, 1) both; }
         .dm-fade-up { animation: dm-fade-up .5s cubic-bezier(.22, 1, .36, 1) both; }
         .dm-letter {
@@ -601,8 +697,88 @@ export default function DayPage() {
         {/* Everything below renders only after data has landed so
             the animations fire ONCE with the real numbers. */}
         {loaded && <>
+        {/* Bright entry FLASH — single hit at t=0. Gives the
+            cinematic real bass-line punch on land. */}
+        <div
+          aria-hidden
+          className="dm-flash"
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: 100,
+            width: 280,
+            height: 280,
+            transform: "translate(-50%, -50%)",
+            background: `radial-gradient(circle, #fff 0%, ${MC.brand}88 35%, transparent 70%)`,
+            pointerEvents: "none",
+            mixBlendMode: "screen",
+            zIndex: 1,
+          }}
+        />
+
+        {/* 18 ambient floating particles — slow upward drift in
+            an infinite loop. Gives the dark backdrop a starry,
+            never-static feel. Each particle has a randomised
+            size, position, drift, peak opacity, and duration so
+            the field looks organic. */}
+        <div
+          aria-hidden
+          style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1 }}
+        >
+          {Array.from({ length: 18 }).map((_, i) => {
+            const left = 5 + Math.random() * 90;
+            const bottom = -20 - Math.random() * 40;
+            const size = 2 + Math.random() * 3;
+            const drift = (Math.random() - 0.5) * 60;
+            const dur = 9 + Math.random() * 6;
+            const delay = Math.random() * 8;
+            const peak = 0.3 + Math.random() * 0.4;
+            return (
+              <span
+                key={i}
+                className="dm-ambient-particle"
+                style={
+                  {
+                    position: "absolute",
+                    left: `${left}%`,
+                    bottom: `${bottom}px`,
+                    width: size,
+                    height: size,
+                    borderRadius: "50%",
+                    background: MC.brand,
+                    boxShadow: `0 0 ${size * 3}px ${MC.brand}`,
+                    ["--drift" as never]: `${drift}px`,
+                    ["--peak" as never]: peak,
+                    ["--dur" as never]: `${dur}s`,
+                    animationDelay: `${delay}s`,
+                  } as React.CSSProperties
+                }
+              />
+            );
+          })}
+        </div>
+
         {/* Big confetti volley — 80 particles, wider spread. */}
         <Confetti count={80} />
+
+        {/* Continuous diagonal shimmer that sweeps the hero area
+            every 5.5 seconds, infinite. Provides ongoing motion
+            after the entry is settled. */}
+        <div
+          aria-hidden
+          className="dm-shimmer-loop"
+          style={{
+            position: "absolute",
+            left: "-20%",
+            top: 0,
+            width: "60%",
+            height: "100%",
+            background: `linear-gradient(105deg, transparent 30%, rgba(255,255,255,.4) 50%, transparent 70%)`,
+            pointerEvents: "none",
+            mixBlendMode: "screen",
+            zIndex: 1,
+          }}
+        />
 
         {/* Starburst flare — radial gradient that explodes outward
             behind the hero number. Pure CSS, no images. */}
@@ -923,6 +1099,7 @@ function DayStat({
       fg: MC.brandDeep,
       iconBg: MC.brand,
       glow: `${MC.brand}33`,
+      glowBright: `${MC.brand}66`,
     },
     ok: {
       bg: `linear-gradient(135deg, ${MC.okTint} 0%, #fff 100%)`,
@@ -930,6 +1107,7 @@ function DayStat({
       fg: "#0d6a45",
       iconBg: MC.ok,
       glow: `${MC.ok}33`,
+      glowBright: `${MC.ok}66`,
     },
     neutral: {
       bg: "linear-gradient(135deg, #F4F6F9 0%, #fff 100%)",
@@ -937,6 +1115,7 @@ function DayStat({
       fg: MC.ink,
       iconBg: MC.ink2,
       glow: "rgba(40, 50, 70, .14)",
+      glowBright: "rgba(40, 50, 70, .28)",
     },
     travel: {
       bg: "linear-gradient(135deg, #EAEFFA 0%, #fff 100%)",
@@ -944,24 +1123,33 @@ function DayStat({
       fg: "#1f3a8a",
       iconBg: "#2E4FB8",
       glow: "rgba(46, 79, 184, .26)",
+      glowBright: "rgba(46, 79, 184, .5)",
     },
   }[tone];
   return (
     <div
       className="dm-tile"
-      style={{
-        animationDelay: `${delay}ms`,
-        background: palette.bg,
-        border: `1px solid ${palette.border}`,
-        borderRadius: 16,
-        padding: "16px 14px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        boxShadow: `0 10px 28px ${palette.glow}, inset 0 1px 0 rgba(255,255,255,.6)`,
-        position: "relative",
-        overflow: "hidden",
-      }}
+      style={
+        {
+          animationDelay: `${delay}ms`,
+          background: palette.bg,
+          border: `1px solid ${palette.border}`,
+          borderRadius: 16,
+          padding: "16px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          // Initial box-shadow; the looping dm-tile-glow keyframe
+          // animates this via the CSS variables below.
+          boxShadow: `0 10px 28px ${palette.glow}, inset 0 1px 0 rgba(255,255,255,.6)`,
+          position: "relative",
+          overflow: "hidden",
+          // CSS vars consumed by dm-tile-glow keyframe (defined
+          // in the page <style> block).
+          ["--glow" as never]: palette.glow,
+          ["--glow-bright" as never]: palette.glowBright,
+        } as React.CSSProperties
+      }
     >
       <div
         style={{
