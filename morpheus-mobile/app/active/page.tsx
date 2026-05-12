@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { type Task } from "@/lib/mock-data";
@@ -198,7 +198,21 @@ export default function ActiveShiftPage() {
     }
   }, [activeTaskId, activeTaskStartedAt]);
 
-  const [tasksOpen, setTasksOpen] = useState(true);
+  // Accordion default rules (May 12 — Gary):
+  //   - If there are NO tasks at all → both accordions closed (no
+  //     point pre-expanding an empty list).
+  //   - If there ARE compulsory tasks → the compulsory section is
+  //     open by default so the rep sees the work they MUST do
+  //     without an extra tap.
+  //   - Optional / available tasks stay closed by default in both
+  //     cases — they're optional, the rep can expand them when
+  //     they're interested.
+  // We resolve this AFTER the async task fetch lands via an effect
+  // below; the initial useState values are placeholders so the page
+  // renders something on first paint. A useRef guards against
+  // overriding the rep's manual toggle once they've touched the
+  // accordion themselves.
+  const [tasksOpen, setTasksOpen] = useState(false);
   const [availOpen, setAvailOpen] = useState(false);
   // Tap-feedback overlay shown the moment the rep taps "Check out".
   // Stays mounted until the destination /check-out page mounts and
@@ -257,6 +271,22 @@ export default function ActiveShiftPage() {
   const compulsory = tasks.filter((t) => t.compulsory);
   const available = tasks.filter((t) => !t.compulsory);
   const compulsoryDone = compulsory.every((t) => completedTaskIds.includes(t.id));
+
+  // Apply the accordion defaults once tasks have loaded (May 12 —
+  // Gary): if there ARE compulsory tasks, pre-expand the Tasks
+  // section so the rep sees the work they must do without an extra
+  // tap. If the customer has no compulsory tasks (or no tasks at
+  // all) we leave it collapsed — there's nothing demanding
+  // attention. The autoOpened ref guards against re-running this
+  // after the rep manually toggles: once we've set the initial
+  // state, we never touch it again.
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenedRef.current) return;
+    if (tasks.length === 0) return; // wait for the fetch to land
+    autoOpenedRef.current = true;
+    if (compulsory.length > 0) setTasksOpen(true);
+  }, [tasks.length, compulsory.length]);
   const completeCount = completedTaskIds.length;
   const totalCount = tasks.length;
 

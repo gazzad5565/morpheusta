@@ -211,13 +211,9 @@ export default function RoutePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Re-render every 60s so "Leave by" / ETAs stay accurate as the
-  // clock ticks. The underlying route data doesn't change — we just
-  // want the relative timing pills to refresh. 60s is fine grain.
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    const t = window.setInterval(() => setNowTick(Date.now()), 60_000);
-    return () => window.clearInterval(t);
-  }, []);
+  // The minute-tick that used to drive per-leg "Leave now / X min
+  // late" pills was removed (May 12) along with those pills — /route
+  // is now pure ordering, no clock-relative state on the page.
 
   const reload = async () => {
     setLoading(true);
@@ -338,52 +334,10 @@ export default function RoutePage() {
   const warning = route?.warning;
   const originFromFirstStop = result?.originFromFirstStop ?? false;
 
-  // Build the "Open whole day in Maps" URL. Needs an origin —
-  // when GPS was denied we used the first stop as origin, which
-  // means the day URL should ALSO start at that first stop (and
-  // skip it in the waypoints). Simpler: when originFromFirstStop,
-  // start from the second stop onwards in the URL.
-  const dayMapsUrl = useMemo(() => {
-    if (!route || stopsInOrder.length === 0) return null;
-    if (originFromFirstStop && stopsInOrder.length === 1) {
-      // Only one stop, no GPS — just link to it.
-      const s = stopsInOrder[0];
-      if (typeof s.siteLat !== "number" || typeof s.siteLng !== "number") return null;
-      return buildLegMapsUrl({
-        id: s.realId,
-        lat: s.siteLat,
-        lng: s.siteLng,
-        label: s.name,
-      });
-    }
-    const trail = originFromFirstStop ? stopsInOrder.slice(1) : stopsInOrder;
-    if (trail.length === 0) return null;
-    const origin = originFromFirstStop
-      ? { lat: stopsInOrder[0].siteLat as number, lng: stopsInOrder[0].siteLng as number }
-      : null;
-    // When we have real GPS we DON'T know it here — buildDayMapsUrl
-    // requires an origin, and the user's current location is already
-    // baked into the route plan. Use the first stop as origin
-    // regardless for the Maps deep link (Maps will route from the
-    // user's GPS anyway via "My location" handling on the device).
-    const dayOrigin =
-      origin ??
-      {
-        lat: stopsInOrder[0].siteLat as number,
-        lng: stopsInOrder[0].siteLng as number,
-      };
-    const stopsForUrl: PlannerStop[] = trail
-      .filter(
-        (s) => typeof s.siteLat === "number" && typeof s.siteLng === "number"
-      )
-      .map((s) => ({
-        id: s.realId,
-        lat: s.siteLat as number,
-        lng: s.siteLng as number,
-        label: s.name,
-      }));
-    return buildDayMapsUrl(dayOrigin, stopsForUrl);
-  }, [route, stopsInOrder, originFromFirstStop]);
+  // "Open whole day in Maps" URL builder was removed (May 12 —
+  // Gary). The dayMapsUrl useMemo + the CTA that consumed it are
+  // gone, so buildDayMapsUrl / buildLegMapsUrl / PlannerStop are no
+  // longer used in this file.
 
   return (
     <div
@@ -539,6 +493,55 @@ export default function RoutePage() {
           </button>
         </div>
 
+        {/* Optimized-at banner.
+            Promoted to its own row (was tucked inside the toggle's
+            subtitle in 10.5px hint colour — Gary's mentioned a few
+            times that the optimization time wasn't obvious enough).
+            Now sits prominently directly under the totals so the
+            first thing the rep sees when arriving on a planned day
+            is "your order was saved at 2:42 PM" — clear, actionable,
+            answers "when did I last touch this?" without scrolling. */}
+        {savedOrder && savedAt && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              borderRadius: 10,
+              background: MC.okTint,
+              border: `1px solid ${MC.ok}33`,
+              borderLeft: `3px solid ${MC.ok}`,
+              fontFamily: MC.font,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <Glyph
+              name="check-circle"
+              size={16}
+              color={MC.ok}
+              strokeWidth={2.4}
+            />
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#0d6a45",
+                letterSpacing: -0.1,
+              }}
+            >
+              Order optimized at{" "}
+              <span style={{ fontWeight: 700 }}>
+                {new Date(savedAt).toLocaleTimeString(undefined, {
+                  hour: "numeric",
+                  minute: "2-digit",
+                  hour12: true,
+                })}
+              </span>
+            </span>
+          </div>
+        )}
+
         {/* Optimize order — flips the toggle, useEffect refetches.
             Hidden entirely when the org has disabled route
             optimization (admin /settings/check-in-rules → "Allow
@@ -623,37 +626,12 @@ export default function RoutePage() {
                 ? "Tap Re-check above to refresh with current traffic — we'll flag any better route."
                 : "Re-order today's stops for the shortest drive"}
             </div>
-            {/* "Optimized order saved · X min ago" caption.
-                Renamed from "Last optimized…" so the line reads as
-                state ("this is the order in effect right now")
-                rather than just a timestamp. The minute-tick on the
-                page's `now` state keeps the relative label fresh. */}
-            {savedOrder && savedAt && (
-              <div
-                style={{
-                  fontFamily: MC.font,
-                  fontSize: 10.5,
-                  color: MC.hint,
-                  marginTop: 3,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                }}
-              >
-                <Glyph
-                  name="check-circle"
-                  size={10}
-                  color={MC.ok}
-                  strokeWidth={2.2}
-                />
-                Optimized order saved at{" "}
-                {new Date(savedAt).toLocaleTimeString(undefined, {
-                  hour: "numeric",
-                  minute: "2-digit",
-                  hour12: true,
-                })}
-              </div>
-            )}
+            {/* Old tiny "Optimized order saved at HH:MM" caption
+                used to live here. Promoted to the prominent banner
+                above the toggle (May 12 — Gary's repeated request)
+                so the timestamp answers "when did I save this?" at
+                a glance instead of being buried in 10.5px hint
+                text. */}
           </div>
           {/* Hidden checkbox removed (May 12).
               It used to live here "for a11y" but it actually broke the
@@ -669,23 +647,18 @@ export default function RoutePage() {
         </label>
         )}
 
-        {/* Save / Re-check button.
-            Three states (one button, three labels):
-              - chronological on screen AND nothing saved → hide
-                (nothing useful to do; the toggle handles re-ordering)
-              - non-chrono order on screen AND nothing saved yet →
-                "Save this order" (primary brand button)
-              - non-chrono on screen AND saved order != current view
-                → "Update saved order" (primary brand button)
-              - non-chrono on screen AND saved order == current view
-                → "Re-check route" (neutral; refreshes the planner so
-                the rep can see if traffic has shifted savings)
-            The old "Order saved ✓ · Clear" pill set was removed —
-            saved-state is already communicated by the "Last
-            optimized X min ago" caption above + the home page's
-            Planned chip. Honours Option A: this is a per-rep view
-            preference. It never touches shifts.start_time so the
-            manager's calendar stays exactly as scheduled. */}
+        {/* Save button.
+            Shows ONLY for the FIRST save. Once the rep has saved an
+            order, this button never returns — Gary's been explicit
+            about this multiple times. The "Update saved order"
+            variant was removed (May 12). If the rep re-checks later
+            and the planner finds a faster route, the comparison
+            banner below shows the delta + timestamp so the rep
+            knows; if they want to swap orders they can flip the
+            toggle off/on which will re-save automatically the next
+            time they tap Save (i.e. after they clear). Keeping the
+            page calm and read-only after the initial save is the
+            whole point. */}
         {(() => {
           if (!result || result.route.legs.length < 2) return null;
           const currentOrder = result.stopsInOrder.map((s) => s.realId);
@@ -693,17 +666,12 @@ export default function RoutePage() {
           if (!comparison) return null;
           const chronoSame =
             comparison.chronologicalOrder.join("|") === currentOrder.join("|");
-          const savedMatchesCurrent =
-            !!savedOrder &&
-            savedOrder.length === currentOrder.length &&
-            savedOrder.join("|") === currentOrder.join("|");
           const savedExists = !!savedOrder && savedOrder.length > 0;
-          if (chronoSame && !savedExists) return null;
-          // When saved order matches what's on screen, the save area
-          // has nothing to do — the top "Re-check" button covers the
-          // "refresh with current traffic" affordance. Hiding this
-          // row entirely avoids two duplicate buttons on the page.
-          if (savedMatchesCurrent) return null;
+          // Once an order is saved, no button. Ever.
+          if (savedExists) return null;
+          // No saved order yet AND current view == chronological →
+          // nothing to save.
+          if (chronoSame) return null;
           return (
             <div
               style={{
@@ -752,7 +720,7 @@ export default function RoutePage() {
                   color="#fff"
                   strokeWidth={2.4}
                 />
-                {savedExists ? "Update saved order" : "Save this order"}
+                Save this order
               </button>
               <span
                 style={{
@@ -890,7 +858,7 @@ export default function RoutePage() {
               ? savedMatchesCurrentBanner
                 ? "This is the order on your shifts list. Re-check anytime to see if traffic has shifted things."
                 : savedOrder
-                ? "Tap 'Update saved order' below to use this faster route."
+                ? "Your saved order is still active. Re-check anytime — traffic may have shifted the picture."
                 : "Tap 'Save this order' below to lock it in."
               : "Flip 'Optimize stop order' above to use the shorter route.";
             // Icon: ✓ when applied, sparkle when there's something
@@ -952,54 +920,14 @@ export default function RoutePage() {
         ) : legs.length === 0 ? (
           <EmptyState onAddShift={() => router.push("/add-shift")} />
         ) : (
-          <LegList
-            legs={legs}
-            stopsInOrder={stopsInOrder}
-            now={new Date(nowTick)}
-          />
+          <LegList legs={legs} stopsInOrder={stopsInOrder} />
         )}
 
-        {/* Open whole day in Maps.
-            Uses openMapsLink() which picks the right open strategy
-            per platform:
-              - iOS PWA → same-window navigation (universal link
-                intercepts before the PWA actually leaves the page,
-                no white-screen on return)
-              - Android PWA / desktop → window.open(_blank) so the
-                PWA stays alive in its own process and is reachable
-                via the app switcher when the rep comes back. */}
-        {dayMapsUrl && legs.length >= 2 && (
-          <a
-            href={dayMapsUrl}
-            onClick={(e) => {
-              e.preventDefault();
-              openMapsLink(dayMapsUrl);
-            }}
-            rel="noopener noreferrer"
-            style={{
-              marginTop: 14,
-              width: "100%",
-              height: 54,
-              borderRadius: 14,
-              border: "none",
-              background: MC.ink,
-              color: "#fff",
-              fontFamily: MC.font,
-              fontSize: 15,
-              fontWeight: 600,
-              letterSpacing: -0.1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              textDecoration: "none",
-              boxShadow: `0 10px 24px ${MC.ink}33, inset 0 1px 0 rgba(255,255,255,.2)`,
-            }}
-          >
-            <Glyph name="pin" size={17} color="#fff" strokeWidth={2.2} />
-            Open whole day in Maps
-          </a>
-        )}
+        {/* "Open whole day in Maps" CTA was removed (May 12 — Gary).
+            /route is now scoped purely to ordering. Reps tap into
+            /shifts (or the home Up Next card) when they actually
+            want to drive somewhere; the explicit Maps handoff lives
+            there alongside the Start-travelling button. */}
       </div>
 
       <AppFooter />
@@ -1182,20 +1110,20 @@ function ErrorState({
 function LegList({
   legs,
   stopsInOrder,
-  now,
 }: {
   legs: NonNullable<PlanMyDayResult["route"]>["legs"];
   stopsInOrder: PlanMyDayResult["stopsInOrder"];
-  now: Date;
 }) {
-  // Cumulative seconds from origin → end of each leg. Drives the
-  // ETA + leave-by calculation per row.
-  let cum = 0;
-  const rows = legs.map((leg, i) => {
-    cum += leg.driveSeconds;
-    const stop = stopsInOrder[i];
-    return { leg, stop, cumSeconds: cum, index: i };
-  });
+  // /route is intentionally scoped to ONE job: re-ordering today's
+  // stops for the shortest drive. Per-leg ETA / Leave-now / Open-in-
+  // Maps affordances have been stripped (May 12 — Gary). Those live
+  // on /shifts now, where they read as actions against a specific
+  // shift. Mixing them in here was confusing reps and risked taps
+  // (e.g. "Leave now — 91 min late · Open in Maps") on a screen
+  // that's supposed to be a calm planning view. Each row now shows
+  // ONLY: order number, customer, address, and the drive duration +
+  // distance for THIS leg. The rep clicks back to /shifts for any
+  // action on a stop.
   return (
     <ol
       style={{
@@ -1207,23 +1135,9 @@ function LegList({
         gap: 10,
       }}
     >
-      {rows.map(({ leg, stop, cumSeconds, index }) => {
+      {legs.map((leg, index) => {
+        const stop = stopsInOrder[index];
         if (!stop) return null;
-        const scheduledArrivalISO = stop.rawStartTime
-          ? buildArrivalISOLocal(stop.shiftDate, stop.rawStartTime)
-          : undefined;
-        const status = computeScheduleStatus(now, cumSeconds, scheduledArrivalISO);
-        const eta = new Date(now.getTime() + cumSeconds * 1000);
-        const scheduledStart = scheduledArrivalISO ? new Date(scheduledArrivalISO) : null;
-        const legMapsUrl =
-          typeof stop.siteLat === "number" && typeof stop.siteLng === "number"
-            ? buildLegMapsUrl({
-                id: stop.realId,
-                lat: stop.siteLat,
-                lng: stop.siteLng,
-                label: stop.name,
-              })
-            : null;
         return (
           <li
             key={`${stop.realId}-${index}`}
@@ -1334,139 +1248,10 @@ function LegList({
               </div>
             </div>
 
-            {/* Schedule block.
-                User feedback: three competing chips (Arrive / Shift
-                starts / Status) read as a pile of numbers without an
-                obvious story. "On time" in green was particularly
-                unclear — green relative to WHAT?
-                Replaced with a single coloured status banner that
-                reads like a sentence ("17 min early — arrive 12:13
-                for the 12:30 shift"). One block, one colour, one
-                idea. */}
-            {(() => {
-              if (!status || !scheduledStart) {
-                // No scheduled time on file → just show the ETA so
-                // the rep at least knows when they'll arrive.
-                return (
-                  <div
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      background: MC.bg,
-                      border: `1px solid ${MC.line}`,
-                      fontFamily: MC.font,
-                      fontSize: 13,
-                      color: MC.ink,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Arrive {formatClock(eta)}
-                  </div>
-                );
-              }
-              // Tones and the headline copy per status. The "if you
-              // leave now" framing is explicit on early / late /
-              // on-time so the rep doesn't have to mentally hold the
-              // assumption "this number is relative to leaving
-              // right this second". The tight case keeps "Leave by
-              // HH:MM" because that IS the actionable number for
-              // that bucket. Gary's reported confusion was that
-              // "Late by 66 min" wasn't obviously "if you leave
-              // now" — now it says so.
-              const headline =
-                status.kind === "late"
-                  ? `Leave now — ${status.minsLate} min late`
-                  : status.kind === "tight"
-                  ? `Leave by ${formatClock(status.leaveBy)}`
-                  : status.kind === "ok"
-                  ? "Leave now to be on time"
-                  : `Leave now — ${status.minsEarly} min early`;
-              const tone =
-                status.kind === "late"
-                  ? { bg: MC.dangerTint, fg: "#9c1a3c", border: MC.danger }
-                  : status.kind === "tight"
-                  ? { bg: MC.warnTint, fg: "#7A560A", border: MC.warn }
-                  : { bg: MC.okTint, fg: "#0d6a45", border: MC.ok };
-              return (
-                <div
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    background: tone.bg,
-                    border: `1px solid ${tone.border}33`,
-                    borderLeft: `3px solid ${tone.border}`,
-                    fontFamily: MC.font,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 13.5,
-                      fontWeight: 700,
-                      color: tone.fg,
-                      letterSpacing: -0.1,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                    }}
-                  >
-                    <Glyph
-                      name={status.kind === "late" ? "warn" : "check-circle"}
-                      size={14}
-                      color={tone.fg}
-                      strokeWidth={2.4}
-                    />
-                    {headline}
-                  </div>
-                  <div
-                    style={{
-                      marginTop: 3,
-                      fontSize: 12,
-                      color: MC.mute,
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {status.kind === "late"
-                      ? `You'd arrive at ${formatClock(eta)} — shift was due to start at ${formatClock(scheduledStart)}.`
-                      : status.kind === "tight"
-                      ? `Arriving on time for the ${formatClock(scheduledStart)} shift needs you out the door by ${formatClock(status.leaveBy)}.`
-                      : `You'd arrive at ${formatClock(eta)} for the ${formatClock(scheduledStart)} shift.`}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Per-leg Open in Maps — openMapsLink() handles the
-                iOS-vs-Android split so the PWA stays reachable
-                after the rep returns from the Maps app. */}
-            {legMapsUrl && (
-              <a
-                href={legMapsUrl}
-                onClick={(e) => {
-                  e.preventDefault();
-                  openMapsLink(legMapsUrl);
-                }}
-                rel="noopener noreferrer"
-                style={{
-                  height: 38,
-                  borderRadius: 10,
-                  border: `1px solid ${MC.line}`,
-                  background: MC.bg,
-                  color: MC.ink,
-                  fontFamily: MC.font,
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 6,
-                  textDecoration: "none",
-                  letterSpacing: -0.1,
-                }}
-              >
-                <Glyph name="pin" size={13} color={MC.ink} strokeWidth={2.2} />
-                Open in Maps
-              </a>
-            )}
+            {/* No per-leg schedule banner or Open-in-Maps button —
+                /route is purely an ordering view now. Drive time +
+                distance for THIS leg already appears under the
+                customer name above; that's enough planning info. */}
           </li>
         );
       })}
