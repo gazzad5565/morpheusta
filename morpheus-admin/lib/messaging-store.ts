@@ -74,15 +74,23 @@ export interface ComposeError {
  * by reading the profiles table. The result is what gets materialised
  * into message_recipients at compose time.
  *
- * Excludes the composer themselves — managers don't need to receive
- * their own broadcasts (avoids the awkward "I sent this and now my
- * inbox has a copy" experience). For 1:1 messages where the composer
- * IS the only audience, the caller can pass them in audienceUserIds.
+ * Includes the composer when they belong in the audience — e.g. a
+ * manager who composes "All managers" or "Everyone" gets their own
+ * copy. This matches Slack / Teams behaviour AND makes testing sane
+ * (you can compose from admin and watch the message arrive on your
+ * own device without juggling two accounts).
+ *
+ * The previous version auto-excluded the composer "to avoid the
+ * awkward I-sent-this-and-got-my-own-copy experience". Gary hit
+ * that exact gotcha during testing — composed from admin, watched
+ * his own inbox, saw nothing because the exclusion silently
+ * filtered him out. If a manager truly doesn't want their own copy
+ * for a specific message, "Pick specific…" gives them precise
+ * control over the list.
  */
 async function resolveRecipients(
   audienceKind: AudienceKind,
-  audienceUserIds: string[] | undefined,
-  excludeUserId: string | null
+  audienceUserIds: string[] | undefined
 ): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }> {
   if (!supabase) return { ok: false, error: "Database not configured" };
   if (audienceKind === "specific") {
@@ -102,8 +110,7 @@ async function resolveRecipients(
   // 'all' → no filter
   const { data, error } = await q;
   if (error) return { ok: false, error: error.message };
-  let ids = ((data as { id: string }[]) || []).map((p) => p.id);
-  if (excludeUserId) ids = ids.filter((id) => id !== excludeUserId);
+  const ids = ((data as { id: string }[]) || []).map((p) => p.id);
   return { ok: true, ids };
 }
 
@@ -136,10 +143,12 @@ export async function composeMessage(
 
   // Resolve recipients first so we can fail fast if there's nobody
   // to send to (avoids creating an orphan zero-recipient row).
+  // Composer is now INCLUDED in the audience when they belong (e.g.
+  // a manager composing "All managers" gets their own copy). See
+  // resolveRecipients() doc comment for rationale.
   const r = await resolveRecipients(
     input.audienceKind,
-    input.audienceUserIds,
-    composerId
+    input.audienceUserIds
   );
   if (!r.ok) return r;
   if (r.ids.length === 0) {
