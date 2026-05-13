@@ -27,6 +27,12 @@ import {
   type UploadedPhoto,
 } from "@/lib/photo-store";
 import {
+  saveShiftTaskSignature,
+  getShiftTaskSignature,
+  subscribeShiftTaskSignatures,
+} from "@/lib/signature-store";
+import { SignaturePad } from "@/components/SignaturePad";
+import {
   getMyActiveShift,
   getTasksForCustomer,
   setShiftBreakState,
@@ -146,6 +152,7 @@ export default function ActiveShiftPage() {
           description: r.description ?? "",
           photoCount: r.photo_count ?? 0,
           photosCompulsory: r.photos_compulsory ?? true,
+          requiresSignature: r.requires_signature ?? false,
         }))
       );
       // Hydrate completed-state from the DB so closing/reopening the
@@ -223,6 +230,39 @@ export default function ActiveShiftPage() {
   // rep interacts and the page-level refresh runs.
   const [taskPhotoCounts, setTaskPhotoCounts] = useState<Map<string, number>>(
     () => new Map()
+  );
+
+  // ─── Signature flow (Feature D — May 13) ─────────────────────────
+  //
+  // signaturePad.taskId controls whether the SignaturePad modal is
+  // mounted. saving + error mirror the photo-flow shape so the modal
+  // can show its spinner + inline error states without a second
+  // state hook. signedTaskIds caches "we have a signature for this
+  // task" so the TaskRow can render a signed pill.
+  const [signaturePad, setSignaturePad] = useState<{
+    task: Task;
+    saving: boolean;
+    error: string | null;
+    initialDataUrl: string | null;
+    initialSignerName: string | null;
+  } | null>(null);
+  const [signedTaskIds, setSignedTaskIds] = useState<Set<string>>(
+    () => new Set()
+  );
+
+  const refreshSignatureFor = useCallback(
+    async (taskId: string): Promise<boolean> => {
+      if (!shiftData?.shiftId) return false;
+      const row = await getShiftTaskSignature(shiftData.shiftId, taskId);
+      setSignedTaskIds((prev) => {
+        const next = new Set(prev);
+        if (row) next.add(taskId);
+        else next.delete(taskId);
+        return next;
+      });
+      return !!row;
+    },
+    [shiftData?.shiftId]
   );
 
   // Refresh the photo count for a given task. Called on mount for
@@ -624,9 +664,32 @@ export default function ActiveShiftPage() {
       }
       const newCount = await refreshPhotoCount(photoFlow.taskId);
       if (newCount >= photoFlow.totalSlots) {
-        // All slots filled — auto-complete the task + dismiss flow.
-        autoCompletePhotoTask(photoFlow.taskId);
+        // All photo slots filled. If this task ALSO requires a
+        // signature and we don't have one yet, hop straight into
+        // the signature pad. Otherwise auto-complete.
+        //
+        // We inline the signature-open here (rather than calling
+        // startSignatureFlow) so we don't have to forward-reference
+        // startSignatureFlow from this callback's deps list. The
+        // signature row hasn't been fetched yet at this point — we
+        // pass null initial data, which means a fresh pad rather
+        // than a pre-fill. That's fine: by definition we're here
+        // because no signature exists yet.
+        const task = tasks.find((t) => t.id === photoFlow.taskId);
+        const needsSig =
+          task?.requiresSignature && !signedTaskIds.has(photoFlow.taskId);
         setPhotoFlow(null);
+        if (task && needsSig) {
+          setSignaturePad({
+            task,
+            saving: false,
+            error: null,
+            initialDataUrl: null,
+            initialSignerName: null,
+          });
+        } else {
+          autoCompletePhotoTask(photoFlow.taskId);
+        }
         return;
       }
       // More slots to go — advance + re-trigger the camera. iOS will
@@ -649,6 +712,8 @@ export default function ActiveShiftPage() {
       shiftData?.shiftId,
       refreshPhotoCount,
       autoCompletePhotoTask,
+      tasks,
+      signedTaskIds,
     ]
   );
 
@@ -661,6 +726,127 @@ export default function ActiveShiftPage() {
       void refreshPhotoCount(t.id);
     });
   }, [tasks, refreshPhotoCount]);
+
+  // Hydrate signature presence for all signature tasks on mount +
+  // whenever the task list changes. Mirrors the photo-count hydration
+  // above so the TaskRow can show a "Signed" pill without each row
+  // independently subscribing.
+  useEffect(() => {
+    const signatureTasks = tasks.filter((t) => t.requiresSignature);
+    signatureTasks.forEach((t) => {
+      void refreshSignatureFor(t.id);
+    });
+  }, [tasks, refreshSignatureFor]);
+
+  // ─── Signature flow handlers (Feature D — May 13) ─────────────────
+
+  /** Auto-complete a signature-only task once a signature lands.
+   *  Shape matches autoCompletePhotoTask. */
+  const autoCompleteSignatureTask = useCallback(
+    (taskId: string) => {
+      const wasActive = activeTaskId === taskId;
+      if (wasActive) {
+        setActiveTaskId(null);
+        setActiveTaskStartedAt(null);
+      }
+      setCompletedTaskIds((ids) =>
+        ids.includes(taskId) ? ids : [...ids, taskId]
+      );
+      if (shiftData?.shiftId) {
+        const elapsedSec =
+          wasActive && activeTaskStartedAt
+            ? Math.floor((Date.now() - activeTaskStartedAt) / 1000)
+            : null;
+        void markTaskComplete(shiftData.shiftId, taskId).then((r) => {
+          if (!r.ok) {
+            // eslint-disable-next-line no-console
+            console.warn("[active] auto-mark signature task failed:", r.error);
+          }
+        });
+        const completed = tasks.find((t) => t.id === taskId);
+        void logEvent({
+          event_type: "shift.task_completed",
+          shift_id: shiftData.shiftId,
+          customer_id: shiftData.customerId,
+          message: `Completed task: ${completed?.name ?? "signature task"}`,
+          meta: {
+            task_id: taskId,
+            task_name: completed?.name,
+            duration_min: completed?.duration,
+            elapsed_sec: elapsedSec,
+            auto_completed: "signature_captured",
+          },
+        });
+      }
+    },
+    [activeTaskId, activeTaskStartedAt, shiftData, tasks]
+  );
+
+  /** Open the signature pad for a given task. Pre-fills the pad with
+   *  any existing signature so a re-sign starts from where they
+   *  were (rather than a blank canvas). */
+  const startSignatureFlow = useCallback(
+    async (task: Task) => {
+      if (!shiftData?.shiftId) return;
+      const existing = await getShiftTaskSignature(
+        shiftData.shiftId,
+        task.id
+      );
+      setSignaturePad({
+        task,
+        saving: false,
+        error: null,
+        initialDataUrl: existing?.signature_data_url ?? null,
+        initialSignerName: existing?.signer_name ?? null,
+      });
+    },
+    [shiftData?.shiftId]
+  );
+
+  const handleSaveSignature = useCallback(
+    async (args: { signatureDataUrl: string; signerName: string | null }) => {
+      if (!signaturePad || !shiftData?.shiftId) return;
+      setSignaturePad((prev) =>
+        prev ? { ...prev, saving: true, error: null } : prev
+      );
+      const r = await saveShiftTaskSignature({
+        shiftId: shiftData.shiftId,
+        taskId: signaturePad.task.id,
+        signatureDataUrl: args.signatureDataUrl,
+        signerName: args.signerName,
+      });
+      if (!r.ok) {
+        setSignaturePad((prev) =>
+          prev ? { ...prev, saving: false, error: r.error } : prev
+        );
+        return;
+      }
+      const taskId = signaturePad.task.id;
+      await refreshSignatureFor(taskId);
+      // Photo + signature combo: only complete when BOTH gates pass.
+      // Signature-only: complete now.
+      const task = signaturePad.task;
+      const photoNeeded = task.photoCount ?? 0;
+      if (photoNeeded === 0) {
+        autoCompleteSignatureTask(taskId);
+      } else {
+        // Both gates required — check if photos are also done.
+        const photosTaken = taskPhotoCounts.get(taskId) ?? 0;
+        if (photosTaken >= photoNeeded) {
+          autoCompleteSignatureTask(taskId);
+        }
+        // Else the photo flow's last upload will trigger completion.
+      }
+      setSignaturePad(null);
+    },
+    [
+      signaturePad,
+      shiftData?.shiftId,
+      refreshSignatureFor,
+      autoCompleteSignatureTask,
+      taskPhotoCounts,
+    ]
+  );
 
   const sheetMode = openSheet
     ? completedTaskIds.includes(openSheet.task.id)
@@ -755,6 +941,98 @@ export default function ActiveShiftPage() {
                 Code {shift.code} · {shift.distance}
               </div>
             </div>
+          </div>
+
+          {/* Address row (May 13) — surfaces the site's physical
+              address right under the customer block so the rep can
+              see where they actually are. Tapping opens the
+              platform-default Maps app via the geo: + universal-link
+              fallback. When the site has no address on file we still
+              render the row but say so explicitly — a "no address"
+              empty state is clearer than the absence of any row. */}
+          <div
+            style={{
+              marginTop: 12,
+              padding: "10px 12px",
+              background: shift.siteAddress ? MC.bg : MC.warnTint,
+              borderRadius: 10,
+              border: `1px solid ${shift.siteAddress ? MC.line : `${MC.warn}33`}`,
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+            }}
+          >
+            <span
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 8,
+                background: shift.siteAddress ? "#fff" : "#fff",
+                border: `1px solid ${shift.siteAddress ? MC.line : `${MC.warn}55`}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <Glyph
+                name="pin"
+                size={13}
+                color={shift.siteAddress ? MC.brandDeep : MC.warn}
+                strokeWidth={2.4}
+              />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 10.5,
+                  fontWeight: 700,
+                  letterSpacing: 0.5,
+                  textTransform: "uppercase",
+                  color: shift.siteAddress ? MC.hint : "#7A560A",
+                  marginBottom: 2,
+                }}
+              >
+                Address
+              </div>
+              {shift.siteAddress ? (
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shift.siteAddress)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    color: MC.ink,
+                    lineHeight: 1.4,
+                    textDecoration: "none",
+                    display: "block",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {shift.siteAddress}
+                </a>
+              ) : (
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    color: "#7A560A",
+                    fontWeight: 600,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  No address on file — flag this with your manager.
+                </div>
+              )}
+            </div>
+            {shift.siteAddress && (
+              // Tiny chevron to make the row read as tappable (opens
+              // Google Maps in a new tab on web, or the system
+              // default maps app on mobile via the URL handler).
+              <Glyph name="chev-r" size={14} color={MC.hint} />
+            )}
           </div>
 
           {/* Site contact strip — only renders when the site has any
@@ -1056,15 +1334,24 @@ export default function ActiveShiftPage() {
                   completed={completedTaskIds.includes(t.id)}
                   active={activeTaskId === t.id}
                   photosTaken={taskPhotoCounts.get(t.id) ?? 0}
+                  signed={signedTaskIds.has(t.id)}
                   onClick={() => {
+                    const isCompleted = completedTaskIds.includes(t.id);
                     const photoNeeded = t.photoCount ?? 0;
                     const taken = taskPhotoCounts.get(t.id) ?? 0;
-                    const photoFlowApplicable =
-                      photoNeeded > 0 &&
-                      !completedTaskIds.includes(t.id) &&
-                      taken < photoNeeded;
-                    if (photoFlowApplicable) {
+                    const photosPending =
+                      photoNeeded > 0 && taken < photoNeeded;
+                    const sigPending =
+                      t.requiresSignature && !signedTaskIds.has(t.id);
+                    // Routing logic — first unfilled gate wins:
+                    //   1. Photos still needed → camera flow
+                    //   2. Signature still needed → signature pad
+                    //   3. Otherwise → sheet (for description /
+                    //      retake / view).
+                    if (!isCompleted && photosPending) {
                       void startPhotoFlow(t);
+                    } else if (!isCompleted && sigPending) {
+                      void startSignatureFlow(t);
                     } else {
                       setOpenSheet({ task: t });
                     }
@@ -1113,15 +1400,24 @@ export default function ActiveShiftPage() {
                   completed={completedTaskIds.includes(t.id)}
                   active={activeTaskId === t.id}
                   photosTaken={taskPhotoCounts.get(t.id) ?? 0}
+                  signed={signedTaskIds.has(t.id)}
                   onClick={() => {
+                    const isCompleted = completedTaskIds.includes(t.id);
                     const photoNeeded = t.photoCount ?? 0;
                     const taken = taskPhotoCounts.get(t.id) ?? 0;
-                    const photoFlowApplicable =
-                      photoNeeded > 0 &&
-                      !completedTaskIds.includes(t.id) &&
-                      taken < photoNeeded;
-                    if (photoFlowApplicable) {
+                    const photosPending =
+                      photoNeeded > 0 && taken < photoNeeded;
+                    const sigPending =
+                      t.requiresSignature && !signedTaskIds.has(t.id);
+                    // Routing logic — first unfilled gate wins:
+                    //   1. Photos still needed → camera flow
+                    //   2. Signature still needed → signature pad
+                    //   3. Otherwise → sheet (for description /
+                    //      retake / view).
+                    if (!isCompleted && photosPending) {
                       void startPhotoFlow(t);
+                    } else if (!isCompleted && sigPending) {
+                      void startSignatureFlow(t);
                     } else {
                       setOpenSheet({ task: t });
                     }
@@ -1225,6 +1521,25 @@ export default function ActiveShiftPage() {
         aria-hidden="true"
         tabIndex={-1}
       />
+
+      {/* Signature pad — Feature D. Mounted at page level (not
+          inside the TaskSheet) for the same reason the photo input
+          is here: the pad needs to overlay the whole screen and
+          survive the rep tapping outside / cancelling. */}
+      {signaturePad && shiftData && (
+        <SignaturePad
+          customerName={shiftData.name}
+          taskName={signaturePad.task.name}
+          initialDataUrl={signaturePad.initialDataUrl}
+          initialSignerName={signaturePad.initialSignerName}
+          saving={signaturePad.saving}
+          error={signaturePad.error}
+          onSave={handleSaveSignature}
+          onCancel={() =>
+            !signaturePad.saving && setSignaturePad(null)
+          }
+        />
+      )}
 
       {/* Upload overlay for the photo-flow. Shown while a capture is
           being compressed + uploaded between camera shots so the rep
@@ -1412,6 +1727,7 @@ function TaskRow({
   completed,
   active,
   photosTaken,
+  signed,
   onClick,
 }: {
   task: Task;
@@ -1419,10 +1735,13 @@ function TaskRow({
   active: boolean;
   /** For photo tasks: how many photos have been captured so far. */
   photosTaken: number;
+  /** For signature tasks: whether a signature has been captured. */
+  signed: boolean;
   onClick: () => void;
 }) {
   const photoCount = task.photoCount ?? 0;
   const isPhotoTask = photoCount > 0;
+  const needsSignature = !!task.requiresSignature;
   // For photo tasks, the row's primary visual cue is the camera pill.
   // The pill is brand-tinted when in-progress (some photos taken),
   // neutral when none yet, and green-checked when complete.
@@ -1544,6 +1863,35 @@ function TaskRow({
                 : photosTaken === 0
                 ? `Camera · ${photoCount} photo${photoCount === 1 ? "" : "s"}`
                 : `${photosTaken}/${photoCount} photos`}
+            </span>
+          )}
+          {needsSignature && (
+            // Signature-required pill — mirror of the camera pill but
+            // for Feature D's signature gate. Brand-tinted when not
+            // yet signed (action needed), green when signed.
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "2px 8px 2px 6px",
+                borderRadius: 999,
+                fontFamily: MC.font,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.2,
+                background: signed ? `${MC.ok}1A` : MC.brandTint,
+                color: signed ? "#0d6a45" : MC.brandDeep,
+                border: `1px solid ${signed ? `${MC.ok}55` : `${MC.brand}33`}`,
+              }}
+            >
+              <Glyph
+                name={signed ? "check" : "edit"}
+                size={11}
+                color={signed ? "#0d6a45" : MC.brandDeep}
+                strokeWidth={2.4}
+              />
+              {signed ? "Signed" : "Signature"}
             </span>
           )}
         </div>

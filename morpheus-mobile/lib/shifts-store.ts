@@ -674,6 +674,8 @@ export interface TaskRow {
   /** Feature C — photos on tasks. */
   photo_count?: number;
   photos_compulsory?: boolean;
+  /** Feature D — customer signature on tasks. */
+  requires_signature?: boolean;
 }
 
 export async function getTasksForCustomer(customerId: string): Promise<TaskRow[]> {
@@ -683,7 +685,7 @@ export async function getTasksForCustomer(customerId: string): Promise<TaskRow[]
   const { data, error } = await supabase
     .from("customer_tasks")
     .select(
-      "id, name, description, duration_min, compulsory, sort_order, photo_count, photos_compulsory"
+      "id, name, description, duration_min, compulsory, sort_order, photo_count, photos_compulsory, requires_signature"
     )
     .or(`customer_id.eq.${customerId},customer_id.is.null`)
     .order("sort_order", { ascending: true })

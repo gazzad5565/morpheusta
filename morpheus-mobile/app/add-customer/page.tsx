@@ -184,26 +184,97 @@ export default function AddCustomerPage() {
             placeholder="e.g. GreenWave Innovations"
             autoFocus
           />
-          {/* Address — typeahead via Nominatim. Picking a suggestion
-              captures lat/lng automatically (source: "suggestion")
-              so the rep gets the pin "for free"; the "Geocode
-              address" button below is still here for the case
-              where Nominatim doesn't surface a match for what they
-              typed, and "Use my GPS" handles the on-site case. */}
-          <div>
-            <label
+          {/* Location section (May 13 rework) — was previously three
+              loose components (address field, two side-by-side pin
+              buttons, green chip) that left reps unsure what was
+              "the active step". Now grouped into a single bordered
+              card with a clear heading and a stacked layout:
+                1. Title + status line (Pinned ✓ / Not pinned)
+                2. Address typeahead (primary path — autopin)
+                3. Two fallback actions, full-width stacked so they
+                   read as alternates not "both required"
+                4. Pin confirmation strip stays at the bottom of the
+                   same card when active. */}
+          <div
+            style={{
+              padding: 14,
+              background: pin ? MC.okTint : MC.bg,
+              border: `1px solid ${pin ? `${MC.ok}55` : MC.line}`,
+              borderRadius: 14,
+              transition: "background .2s, border-color .2s",
+            }}
+          >
+            <div
               style={{
-                display: "block",
-                fontFamily: MC.font,
-                fontSize: 12.5,
-                fontWeight: 700,
-                color: MC.ink2,
-                marginBottom: 6,
-                letterSpacing: -0.05,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 10,
               }}
             >
-              Address
-            </label>
+              <span
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 8,
+                  background: pin ? "#fff" : "#fff",
+                  border: `1px solid ${pin ? `${MC.ok}55` : MC.line}`,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Glyph
+                  name={pin ? "check-circle" : "pin"}
+                  size={14}
+                  color={pin ? MC.ok : MC.brandDeep}
+                  strokeWidth={2.4}
+                />
+              </span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: pin ? "#0d6a45" : MC.ink,
+                    letterSpacing: -0.05,
+                  }}
+                >
+                  Location {pin ? "pinned" : "·  needed"}
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 11.5,
+                    color: pin ? "#0d6a45" : MC.mute,
+                    marginTop: 2,
+                    lineHeight: 1.35,
+                  }}
+                >
+                  {pin
+                    ? "Geofence locked. Rename the address freely below — coords stay."
+                    : "Pick a suggestion below to auto-pin, OR use one of the manual options."}
+                </div>
+              </div>
+            </div>
+
+            {/* Primary path — typeahead. Picking a suggestion
+                auto-pins, so most reps never need the buttons below. */}
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 10.5,
+                fontWeight: 700,
+                letterSpacing: 0.5,
+                textTransform: "uppercase",
+                color: MC.hint,
+                marginBottom: 6,
+              }}
+            >
+              1 · Type the address
+            </div>
             <AddressAutocomplete
               value={address}
               onChange={(v) => {
@@ -223,93 +294,112 @@ export default function AddCustomerPage() {
               }}
               placeholder="Start typing — e.g. 12 Loop St Cape Town"
             />
+
+            {/* Manual fallbacks — only foregrounded when the rep
+                hasn't already pinned. Once pinned, this whole block
+                collapses into the confirmation strip below to keep
+                the form short. */}
+            {!pin && (
+              <>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    letterSpacing: 0.5,
+                    textTransform: "uppercase",
+                    color: MC.hint,
+                    margin: "14px 0 6px",
+                  }}
+                >
+                  2 · …or pin it manually
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={pinViaGps}
+                    disabled={!!pinning}
+                    style={{
+                      minHeight: 42,
+                      padding: "0 14px",
+                      borderRadius: 10,
+                      background: MC.brandDeep,
+                      color: "#fff",
+                      border: "none",
+                      fontFamily: MC.font,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: pinning ? "wait" : "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      opacity: pinning === "gps" ? 0.7 : 1,
+                    }}
+                  >
+                    <Glyph name="target" size={15} color="#fff" strokeWidth={2.4} />
+                    {pinning === "gps"
+                      ? "Pinning your location…"
+                      : "Use my current GPS"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={pinViaAddress}
+                    disabled={!!pinning || address.trim().length === 0}
+                    style={{
+                      minHeight: 42,
+                      padding: "0 14px",
+                      borderRadius: 10,
+                      background: "#fff",
+                      color: MC.brandDeep,
+                      border: `1px solid ${MC.brand}55`,
+                      fontFamily: MC.font,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor:
+                        pinning || address.trim().length === 0
+                          ? "not-allowed"
+                          : "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      opacity:
+                        pinning === "address" || address.trim().length === 0
+                          ? 0.55
+                          : 1,
+                    }}
+                  >
+                    <Glyph
+                      name="pin"
+                      size={15}
+                      color={MC.brandDeep}
+                      strokeWidth={2.4}
+                    />
+                    {pinning === "address"
+                      ? "Looking up the address…"
+                      : "Geocode what I typed"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {pin && (
             <div
               style={{
-                fontFamily: MC.font,
-                fontSize: 11.5,
-                color: MC.hint,
-                marginTop: 6,
-                lineHeight: 1.4,
-              }}
-            >
-              {pin
-                ? "Pinned — you can rename this freely; the geofence stays locked to the pin."
-                : "Pick a suggestion to auto-pin, or pin manually below. One of the two is needed."}
-            </div>
-          </div>
-
-          {/* Pin buttons — let the rep capture coords either from
-              their current GPS (most accurate when actually on-site)
-              or from the typed address (good when adding a customer
-              they're not currently at). After pinning, the rep can
-              rename the address freely while coords stay locked. */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              onClick={pinViaGps}
-              disabled={!!pinning}
-              style={{
-                flex: 1,
-                minHeight: 40,
-                padding: "0 12px",
-                borderRadius: 10,
-                background: MC.brandDeep,
-                color: "#fff",
-                border: "none",
-                fontFamily: MC.font,
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: pinning ? "wait" : "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-                opacity: pinning === "gps" ? 0.7 : 1,
-              }}
-            >
-              <Glyph name="target" size={14} color="#fff" strokeWidth={2.4} />
-              {pinning === "gps" ? "Pinning…" : "Use my GPS"}
-            </button>
-            <button
-              type="button"
-              onClick={pinViaAddress}
-              disabled={!!pinning || address.trim().length === 0}
-              style={{
-                flex: 1,
-                minHeight: 40,
-                padding: "0 12px",
-                borderRadius: 10,
-                background: "#fff",
-                color: MC.brandDeep,
-                border: `1px solid ${MC.brand}55`,
-                fontFamily: MC.font,
-                fontSize: 13,
-                fontWeight: 700,
-                cursor:
-                  pinning || address.trim().length === 0
-                    ? "not-allowed"
-                    : "pointer",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-                opacity: pinning === "address" || address.trim().length === 0 ? 0.6 : 1,
-              }}
-            >
-              <Glyph name="pin" size={14} color={MC.brandDeep} strokeWidth={2.4} />
-              {pinning === "address" ? "Looking up…" : "Geocode address"}
-            </button>
-          </div>
-
-          {pin && (
-            <div
-              style={{
+                marginTop: 12,
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
                 padding: "8px 10px",
-                background: MC.okTint,
-                border: `1px solid ${MC.ok}33`,
+                background: "#fff",
+                border: `1px solid ${MC.ok}55`,
                 borderRadius: 10,
                 fontFamily: MC.font,
                 fontSize: 12,
@@ -358,16 +448,17 @@ export default function AddCustomerPage() {
           {pinError && (
             <div
               style={{
+                marginTop: 8,
                 fontFamily: MC.font,
                 fontSize: 11.5,
                 color: "#9c1a3c",
                 lineHeight: 1.4,
-                marginTop: -4,
               }}
             >
               {pinError}
             </div>
           )}
+          </div>{/* end location card */}
           <div style={{ height: 1, background: MC.line, margin: "2px 0" }} />
           <div
             style={{

@@ -23,6 +23,10 @@ export interface TaskRow {
   /** Feature C (May 13): photos on tasks. */
   photo_count?: number;
   photos_compulsory?: boolean;
+  /** Feature D (May 13): customer signature on the task. When true,
+   *  the rep must capture a signature in the rep app before they
+   *  can mark the task complete. Combines with photo gates. */
+  requires_signature?: boolean;
   /** Joined customer summary, when present (null for universal tasks). */
   customers?: {
     id: string;
@@ -52,6 +56,8 @@ export interface NewTask {
   /** Feature C: whether photos are required to mark complete when
    *  photo_count > 0. Ignored at photo_count = 0. Default true. */
   photos_compulsory?: boolean;
+  /** Feature D: rep must capture a customer signature to complete. */
+  requires_signature?: boolean;
 }
 
 /** All tasks across all customers (admin /tasks page). */
@@ -60,7 +66,7 @@ export async function listAllTasks(): Promise<TaskRow[]> {
   const { data, error } = await supabase
     .from("customer_tasks")
     .select(
-      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory, customers(id,name,initials,color,code)"
+      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory, requires_signature, customers(id,name,initials,color,code)"
     )
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
@@ -126,7 +132,7 @@ export async function listTasksForCustomer(customerId: string): Promise<TaskRow[
   const { data, error } = await supabase
     .from("customer_tasks")
     .select(
-      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory"
+      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory, requires_signature"
     )
     .eq("customer_id", customerId)
     .order("sort_order", { ascending: true })
@@ -154,6 +160,7 @@ export async function createTask(
     sort_order: t.sort_order ?? 0,
     photo_count: Math.max(0, Math.round(t.photo_count ?? 0)),
     photos_compulsory: t.photos_compulsory ?? true,
+    requires_signature: t.requires_signature ?? false,
   };
 
   // Build the rows to insert. NULL customer_id = universal.
@@ -214,7 +221,7 @@ export async function getTask(id: string): Promise<TaskRow | null> {
   const { data, error } = await supabase
     .from("customer_tasks")
     .select(
-      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory, customers(id,name,initials,color,code)"
+      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory, requires_signature, customers(id,name,initials,color,code)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -236,6 +243,8 @@ export interface TaskUpdate {
   /** Feature C — photos on tasks. */
   photo_count?: number;
   photos_compulsory?: boolean;
+  /** Feature D — signature on tasks. */
+  requires_signature?: boolean;
 }
 
 export async function updateTask(
@@ -260,6 +269,9 @@ export async function updateTask(
   }
   if (patch.photos_compulsory !== undefined) {
     dbPatch.photos_compulsory = patch.photos_compulsory;
+  }
+  if (patch.requires_signature !== undefined) {
+    dbPatch.requires_signature = patch.requires_signature;
   }
 
   const { error } = await supabase

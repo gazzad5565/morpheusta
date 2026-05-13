@@ -44,6 +44,8 @@ export default function EditTaskPage({
   const [photoCount, setPhotoCount] = useState("0");
   // No separate photosCompulsory state — see /tasks/new for the
   // rationale. photos_compulsory always mirrors task.compulsory.
+  // Feature D (May 13) — signature on tasks.
+  const [requiresSignature, setRequiresSignature] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +69,7 @@ export default function EditTaskPage({
       setPhotoCount(String(t.photo_count ?? 0));
       // photos_compulsory is no longer surfaced separately — it
       // gets re-derived from `compulsory` on save.
+      setRequiresSignature(t.requires_signature ?? false);
       setLoading(false);
     });
     return () => {
@@ -100,6 +103,7 @@ export default function EditTaskPage({
       // photos_compulsory mirrors task.compulsory — single source
       // of truth so the two flags can't drift.
       photos_compulsory: compulsory,
+      requires_signature: requiresSignature,
     });
     setBusy(false);
     if (!r.ok) {
@@ -265,6 +269,44 @@ export default function EditTaskPage({
                 inputMode="numeric"
                 style={{ ...inputStyle, fontFamily: AC.fontMono }}
               />
+            </Field>
+          </div>
+
+          {/* Signature requirement — Feature D (May 13). Same as
+              /tasks/new. Independent of photos. */}
+          <div style={{ marginBottom: 14 }}>
+            <Field
+              label="Customer signature"
+              hint={
+                requiresSignature
+                  ? "On the rep app, tapping this task opens a signature pad for the customer to sign. The signed image is saved with the shift and appears in the customer-facing report later."
+                  : "Most tasks don't need a signature. Turn this on for ones that do (deliveries, sign-offs, end-of-visit confirmations)."
+              }
+            >
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "9px 11px",
+                  border: `1px solid ${requiresSignature ? AC.brand : AC.line}`,
+                  borderRadius: 10,
+                  background: requiresSignature ? AC.brandSoft : "#fff",
+                  cursor: "pointer",
+                  fontFamily: AC.font,
+                  fontSize: 13,
+                  color: AC.ink,
+                  transition: "background .15s, border-color .15s",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={requiresSignature}
+                  onChange={(e) => setRequiresSignature(e.target.checked)}
+                  style={{ width: 16, height: 16, accentColor: AC.brand }}
+                />
+                Require a customer signature to complete this task
+              </label>
             </Field>
           </div>
 

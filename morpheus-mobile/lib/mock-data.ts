@@ -60,6 +60,11 @@ export interface Task {
   /** When photoCount > 0, whether all N photos are required to
    *  mark the task complete. Default true. */
   photosCompulsory?: boolean;
+  /** When true, the rep must capture a customer signature on the
+   *  in-app signature pad before this task can be marked complete.
+   *  Independent of photoCount — a task can require photos and/or
+   *  signature. Feature D (May 13). */
+  requiresSignature?: boolean;
 }
 
 export interface LibFile {
