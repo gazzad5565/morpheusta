@@ -372,13 +372,24 @@ export function SideMenu() {
               alignItems: "center",
               justifyContent: "center",
               gap: 5,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
             }}
           >
             Powered by{" "}
-            <span style={{ fontWeight: 800, color: MC.ink2, letterSpacing: 0.4 }}>
-              MORPHEUS
-            </span>
-            <span style={{ fontWeight: 800, color: MC.brand, letterSpacing: 0.4 }}>
+            <span style={{ fontWeight: 800, color: MC.ink2 }}>MORPHEUS</span>
+            {/* Brand-tinted pill matching the admin sidebar footer
+                + the AppFooter wordmark — same chip treatment so
+                the brand reads identically across every surface. */}
+            <span
+              style={{
+                fontWeight: 800,
+                color: MC.brand,
+                padding: "1px 6px",
+                borderRadius: 4,
+                background: "rgba(21, 180, 214, 0.18)",
+              }}
+            >
               OPS
             </span>
           </div>

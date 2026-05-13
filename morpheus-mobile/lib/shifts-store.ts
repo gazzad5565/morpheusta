@@ -12,6 +12,7 @@
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent } from "./events-store";
 import { notifyManagersOfAttention } from "./push-notify-managers";
+import { haversineMeters } from "./geo";
 import type { Shift } from "./mock-data";
 
 interface ShiftRow {
@@ -417,23 +418,8 @@ export async function listUnassignedShiftsToday(): Promise<
     return rows.map(rowToShift);
   }
 
-  // Haversine distance in metres.
-  const haversineM = (
-    a: { lat: number; lng: number },
-    b: { lat: number; lng: number }
-  ): number => {
-    const R = 6_371_000;
-    const toRad = (x: number) => (x * Math.PI) / 180;
-    const dLat = toRad(b.lat - a.lat);
-    const dLng = toRad(b.lng - a.lng);
-    const s =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(a.lat)) *
-        Math.cos(toRad(b.lat)) *
-        Math.sin(dLng / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(s));
-  };
-
+  // Haversine distance now lives in lib/geo.ts (shared with /check-in
+  // and /check-out which used to copy-paste their own variants).
   const filtered = rows.filter((r) => {
     const radius = r.claim_radius_m ?? 0;
     if (!radius || radius <= 0) return true; // no restriction
@@ -445,7 +431,7 @@ export async function listUnassignedShiftsToday(): Promise<
       // no way for the rep to know why.
       return true;
     }
-    const distance = haversineM(repPos, { lat, lng });
+    const distance = haversineMeters(repPos, { lat, lng });
     return distance <= radius;
   });
 

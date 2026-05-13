@@ -25,6 +25,10 @@ import {
 import { getCustomerById } from "@/lib/customers-store";
 import { getEarlyGraceMinutes } from "@/lib/settings-store";
 import { logEvent } from "@/lib/events-store";
+// haversineMeters + formatDistance previously lived inline in this
+// file (and in /check-in, and in shifts-store). Consolidated into
+// lib/geo.ts so the formula + units format are defined once.
+import { haversineMeters, formatDistanceMeters as formatDistance } from "@/lib/geo";
 
 const OFFSITE_REASONS = [
   "Wrong location pinned",
@@ -40,27 +44,6 @@ const EARLY_REASONS = [
   "Other",
 ];
 
-// Distance in meters between two lat/lng pairs (Haversine).
-function haversineMeters(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
-  const R = 6371000;
-  const toRad = (x: number) => (x * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-function formatDistance(m: number): string {
-  if (m < 1000) return `${Math.round(m)} m`;
-  return `${(m / 1000).toFixed(m < 10000 ? 2 : 1)} km`;
-}
 function formatMinutes(minutes: number): string {
   const m = Math.round(minutes);
   if (m < 60) return `${m} min`;

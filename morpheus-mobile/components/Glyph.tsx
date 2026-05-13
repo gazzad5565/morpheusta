@@ -88,10 +88,26 @@ export function MorpheusMark({ inverted = false, size = 14 }: { inverted?: boole
           boxShadow: `0 0 0 2px ${inverted ? "#0B0D10" : "#fff"}, 0 0 0 3px ${accent}`,
         }}
       />
-      {/* Rebrand May 13: "Morpheus t&a²" → "Morpheus Ops". The
-          accent on "Ops" keeps the same two-tone wordmark rhythm. */}
+      {/* Rebrand May 13: "Morpheus t&a²" → "Morpheus Ops".
+          Matches the admin sidebar pill — "Ops" is a brand-tinted
+          rounded chip rather than plain coloured text, so the
+          wordmark reads the same on web + mobile + side menu. */}
       <span>Morpheus</span>
-      <span style={{ color: accent, fontWeight: 700 }}>Ops</span>
+      <span
+        style={{
+          color: accent,
+          fontWeight: 800,
+          padding: "1px 6px",
+          borderRadius: 4,
+          // rgba of the accent at 18% — same alpha admin uses for
+          // the matching pill. Looks correct on both dark
+          // (header) and light (footer) backgrounds.
+          background: "rgba(21, 180, 214, 0.18)",
+          letterSpacing: 0.4,
+        }}
+      >
+        Ops
+      </span>
     </div>
   );
 }
