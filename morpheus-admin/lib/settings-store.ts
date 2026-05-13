@@ -398,6 +398,40 @@ export async function setPushNotificationsEnabled(
   return writeSetting("push_notifications_enabled", !!on, "notifications");
 }
 
+// ─── EOD checkout reminder buffer ────────────────────────────────
+//
+// Minutes past the shift's end_time before the cron sweep fires
+// the "Don't forget to check out" push to the rep. Was a hardcoded
+// constant (30) in the cron endpoint; now configurable from the
+// admin so a manager can tighten / loosen it without a deploy.
+//
+// Used ONLY by /api/cron/shift-reminders. Independent of
+// app_settings.auto_checkout_time (the safety-net cutoff that
+// actually force-completes the shift). Default 30 keeps behaviour
+// identical to pre-setting cron versions.
+
+export const DEFAULT_EOD_REMINDER_BUFFER_MINUTES = 30;
+
+export async function getEodReminderBufferMinutes(): Promise<number> {
+  const v = await readSetting<number>(
+    "eod_reminder_buffer_minutes",
+    DEFAULT_EOD_REMINDER_BUFFER_MINUTES
+  );
+  return typeof v === "number" && v >= 0
+    ? v
+    : DEFAULT_EOD_REMINDER_BUFFER_MINUTES;
+}
+
+export async function setEodReminderBufferMinutes(
+  minutes: number
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting(
+    "eod_reminder_buffer_minutes",
+    Math.max(0, Math.round(minutes)),
+    "notifications"
+  );
+}
+
 /** One-shot fetch of every org text field for a settings form. */
 export async function getOrganisationDetails(): Promise<{
   address: string;

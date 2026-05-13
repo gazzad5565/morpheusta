@@ -1208,7 +1208,7 @@ CORS: `/api/push/notify` exposes `Access-Control-Allow-Origin` to the mobile ori
 
 **Limits still deferred:**
 - No admin UI for sending arbitrary test pushes. Could be added on `/reps/[id]` as a "Send test" button if useful for debugging.
-- EOD_BUFFER_MINUTES is a constant (30) — could be promoted to `app_settings` if managers want to tune it.
+- ~~EOD_BUFFER_MINUTES is a constant (30) — could be promoted to `app_settings`~~ ✅ Done. Now `app_settings.eod_reminder_buffer_minutes`, editable from `/settings/notifications`. Cron reads it on every tick with a 30-min fallback if the row's missing or unparseable.
 
 ### Push kill switch — `/settings/notifications` (shipped May 13)
 
@@ -1249,7 +1249,7 @@ Two completely independent code paths. Don't confuse them.
 | **Trigger** | Vercel Cron, every 5 min | Admin Live Ops home mount + tab-focus event |
 | **Frequency** | Predictable, server-driven | Opportunistic — only runs when a manager has the admin tab open |
 | **What it does** | Sends a push notification to the rep's phone | Marks the shift as `state='complete'`, stamps `check_out_at`, logs `shift.auto_checked_out` |
-| **EOD threshold** | 30 min past `end_time` (constant `EOD_BUFFER_MINUTES`) | `app_settings.auto_checkout_time` (default `23:59`) |
+| **EOD threshold** | `app_settings.eod_reminder_buffer_minutes` past `end_time` (default 30, editable on `/settings/notifications`) | `app_settings.auto_checkout_time` (default `23:59`, editable on `/settings/check-in-rules`) |
 | **Modifies shift state?** | ❌ No — only sends a notification | ✅ Yes — sets `state='complete'` + `check_out_at` |
 | **Affected by push kill switch?** | ✅ Yes — silenced when the toggle is off | ❌ No — completely independent |
 | **Required for production?** | Nice-to-have nudge | Mandatory safety net |

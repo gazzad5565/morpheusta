@@ -51,11 +51,14 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const CRON_SECRET = process.env.CRON_SECRET || "";
 
-/** How many minutes past `end_time` we wait before nudging the rep
- *  to check out. 30 is the sweet spot: long enough that "rep is
- *  finishing up" doesn't generate a false positive, short enough
- *  that the reminder lands while it's still actionable. */
-const EOD_BUFFER_MINUTES = 30;
+/** Fallback when `eod_reminder_buffer_minutes` hasn't been
+ *  configured yet. Mirrors the constant on /lib/settings-store. The
+ *  cron prefers the app_settings value (manager can tune from
+ *  /settings/notifications); only falls back here if the row is
+ *  missing or unparseable. 30 is the sweet spot: long enough that
+ *  "rep is finishing up" doesn't generate a false positive, short
+ *  enough that the reminder lands while it's still actionable. */
+const DEFAULT_EOD_BUFFER_MINUTES = 30;
 
 /** Fallback when the `late_grace_minutes` app-setting hasn't been
  *  configured yet. Mirrors the constant on /lib/settings-store. */
@@ -234,6 +237,19 @@ async function eodCheckoutSweep(): Promise<SweepResult> {
   };
   const sb = adminClient();
 
+  // Read the org's EOD reminder buffer (configurable from
+  // /settings/notifications). Same fallback pattern as the running-
+  // late sweep above.
+  const { data: bufferPref } = await sb
+    .from("app_settings")
+    .select("value")
+    .eq("key", "eod_reminder_buffer_minutes")
+    .maybeSingle();
+  const bufferMinutes =
+    typeof (bufferPref as { value?: number } | null)?.value === "number"
+      ? (bufferPref as { value: number }).value
+      : DEFAULT_EOD_BUFFER_MINUTES;
+
   // Pull live shifts (in-progress + on-break) from today/yesterday.
   // Flex-time shifts are skipped — they have no concrete end_time
   // to compare against.
@@ -254,7 +270,7 @@ async function eodCheckoutSweep(): Promise<SweepResult> {
     if (!s.end_time) return false;
     const endMs = shiftTimestampMs(s.shift_date, s.end_time);
     if (!Number.isFinite(endMs)) return false;
-    return endMs + EOD_BUFFER_MINUTES * 60_000 < now;
+    return endMs + bufferMinutes * 60_000 < now;
   });
   result.shiftsConsidered = due.length;
   if (due.length === 0) return result;
