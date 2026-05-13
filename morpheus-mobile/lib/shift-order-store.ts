@@ -23,15 +23,26 @@
 
 import { todayLocalISO } from "./format";
 
-const LS_KEY_PREFIX = "morpheus.shift_order.";
-const LS_META_KEY_PREFIX = "morpheus.shift_order.meta.";
+// v2 (current): single key holding `{order, savedAt}`. One setItem
+// writes both fields together so a crash between writes can't leave
+// an order without meta (or vice versa).
+const LS_V2_PREFIX = "morpheus.shift_order.v2.";
+// v1 (legacy): two separate keys. Reads fall back to v1 for one
+// release so reps mid-day on the day of the rollout keep their
+// saved order. v1 keys are removed on the next save/clear so they
+// don't linger.
+const LS_V1_ORDER_PREFIX = "morpheus.shift_order.";
+const LS_V1_META_PREFIX = "morpheus.shift_order.meta.";
 const CHANGE_EVENT = "morpheus.shift_order.changed";
 
-function todayKey(): string {
-  return LS_KEY_PREFIX + todayLocalISO();
+function todayV2Key(): string {
+  return LS_V2_PREFIX + todayLocalISO();
 }
-function todayMetaKey(): string {
-  return LS_META_KEY_PREFIX + todayLocalISO();
+function todayV1OrderKey(): string {
+  return LS_V1_ORDER_PREFIX + todayLocalISO();
+}
+function todayV1MetaKey(): string {
+  return LS_V1_META_PREFIX + todayLocalISO();
 }
 
 interface OrderMeta {
@@ -40,17 +51,51 @@ interface OrderMeta {
   savedAt: number;
 }
 
-/** Persist the visit order. Fires a window event so other parts of
- *  the app (Up Next card, /shifts list) refresh immediately without
- *  waiting for a remount. */
+interface OrderPayload {
+  order: string[];
+  savedAt: number;
+}
+
+/** Read + validate the v2 payload, or null if absent / malformed. */
+function readV2Payload(): OrderPayload | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(todayV2Key());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray(parsed.order) &&
+      parsed.order.every((x: unknown) => typeof x === "string") &&
+      typeof parsed.savedAt === "number"
+    ) {
+      return { order: parsed.order as string[], savedAt: parsed.savedAt };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the visit order. One setItem call so order + savedAt are
+ *  atomic — a crash between writes can no longer leave the rep with
+ *  a "Last optimized at" line that doesn't match the order on
+ *  screen. Fires a window event so other parts of the app (Up Next
+ *  card, /shifts list) refresh immediately without waiting for a
+ *  remount. */
 export function saveShiftOrder(shiftRealIds: string[]): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(todayKey(), JSON.stringify(shiftRealIds));
-    window.localStorage.setItem(
-      todayMetaKey(),
-      JSON.stringify({ savedAt: Date.now() } satisfies OrderMeta)
-    );
+    const payload: OrderPayload = {
+      order: shiftRealIds,
+      savedAt: Date.now(),
+    };
+    window.localStorage.setItem(todayV2Key(), JSON.stringify(payload));
+    // Sweep v1 leftovers so they don't shadow the v2 payload on
+    // reads from a different (older) build mid-session.
+    window.localStorage.removeItem(todayV1OrderKey());
+    window.localStorage.removeItem(todayV1MetaKey());
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
   } catch {
     /* quota / disabled — fail silently. Loss of preference is
@@ -58,11 +103,15 @@ export function saveShiftOrder(shiftRealIds: string[]): void {
   }
 }
 
-/** Read the saved visit order for today, or null if none saved. */
+/** Read the saved visit order for today, or null if none saved.
+ *  Falls back to the v1 key shape for one release. */
 export function readShiftOrder(): string[] | null {
   if (typeof window === "undefined") return null;
+  const v2 = readV2Payload();
+  if (v2) return v2.order;
+  // v1 fallback — read-only; not migrated until the next save.
   try {
-    const raw = window.localStorage.getItem(todayKey());
+    const raw = window.localStorage.getItem(todayV1OrderKey());
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) && parsed.every((x) => typeof x === "string")
@@ -74,11 +123,15 @@ export function readShiftOrder(): string[] | null {
 }
 
 /** Read the metadata (savedAt) for today's order, or null if none
- *  saved. Used by /route to show "Last optimized X min ago". */
+ *  saved. Used by /route to show "Last optimized X min ago". Falls
+ *  back to the v1 key shape for one release. */
 export function readShiftOrderMeta(): OrderMeta | null {
   if (typeof window === "undefined") return null;
+  const v2 = readV2Payload();
+  if (v2) return { savedAt: v2.savedAt };
+  // v1 fallback.
   try {
-    const raw = window.localStorage.getItem(todayMetaKey());
+    const raw = window.localStorage.getItem(todayV1MetaKey());
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (
@@ -99,8 +152,9 @@ export function readShiftOrderMeta(): OrderMeta | null {
 export function clearShiftOrder(): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(todayKey());
-    window.localStorage.removeItem(todayMetaKey());
+    window.localStorage.removeItem(todayV2Key());
+    window.localStorage.removeItem(todayV1OrderKey());
+    window.localStorage.removeItem(todayV1MetaKey());
     window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
   } catch {
     /* noop */

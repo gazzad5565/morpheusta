@@ -7,7 +7,7 @@
 > 3. **Plan my day · /route (mobile)** — server-side `/api/route/plan` with Google Routes (TRAFFIC_AWARE) when `GOOGLE_ROUTES_API_KEY` is set, mock fallback otherwise; client wrapper with 5-min cache + GPS fallback; `/route` page with provider chip, Optimize toggle, ETA + Leave-by pills, per-leg Open in Maps + whole-day Open in Maps. Entry pills on home (under Up Next) and /shifts header, only when 2+ stops.
 > 4. **Per-customer logo upload** — admin `/customers/[id]/edit` gets an Identity-section logo upload (client-side compressed to ~96×96 letterboxed JPEG, 5-15KB base64 in a new `customers.logo_url text` column). `CustomerSwatch` (admin) + `CustomerTile` (mobile) auto-branch on `logoUrl` so the logo shows everywhere — shift rows, /active hero, /check-in / -out, /add-shift picker, /route badges, map markers — without per-call-site changes.
 > 5. **UX fixes from manager testing** — `/check-in/success` page deleted (routes straight to `/active`); "Wrapping up…" overlay on the /active → /check-out tap (was "Opening…"); Up Next picker now matches any non-terminal state (was missing 'travelling', 'on-break', 'late' → reps saw a lying "No shift assigned today" card); dead Directions buttons removed from /shifts row expansions; customer edit page reorganised into Identity / Location / Check-in exceptions Cards instead of one giant fields dump.
-> Seven migrations to run in Supabase before everything is fully live — see "Migrations to run for May 11" below. `GOOGLE_ROUTES_API_KEY` is optional but recommended in prod — see "Optional env vars". Working tree clean.
+> All May 7 / 11 / 12 migrations have been applied to the shared Supabase project (May 12). No migrations pending. `GOOGLE_ROUTES_API_KEY` is optional but recommended in prod — see "Optional env vars". Working tree clean.
 > Repo: https://github.com/gazzad5565/morpheusta · Live: https://morpheus-admin.vercel.app + https://morpheusta-khaki-omega.vercel.app · DB: Supabase project `otweltzwwhrvhtvaqsci`
 > **Don't ask the user for context — read this whole file first.** Section "Where things stand right now" (around line 100) is the canonical handover. The "Today's session — what shipped" sections list every commit by hash, newest day first. The "Top of the deferred list" tells you what to start on next.
 > If you make changes, update this file before you push. Phase 4 RLS is still the highest-priority open item; do not deploy to real users without it.
@@ -1044,26 +1044,18 @@ Big day. Roughly in order:
 
 ### Migrations applied today (cloud status)
 
-May 12 — **all need running** in Supabase SQL Editor before the
-corresponding features work in prod. Each is wrapped in
-`BEGIN; … COMMIT;` and uses `ADD COLUMN IF NOT EXISTS` /
-`CREATE TABLE IF NOT EXISTS`, safe to re-run:
+**All migrations through May 12 have been applied to the shared Supabase project.** Nothing pending. The lists below are kept as a record of what landed and when; each file is safe to re-run on a fresh Supabase environment.
+
+May 12 (applied):
 
 - `2026_05_12_customer_contacts.sql` — multi-contact support per
-  customer (admin /customers/[id]/edit Identity tab). Without
-  this, save throws "relation customer_contacts does not exist".
+  customer (admin /customers/[id]/edit Identity tab).
 - `2026_05_12_shifts_claim_radius.sql` — `shifts.claim_radius_m
-  integer`. Without this, claimable-shift distance filtering on
-  mobile is a no-op.
+  integer`; claimable-shift distance filtering on mobile.
 - `2026_05_12_shifts_flexible_time.sql` — `shifts.is_flexible_time
-  boolean`. Without this, the "Anytime today" toggle on
-  /schedule/new fails silently and mobile renders the sentinel
-  06:00–18:00 range instead of "Anytime today".
+  boolean`; "Anytime today" toggle on /schedule/new.
 
-May 11 — **all need running** in Supabase SQL Editor before the
-corresponding features work in prod. Each is wrapped in
-`BEGIN; … COMMIT;` and uses `ADD COLUMN IF NOT EXISTS` /
-`CREATE INDEX IF NOT EXISTS`, so they're safe to re-run:
+May 11 (applied):
 
 - `2026_05_11_shifts_attention.sql` — cancellation overlay
 - `2026_05_11_shifts_attention_resolution.sql` — rep-feedback pill
@@ -1073,10 +1065,10 @@ corresponding features work in prod. Each is wrapped in
 - `2026_05_11_perf_indexes.sql` — engineering pass (4 hot-path indexes)
 - `2026_05_11_customers_logo.sql` — `customers.logo_url text`
 
-May 7:
+May 7 (applied):
 
-- `2026_05_07_custom_fields_organisation.sql` — applied? **needs running** in Supabase SQL Editor
-- `2026_05_07_shifts_series_id.sql` — applied? **needs running** in Supabase SQL Editor
+- `2026_05_07_custom_fields_organisation.sql`
+- `2026_05_07_shifts_series_id.sql`
 
 May 6 (already in cloud):
 
@@ -1091,18 +1083,17 @@ May 6 (already in cloud):
 
 Top of the queue (in priority order):
 
-1. **Run the May 7 + May 11 + May 12 migrations** in Supabase Editor — full list is under "Migrations applied today (cloud status)" above. The combined batch has ten files; nothing's destructive but the features won't work until they run. Most urgent for new prod traffic:
-   - **May 12:** `2026_05_12_customer_contacts.sql` (admin customer-edit "Identity" tab throws "relation does not exist" without it), `2026_05_12_shifts_claim_radius.sql` (claimable-shift distance filter is a no-op without it), `2026_05_12_shifts_flexible_time.sql` ("Anytime today" toggle silently fails without it).
-   - **May 11:** `2026_05_11_customers_logo.sql` (admin logo upload throws "column does not exist"); `2026_05_11_shifts_attention.sql` + `_resolution.sql` ("Can't make this shift" UI silently fails).
-2. **Address the two QA-audit medium nits** from May 12 EOD:
-   - `saveShiftOrder` atomicity: combine order + meta into one JSON payload written via a single `setItem`. Touch `lib/shift-order-store.ts` and the two read sites on /route + /shifts. ~30 minute change with backward-compat read for one release.
-   - Home segmented pill needs a "Day complete" calm state: mirror the `dayComplete` logic from `/shifts` into `app/page.tsx` around the segmented-pill block. ~5 lines.
-3. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
-4. **Refresh `qa/QA_PLAN.md`** — §1.2 still lists deleted routes `M5 /check-in/success` and `M8 /summary`, and the `M-CHECKOUT-OK` test ID asserts "summary shows" which can never pass anymore. 10-min fix.
-5. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-6. **Web Push notifications (PWA-native, no Capacitor)** — works on Android Chrome + iOS Safari-as-PWA since iOS 16.4. Scope: VAPID key pair, service worker `push` handler, `push_subscriptions` table on Supabase (rep_id, endpoint, p256dh, auth), Edge Function or Vercel route sending via `web-push`. On iOS, prompt "Install to home screen for notifications" when `display-mode: standalone` is false. Triggers worth wiring: shift assigned, shift cancelled, "you're running late", manager left a note, end-of-day "Don't forget to check out". 2–3 days of work.
-7. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
-8. **Custom report builder** if reporting is the priority.
+1. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
+2. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
+3. **Web Push notifications (PWA-native, no Capacitor)** — works on Android Chrome + iOS Safari-as-PWA since iOS 16.4. Scope: VAPID key pair, service worker `push` handler, `push_subscriptions` table on Supabase (rep_id, endpoint, p256dh, auth), Edge Function or Vercel route sending via `web-push`. On iOS, prompt "Install to home screen for notifications" when `display-mode: standalone` is false. Triggers worth wiring: shift assigned, shift cancelled, "you're running late", manager left a note, end-of-day "Don't forget to check out". 2–3 days of work.
+4. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
+5. **Custom report builder** if reporting is the priority.
+
+Recently cleared (May 13):
+- ✅ All May 7 / 11 / 12 migrations applied to Supabase.
+- ✅ `saveShiftOrder` atomicity — order + meta now written in one `setItem` (v2 payload in `lib/shift-order-store.ts`, with v1 read fallback for one release).
+- ✅ Home segmented pill — "Day complete" calm state mirrors `/shifts`; pill no longer shouts "Plan route" when the celebration card is showing.
+- ✅ `qa/QA_PLAN.md` already refreshed (May 12) — `/check-in/success` + `/summary` are documented as dead routes, `M-CHECKOUT-OK` asserts the new "routes to `/`" behaviour.
 
 The May 11 "calendar — add second shift to occupied slot" ask
 shipped on May 12 (commits `adc7ed6`, `8197bf1`, `2bf4e8a`): the
@@ -1159,9 +1150,19 @@ Schema lives on the shared Supabase project, code lives on GitHub. Just clone + 
 | `2026_05_06_shifts_indexes.sql` | Hot-path indexes on shifts + requested_shifts (perf — was missing) |
 | `2026_05_07_custom_fields_organisation.sql` | Extends `custom_fields.applies_to` CHECK to include `'organisation'` |
 | `2026_05_07_shifts_series_id.sql` | Nullable `shifts.series_id uuid` + partial index for grouped series edits |
-| `2026_05_08_customer_sites.sql` | **NEW** — `customer_sites` table + `shifts.site_id` FK + backfill + RLS + realtime |
-| `2026_05_08_customer_sites_head_office.sql` | **NEW** — renames auto-seeded `Main` rows to `Head office` |
-| `2026_05_08_customer_sites_contact.sql` | **NEW** — adds `contact_name` / `contact_phone` / `contact_email` / `notes` columns |
+| `2026_05_08_customer_sites.sql` | `customer_sites` table + `shifts.site_id` FK + backfill + RLS + realtime |
+| `2026_05_08_customer_sites_head_office.sql` | Renames auto-seeded `Main` rows to `Head office` |
+| `2026_05_08_customer_sites_contact.sql` | Adds `contact_name` / `contact_phone` / `contact_email` / `notes` columns |
+| `2026_05_11_shifts_attention.sql` | "Can't make this shift" overlay — `attention` / `attention_reason` / `attention_note` / `attention_raised_at` / `attention_resolved_at` / `attention_resolved_by` columns on `shifts` |
+| `2026_05_11_shifts_attention_resolution.sql` | `attention_resolution` column for the rep-feedback pill after manager actions |
+| `2026_05_11_shifts_notes.sql` | `shifts.rep_notes text` — per-shift freeform rep notes |
+| `2026_05_11_profile_avatars.sql` | `profiles.avatar_url text` — base64 data URL for rep profile photos |
+| `2026_05_11_exception_toggles.sql` | Per-customer override columns for location + timing check-in exceptions |
+| `2026_05_11_perf_indexes.sql` | Hot-path indexes — `shift_events.shift_id`, `profiles.role`, `rep_locations.rep_id`, `customer_sites.active` |
+| `2026_05_11_customers_logo.sql` | `customers.logo_url text` — per-customer logo (base64 JPEG) |
+| `2026_05_12_customer_contacts.sql` | `customer_contacts` table — multi-contact support per customer + role-based RLS template |
+| `2026_05_12_shifts_claim_radius.sql` | `shifts.claim_radius_m integer` — per-shift override for claimable-shift distance filter |
+| `2026_05_12_shifts_flexible_time.sql` | `shifts.is_flexible_time boolean` — "Anytime today" scheduling |
 
 ### Engineering review · 2026-05-11 (handoff for the senior engineer)
 
