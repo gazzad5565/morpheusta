@@ -673,6 +673,115 @@ broadcast is queued) don't retroactively shift who got it.
 Both apps build clean (`npm run build`). TypeScript clean
 (`npx tsc --noEmit`) on both.
 
+#### Late-evening messaging fixes + post-ship polish
+
+After the initial Feature E ship Gary went straight into live testing
+and surfaced a handful of issues that got patched the same evening.
+Listed here in commit order so the next chat can read the trail:
+
+- **`27a120e` — README full May 13 session entry + ungrey the
+  Messaging nav link.** The `Messaging` nav entry in
+  `lib/mock-data.ts` was still flagged `comingSoon: true` from the
+  placeholder era. Sidebar's NavItem renders coming-soon entries
+  as a non-clickable greyed row with a SOON pill — exactly the
+  symptom Gary reported ("i cant access messaging on backend...
+  greyed out"). Flag removed. The Sidebar TS now narrows via a
+  `(item as { comingSoon?: boolean })` cast since the NAV_ITEMS
+  literal union no longer has the property on any member; the
+  plumbing is preserved for future "Coming soon" entries.
+
+- **`e2a250a` — make the messages publication ADD TABLE
+  idempotent.** Re-running `2026_05_13_messages.sql` errored with
+  `42710: relation "messages" is already member of publication
+  "supabase_realtime"`. `ALTER PUBLICATION ... ADD TABLE` isn't
+  idempotent — the retry aborts the surrounding transaction.
+  Wrapped both ADDs in `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM
+  pg_publication_tables WHERE ...) THEN ... END IF; END $$;`
+  guards. Safe to re-run any number of times now.
+
+- **`8874347` — stop auto-excluding the composer from their own
+  audience.** Field bug: Gary composed a test message, watched
+  his own mobile inbox, got "All caught up" (zero messages). The
+  message DID land in the DB with `status='sent'` but no
+  recipient row existed for his user. Root cause:
+  `resolveRecipients()` was filtering the composer out of the
+  resolved id list "to avoid the awkward I-sent-this-and-got-my-
+  own-copy experience". In practice this made single-account
+  testing impossible AND misbehaved on Everyone / All managers /
+  Specific[self] where the composer genuinely belonged in the
+  audience. Slack / Teams / Discord all give the sender a copy
+  of broadcasts they're part of — matched that behaviour.
+  Removed `excludeUserId` parameter entirely.
+
+- **`a1cbf2f` — rep avatars + selected-summary strip in the
+  user picker.** Two UX bumps to the "Pick specific…" affordance
+  on `/notify`:
+  - Each row shows the user's `RepAvatar` (uploaded profile
+    photo from mobile /profile, falling back to a colour-hashed
+    initials circle). Same component admin uses on `/reps` and
+    the Live Ops map markers, so it stays visually consistent.
+  - Selected-summary strip appears above the list as soon as
+    ≥1 user is ticked: brand-tinted "N picked · Clear" bar.
+    Solves the case where a long search query scrolls the
+    picked rows out of view and the manager loses track of
+    who's actually in the audience.
+  Also bumped list maxHeight 200 → 320 px and added ellipsis
+  truncation on name + meta so long emails don't push the
+  avatar off the row. The picker is a static inline list (not
+  a popover), so no outside-click dismissal to worry about.
+
+#### Pending-status messaging — diagnosis for the next chat
+
+Gary reported a Send Now landing the row at `status='pending'`
+(not `sent`) with `sent_at=NULL` and `push_sent_at=NULL`. The
+recipient row WAS materialised correctly (his rep account, role
+matching). So the schema is fine — but the `/api/messages/send`
+route either didn't run or returned 2xx without doing the work.
+
+**Most likely cause:** `SUPABASE_SERVICE_ROLE_KEY` env var
+missing on Vercel `morpheus-admin`. The send route bails with
+500 if the key isn't set:
+
+```ts
+if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+  return Response.json(
+    { ok: false, error: "Server is missing SUPABASE_SERVICE_ROLE_KEY" },
+    { status: 500 }
+  );
+}
+```
+
+`composeMessage` SHOULD then flip the row to `status='failed'`
+in its catch block — but Gary's data showed `pending`, which
+means either (a) the env var was set but the route hadn't been
+redeployed since adding it (Vercel binds env at build), or (b)
+the fetch errored before getting a response and the catch
+behaved differently than expected.
+
+**Two-minute fix tomorrow:**
+1. Vercel dashboard → morpheus-admin → Settings → Environment
+   Variables → confirm `SUPABASE_SERVICE_ROLE_KEY` exists on
+   **Production**.
+2. Deployments → latest → **Redeploy** (forces rebuild that
+   picks up env changes).
+
+**Unblock-tonight workaround** (run in Supabase SQL editor):
+
+```sql
+-- Flips every stuck-pending non-future-scheduled message to sent
+-- so the mobile inbox picks them up via realtime.
+UPDATE public.messages
+SET status = 'sent', sent_at = now()
+WHERE status = 'pending'
+  AND (scheduled_at IS NULL OR scheduled_at <= now());
+```
+
+The mobile inbox query filters to `status='sent'`, so this
+single UPDATE makes the message visible. The
+`message_recipients` rows are already in place (composer
+materialised them at compose time), so the realtime sub on
+mobile picks up the change instantly.
+
 ### Today's session — what shipped (May 12, 2026)
 
 A long iteration day on Plan-my-day, the /shifts list, and the
@@ -1466,13 +1575,34 @@ May 6 (already in cloud):
 
 Top of the queue (in priority order):
 
-1. **Run the two pending May 13 migrations in Supabase** (idempotent):
+1. **Run the two pending May 13 migrations in Supabase** (both
+   now fully idempotent — `2026_05_13_messages.sql` was patched
+   in commit `e2a250a` to guard the ADD PUBLICATION TABLE step):
    - `db/migrations/2026_05_13_task_signatures.sql` — Feature D
    - `db/migrations/2026_05_13_messages.sql` — Feature E
 
    Without these the signature pad upload + the messaging compose
    will hard-fail at the DB layer.
-2. **Vercel Pro upgrade** — multiple crons are parked in
+
+   **Note for Gary's prod Supabase project:** at end of May 13
+   session both these tables existed and `status='sent'` rows
+   were observed, so the migrations have ALREADY been applied to
+   prod. The re-run guard only matters for a fresh / replica
+   environment. The "Recent message stuck at status='pending'"
+   issue Gary hit is a separate problem — see the
+   "Pending-status messaging — diagnosis" subsection in the
+   May 13 session log above for the env-var fix.
+2. **Verify `SUPABASE_SERVICE_ROLE_KEY` is set on Vercel
+   `morpheus-admin` AND redeploy.** This is the single most
+   likely cause of Send Now messages getting stuck at
+   `status='pending'`. The `/api/messages/send` route bails with
+   500 if the env var is missing. Two-minute fix:
+   - Vercel dashboard → morpheus-admin → Settings → Environment
+     Variables → confirm key exists on **Production** (mark
+     Sensitive).
+   - Deployments → latest → **Redeploy** (forces rebuild that
+     picks up env changes; Vercel binds env at build time).
+4. **Vercel Pro upgrade** — multiple crons are parked in
    `morpheus-admin/vercel.json` because Hobby plan rejects sub-daily
    schedules. Once Pro is active, restore:
    ```json
@@ -1488,11 +1618,11 @@ Top of the queue (in priority order):
    messages need it. Shift reminders + auto-checkout work without
    the cron via the client-side `StaleShiftSweeper` fallback but
    only fire when an admin has Live Ops open.
-3. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
-4. **Confirm `CRON_SECRET` + `NEXT_PUBLIC_ADMIN_URL`** are set on Vercel (added during May 13 — the README's earlier check). Required by the cron routes and by mobile's cross-origin manager-push.
-5. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-6. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
-7. **Custom report builder** if reporting is the priority. The
+5. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
+6. **Confirm `CRON_SECRET` + `NEXT_PUBLIC_ADMIN_URL`** are set on Vercel (added during May 13 — the README's earlier check). Required by the cron routes and by mobile's cross-origin manager-push.
+7. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
+8. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
+9. **Custom report builder** if reporting is the priority. The
    foundations are now in place (photos + signatures are stored
    per-(shift, task) and a future generator can embed them in a
    customer-facing PDF).
@@ -1511,7 +1641,10 @@ Recently cleared (May 13 — afternoon + evening session):
 - ✅ **Shift dashboard address surface** (`a44a579`)
 - ✅ **Morpheus Ops rebrand** with brand-tinted pill everywhere (`038ba80`, `0c9bcb0`)
 - ✅ **Compulsory linking** — task `compulsory` and `photos_compulsory` now share one toggle so they can't drift
-- ✅ **Messaging nav entry de-greyed** — was `comingSoon: true` from the placeholder era
+- ✅ **Messaging nav entry de-greyed** — was `comingSoon: true` from the placeholder era (`27a120e`)
+- ✅ **Messages migration ADD PUBLICATION made idempotent** — re-running `2026_05_13_messages.sql` no longer errors with `42710` (`e2a250a`)
+- ✅ **Composer no longer auto-excludes the sender from the audience** — Slack-style "everyone in the audience gets a copy, including the composer" behaviour (`8874347`)
+- ✅ **Specific-user picker shows rep avatars + selected-summary strip** — uses existing `<RepAvatar>` component; "N picked · Clear" bar keeps the audience visible while scrolling; list maxHeight bumped to 320 px (`a1cbf2f`)
 
 Recently cleared (May 13 — morning):
 - ✅ **Auto-checkout cron shipped** — `/api/cron/auto-checkout` runs every 15 min via Vercel Cron. The "auto-checkout only fires when an admin has Live Ops open" pre-existing limitation is now closed. Client-side `StaleShiftSweeper` kept as a belt-and-braces opportunistic sweep.
