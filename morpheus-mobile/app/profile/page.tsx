@@ -15,6 +15,14 @@ import {
   compressAvatar,
   type Profile,
 } from "@/lib/profiles-store";
+import {
+  pushSupportState,
+  notificationPermission,
+  hasActiveSubscription,
+  subscribeToPush,
+  unsubscribeFromPush,
+  type PushSupportState,
+} from "@/lib/push";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -425,6 +433,8 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      <NotificationsCard />
+
       <div style={{ padding: "0 16px 16px" }}>
         <button
           type="button"
@@ -786,5 +796,270 @@ function SheetSection({
         {saving ? "Saving…" : saveLabel}
       </button>
     </div>
+  );
+}
+
+/**
+ * NotificationsCard — Web Push opt-in tile.
+ *
+ * State machine the rep can be in:
+ *   1. loading            — first read on mount
+ *   2. unsupported        — old browser, no SW / no Push API
+ *   3. ios-needs-install  — iOS Safari without home-screen install
+ *   4. needs-vapid-key    — server misconfigured (NEXT_PUBLIC_VAPID_PUBLIC_KEY missing)
+ *   5. denied             — rep blocked notifications in browser/OS settings
+ *   6. off                — supported + permitted (default/granted) but no subscription
+ *   7. on                 — subscribed, push works
+ *
+ * Each state surfaces a specific message + action. We deliberately
+ * avoid hiding the card when push isn't possible — reps need to
+ * see WHY it's not on (the iOS install case in particular is
+ * non-obvious without a hint).
+ */
+function NotificationsCard() {
+  const [support, setSupport] = useState<PushSupportState | null>(null);
+  const [active, setActive] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  // Refresh both bits of state. Called on mount and after every
+  // enable/disable action so the UI mirrors browser truth.
+  const refresh = async () => {
+    const s = pushSupportState();
+    setSupport(s);
+    if (s.status === "supported") {
+      setActive(await hasActiveSubscription());
+    } else {
+      setActive(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const onEnable = async () => {
+    setBusy(true);
+    setMessage(null);
+    const ok = await subscribeToPush();
+    if (!ok) {
+      // The browser's permission dialog may have shown "Block" or
+      // the rep dismissed it. We don't get a specific reason back —
+      // just surface a generic message and rely on permission state
+      // on the next refresh to tell the real story.
+      setMessage(
+        notificationPermission() === "denied"
+          ? "Notifications are blocked. Open device Settings → Morpheus → Notifications to allow."
+          : "Couldn't enable notifications. Try again, or check your browser/OS settings."
+      );
+    } else {
+      setMessage("Notifications enabled.");
+    }
+    await refresh();
+    setBusy(false);
+  };
+
+  const onDisable = async () => {
+    setBusy(true);
+    setMessage(null);
+    await unsubscribeFromPush();
+    setMessage("Notifications disabled.");
+    await refresh();
+    setBusy(false);
+  };
+
+  // Card chrome — same shape as the Account settings card above so
+  // the section reads as part of the same family.
+  const card = (children: React.ReactNode, tone?: "warn" | "info") => (
+    <div style={{ padding: "0 16px 16px" }}>
+      <div
+        style={{
+          background: tone === "warn" ? MC.warnTint : MC.card,
+          borderRadius: MC.radiusCard,
+          border: `1px solid ${tone === "warn" ? `${MC.warn}55` : MC.line}`,
+          padding: 14,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+
+  const headerRow = (
+    iconName: Parameters<typeof Glyph>[0]["name"],
+    title: string,
+    subtitle: string,
+    iconColor?: string
+  ) => (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+      <Glyph name={iconName} size={20} color={iconColor || MC.brand} />
+      <div style={{ flex: 1 }}>
+        <div
+          style={{
+            fontFamily: MC.font,
+            fontSize: 14.5,
+            fontWeight: 600,
+            color: MC.ink,
+            letterSpacing: -0.1,
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            fontFamily: MC.font,
+            fontSize: 12.5,
+            color: MC.mute,
+            marginTop: 3,
+            lineHeight: 1.45,
+          }}
+        >
+          {subtitle}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (support === null) {
+    // SSR / first paint — render a skeleton-ish placeholder so the
+    // card layout doesn't reflow when the support check resolves.
+    return card(
+      headerRow(
+        "info",
+        "Notifications",
+        "Checking your device…",
+        MC.mute
+      )
+    );
+  }
+
+  if (support.status === "unsupported") {
+    return card(
+      headerRow(
+        "info",
+        "Notifications not supported",
+        "This browser doesn't support push notifications. Try Chrome on Android, or install this app to your iPhone home screen.",
+        MC.mute
+      )
+    );
+  }
+
+  if (support.status === "needs-vapid-key") {
+    return card(
+      headerRow(
+        "info",
+        "Notifications unavailable",
+        "The server isn't set up for notifications yet. Ask your admin to configure the VAPID public key.",
+        MC.mute
+      )
+    );
+  }
+
+  if (support.status === "ios-needs-install") {
+    return card(
+      <>
+        {headerRow(
+          "info",
+          "Add Morpheus to your Home Screen",
+          "iPhone notifications only work when the app is installed. It takes 10 seconds:",
+          MC.warn
+        )}
+        <ol
+          style={{
+            margin: "10px 0 0 0",
+            paddingLeft: 24,
+            fontFamily: MC.font,
+            fontSize: 12.5,
+            color: MC.ink,
+            lineHeight: 1.55,
+          }}
+        >
+          <li>
+            Tap the <strong>Share</strong> button (square with an
+            up-arrow) in Safari's toolbar.
+          </li>
+          <li>
+            Scroll down and tap <strong>Add to Home Screen</strong>.
+          </li>
+          <li>Tap <strong>Add</strong> in the top right.</li>
+          <li>
+            Open Morpheus from your home screen, sign in, and come
+            back to this page.
+          </li>
+        </ol>
+      </>,
+      "warn"
+    );
+  }
+
+  // From here on, push is supported. Branch on permission +
+  // subscription state.
+  const permission = support.permission;
+
+  if (permission === "denied") {
+    return card(
+      headerRow(
+        "info",
+        "Notifications blocked",
+        "You've blocked notifications for Morpheus. Open your device Settings → Morpheus → Notifications to allow them, then come back to this page.",
+        MC.danger
+      )
+    );
+  }
+
+  // Granted or default — show the toggle. `active === true` means
+  // a subscription exists in the browser.
+  const isOn = active === true;
+  return card(
+    <>
+      {headerRow(
+        isOn ? "check-circle" : "info",
+        isOn ? "Notifications on" : "Get notified about your shifts",
+        isOn
+          ? "You'll get a push for new shifts, cancellations, and reassignments."
+          : "Turn on push notifications so you don't miss a shift assignment, cancellation, or change.",
+        isOn ? MC.ok : MC.brand
+      )}
+      <div style={{ marginTop: 12 }}>
+        <button
+          type="button"
+          onClick={isOn ? onDisable : onEnable}
+          disabled={busy}
+          style={{
+            padding: "9px 16px",
+            borderRadius: 10,
+            background: isOn ? "transparent" : MC.brand,
+            color: isOn ? MC.danger : "#fff",
+            border: isOn ? `1px solid ${MC.danger}55` : "none",
+            fontFamily: MC.font,
+            fontSize: 13.5,
+            fontWeight: 600,
+            cursor: busy ? "wait" : "pointer",
+            letterSpacing: -0.1,
+          }}
+        >
+          {busy
+            ? isOn
+              ? "Turning off…"
+              : "Turning on…"
+            : isOn
+            ? "Disable"
+            : "Enable notifications"}
+        </button>
+      </div>
+      {message && (
+        <div
+          style={{
+            marginTop: 10,
+            fontFamily: MC.font,
+            fontSize: 12.5,
+            color: MC.mute,
+            lineHeight: 1.5,
+          }}
+        >
+          {message}
+        </div>
+      )}
+    </>
   );
 }
