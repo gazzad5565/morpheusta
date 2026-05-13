@@ -314,6 +314,12 @@ export default function DashboardPage() {
     !!savedOrder &&
     savedOrder.length > 0 &&
     shifts.some((s) => savedOrder.includes(s.realId));
+  // True when every shift today is done or cancelled. Mirrors the
+  // /shifts page so the home pill stops shouting "Plan route" at
+  // 5pm when there's nothing left to plan.
+  const dayComplete =
+    shifts.length > 0 &&
+    shifts.every((s) => s.state === "complete" || s.state === "cancelled");
 
   // "I can't make this shift" sheet state — applies to the up-next
   // shift only on the dashboard. Mirrors the /shifts page pattern so
@@ -533,6 +539,12 @@ export default function DashboardPage() {
             // an order is saved.
             const showPlanSlot = shiftsLoaded && shifts.length > 0;
             const planned = dayPlanned;
+            // Calm = nothing left to push the rep toward. Either the
+            // day is already optimized OR every shift is done. Both
+            // collapse to the same green-check confirmation surface
+            // so the pill doesn't shout "Plan route" while the
+            // celebration card below says "All shifts done".
+            const isCalm = planned || dayComplete;
             return (
               <div
                 style={{
@@ -550,14 +562,18 @@ export default function DashboardPage() {
                     <Link
                       href="/route"
                       aria-label={
-                        planned
-                          ? "Today is planned — view or re-optimize"
-                          : "Plan today's route"
+                        dayComplete
+                          ? "All shifts done — open Route to review"
+                          : planned
+                          ? "Route optimized — tap to view or re-optimize"
+                          : "Optimize today's route"
                       }
                       title={
-                        planned
-                          ? "Today's route is planned — tap to view or re-optimize"
-                          : "Plan today's route"
+                        dayComplete
+                          ? "All shifts done"
+                          : planned
+                          ? "Route optimized — tap to view or re-optimize"
+                          : "Optimize today's route"
                       }
                       style={{
                         display: "inline-flex",
@@ -567,7 +583,8 @@ export default function DashboardPage() {
                         textDecoration: "none",
                         // Visual weight reflects whether there's
                         // work to do:
-                        //  - planned    → okTint surface (confirmation)
+                        //  - calm (planned or done) → okTint surface
+                        //    (confirmation)
                         //  - unplanned  → solid brand-deep fill so
                         //    the icon pops as a real CTA. Earlier
                         //    iteration sat on transparent and Gary
@@ -575,13 +592,13 @@ export default function DashboardPage() {
                         //    when there's a day to optimize" — solid
                         //    fill + white glyph fixes that without
                         //    inflating the pill width.
-                        background: planned ? MC.okTint : MC.brandDeep,
+                        background: isCalm ? MC.okTint : MC.brandDeep,
                       }}
                     >
                       <Glyph
-                        name={planned ? "check-circle" : "target"}
+                        name={isCalm ? "check-circle" : "target"}
                         size={15}
-                        color={planned ? MC.ok : "#fff"}
+                        color={isCalm ? MC.ok : "#fff"}
                         strokeWidth={2.4}
                       />
                     </Link>

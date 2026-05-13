@@ -694,18 +694,24 @@ export default function ShiftsListPage() {
             so the CTA pulls more weight here. */}
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
           {(() => {
-            // Visibility + copy rules (May 12 — Gary):
+            // Visibility + states:
             // The pill is the ONLY link to /route now that the
-            // Plan-my-day side-menu entry was removed. Hiding it
-            // based on stop count made the page unreachable — so
-            // we render whenever the rep has any shifts today.
-            // Copy flips based on the day's state:
-            //   - day complete (all shifts done/cancelled)
-            //       → "Day complete" + check (no point saying
-            //         "Optimized" — the work's done, optimisation
-            //         is irrelevant)
-            //   - saved order + remaining > 0 → "Optimized · 2:42 PM"
-            //   - no saved order + remaining > 0 → "Plan route" CTA
+            // Plan-my-day side-menu entry was removed, so it
+            // renders whenever the rep has any shifts today.
+            //
+            // Three states with deliberately uneven weight:
+            //   - CTA (no saved order, work remaining) → text pill
+            //     "Route" + target icon, brand-deep fill. Pulls
+            //     attention because there's an action to take.
+            //   - Optimized → ICON-ONLY okTint disc with green
+            //     check. Status, not call-to-action. Timestamp
+            //     lives in the tooltip / aria, not the visual.
+            //   - Day complete → ICON-ONLY muted disc with check.
+            //     Same shape as optimized but calmer tone so the
+            //     rep reads "done" at a glance.
+            // Status states drop the label entirely because
+            // Gary's feedback was that "Optimized · 2:42 PM"
+            // didn't flow — the icon carries the meaning.
             const planned = headerDayPlanned;
             if (mine.length === 0) return null;
             const remainingStops = mine.filter(
@@ -719,80 +725,76 @@ export default function ShiftsListPage() {
                   hour12: true,
                 })
               : null;
-            // Three visual modes: ok-tinted "done" state, ok-tinted
-            // "saved" state, brand-deep CTA. The done + saved
-            // states share styling (calm green); the CTA pulls
-            // weight.
-            const isCalm = dayComplete || planned;
-            const label = dayComplete
-              ? "Day complete"
+            const isStatus = dayComplete || planned;
+            const ariaLabel = dayComplete
+              ? "All shifts done — open Route to review"
               : planned
-              ? "Optimized"
-              : "Plan route";
+              ? optimizedAt
+                ? `Route optimized at ${optimizedAt} — tap to view or re-optimize`
+                : "Route optimized — tap to view or re-optimize"
+              : "Optimize today's route";
+            const titleAttr = dayComplete
+              ? "All shifts done"
+              : planned
+              ? optimizedAt
+                ? `Optimized at ${optimizedAt}`
+                : "Optimized — tap to view"
+              : "Optimize the order of today's stops";
+            if (isStatus) {
+              // Icon-only disc. 32×32 hit target, calm visual.
+              const tone = dayComplete
+                ? { bg: MC.line, fg: MC.mute, border: MC.line }
+                : { bg: MC.okTint, fg: MC.ok, border: `${MC.ok}55` };
+              return (
+                <Link
+                  href="/route"
+                  aria-label={ariaLabel}
+                  title={titleAttr}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 32,
+                    height: 32,
+                    borderRadius: 999,
+                    background: tone.bg,
+                    border: `1px solid ${tone.border}`,
+                    textDecoration: "none",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Glyph name="check-circle" size={16} color={tone.fg} strokeWidth={2.4} />
+                </Link>
+              );
+            }
+            // CTA — keeps the text label so the affordance is
+            // discoverable. "Route" (not "Plan route") matches
+            // the page name and reads as the noun the rep is
+            // about to act on.
             return (
               <Link
                 href="/route"
-                aria-label={
-                  dayComplete
-                    ? "All shifts done — open Plan my day to review"
-                    : planned
-                    ? optimizedAt
-                      ? `Day optimized at ${optimizedAt} — view or re-optimize`
-                      : "Day optimized — view or re-optimize"
-                    : "Plan today's route"
-                }
-                title={
-                  dayComplete
-                    ? "All shifts done"
-                    : planned
-                    ? "Tap to view or re-optimize"
-                    : "Optimize the order of today's stops"
-                }
+                aria-label={ariaLabel}
+                title={titleAttr}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 6,
                   padding: "8px 12px 8px 10px",
                   borderRadius: 999,
-                  background: isCalm ? MC.okTint : MC.brandDeep,
-                  border: isCalm
-                    ? `1px solid ${MC.ok}55`
-                    : `1px solid ${MC.brandDeep}`,
-                  color: isCalm ? "#0d6a45" : "#fff",
+                  background: MC.brandDeep,
+                  border: `1px solid ${MC.brandDeep}`,
+                  color: "#fff",
                   textDecoration: "none",
                   fontFamily: MC.font,
                   fontSize: 12.5,
                   fontWeight: 700,
                   letterSpacing: -0.1,
-                  boxShadow: isCalm
-                    ? "none"
-                    : `0 2px 6px ${MC.brand}55`,
+                  boxShadow: `0 2px 6px ${MC.brand}55`,
                 }}
               >
-                <Glyph
-                  // Identical pair to the home segmented pill so the
-                  // affordance reads as the same feature from
-                  // either entry point: check-circle = "day's
-                  // optimized" / "day's done", target = "needs
-                  // planning".
-                  name={isCalm ? "check-circle" : "target"}
-                  size={15}
-                  color={isCalm ? MC.ok : "#fff"}
-                  strokeWidth={2.4}
-                />
-                {label}
-                {optimizedAt && (
-                  <span
-                    style={{
-                      opacity: 0.75,
-                      fontWeight: 500,
-                      fontSize: 11.5,
-                      marginLeft: 1,
-                    }}
-                  >
-                    · {optimizedAt}
-                  </span>
-                )}
+                <Glyph name="target" size={15} color="#fff" strokeWidth={2.4} />
+                Route
               </Link>
             );
           })()}

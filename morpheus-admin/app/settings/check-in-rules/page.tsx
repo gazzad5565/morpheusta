@@ -112,7 +112,7 @@ export default function CheckInRulesPage() {
     }
     setMessage(
       next
-        ? "Route optimization enabled — reps can reorder their day on Plan my day."
+        ? "Route optimization enabled — reps can reorder their day on Route."
         : "Route optimization disabled — reps see their shifts in chronological order only."
     );
   };
@@ -223,7 +223,7 @@ export default function CheckInRulesPage() {
             a re-ordered route would breach an SLA. Flipping this off
             hides the Optimize toggle on /route entirely. */}
         <ToggleRow
-          title="Allow Plan my day to optimize stop order"
+          title="Allow Route to optimize stop order"
           subtitle="When off, reps see their shifts in chronological order only — they can't reshuffle the day on the route planner. Turn off if customers have strict appointment slots."
           on={routeOptimizeOn}
           saving={savingKey === "routeOpt"}

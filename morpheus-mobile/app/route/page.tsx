@@ -390,7 +390,7 @@ export default function RoutePage() {
           is the roster, /route is the optimised planning view of
           the same shifts — so back-navigation should stay inside
           that workflow rather than punt to the home screen. */}
-      <AppHeader title="Plan my day" onBack={() => router.push("/shifts")} withMenu />
+      <AppHeader title="Route" onBack={() => router.push("/shifts")} withMenu />
 
       {/* Sticky summary band — provider, ETA totals, Refresh + Optimize toggles */}
       <div
