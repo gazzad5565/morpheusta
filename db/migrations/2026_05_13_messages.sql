@@ -153,7 +153,32 @@ CREATE POLICY mr_delete_authenticated
 
 -- Realtime for both tables so mobile inbox updates without polling +
 -- admin sent/scheduled lists update across manager sessions.
-ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.message_recipients;
+--
+-- ADD TABLE isn't natively idempotent — Postgres returns 42710
+-- "relation X is already member of publication Y" on re-run, which
+-- aborts the surrounding transaction. Wrap each in a guard so a
+-- second run is a clean no-op.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'messages'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.messages;
+  END IF;
+END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'message_recipients'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.message_recipients;
+  END IF;
+END $$;
 
 COMMIT;
