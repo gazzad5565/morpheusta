@@ -11,7 +11,7 @@ import {
   getShiftById,
   checkInToShift,
   getMyActiveShift,
-  switchToShift,
+  pauseAndCheckIn,
   type ShiftWithMeta,
 } from "@/lib/shifts-store";
 import { getCustomerById } from "@/lib/customers-store";
@@ -463,12 +463,13 @@ function CheckInPage() {
     setSubmitting(true);
     setCheckInPhase("submitting");
     // 1. Open the new shift. If the rep was already checked into a
-    //    different shift, use switchToShift which atomically closes
-    //    the old one (with a shift.auto_checked_out audit event
-    //    tagged reason='switched_to_other_shift') before opening the
-    //    new one. Otherwise, regular checkInToShift.
+    //    different shift, use pauseAndCheckIn which atomically pauses
+    //    the old one (state='on-break', shift.paused_for_other_shift
+    //    audit event with meta.next_shift_id) before opening the new
+    //    one. The previous shift can be resumed later. Otherwise,
+    //    regular checkInToShift.
     const result = activeShift
-      ? await switchToShift({
+      ? await pauseAndCheckIn({
           fromShiftId: activeShift.realId,
           toShiftId: shift.realId,
         })
@@ -608,13 +609,14 @@ function CheckInPage() {
           </div>
         </div>
 
-        {/* Switch-shifts warning (May 13) — when the rep is already
-            checked into a different shift, surface a banner here
-            BEFORE the exception cards so they can't tap through to
-            Proceed without acknowledging that the previous shift
-            will be auto-closed. Tap "Switch shifts" to arm the
-            Proceed button; "View previous" to bail and go back to
-            the active shift instead. */}
+        {/* Pause-and-switch warning (May 13) — when the rep is
+            already checked into a different shift, surface a banner
+            here BEFORE the exception cards so they can't tap
+            through to Proceed without acknowledging that the
+            previous shift will be PAUSED (state='on-break', not
+            closed — they can resume it from /shifts when they're
+            done with this one). Tap "Pause & switch" to arm the
+            Proceed button; "Back to previous" to bail. */}
         {activeShift && (
           <div
             style={{
@@ -664,7 +666,7 @@ function CheckInPage() {
                   }}
                 >
                   {switchAcknowledged
-                    ? `Switching from ${activeShift.name}`
+                    ? `Pausing ${activeShift.name} → switching to ${shift?.name ?? "new shift"}`
                     : `You're still checked into ${activeShift.name}`}
                 </div>
                 <div
@@ -677,8 +679,8 @@ function CheckInPage() {
                   }}
                 >
                   {switchAcknowledged
-                    ? `We'll check you out of ${activeShift.name} and into ${shift?.name ?? "this shift"} when you tap Proceed. Tasks already completed there stay saved.`
-                    : `Checking in here will auto-close that shift first. Any tasks or photos you've already completed at ${activeShift.name} stay saved.`}
+                    ? `${activeShift.name} will be paused — not closed — so you can come back and finish it from your shifts list. Any tasks or photos already done stay saved.`
+                    : `Checking in here will PAUSE that shift (not close it). You can return to ${activeShift.name} after you're done here. Tasks and photos already saved at ${activeShift.name} stay safe either way.`}
                 </div>
               </div>
             </div>
@@ -706,7 +708,7 @@ function CheckInPage() {
                     cursor: "pointer",
                   }}
                 >
-                  Switch shifts
+                  Pause &amp; switch
                 </button>
                 <button
                   type="button"
@@ -724,7 +726,7 @@ function CheckInPage() {
                     cursor: "pointer",
                   }}
                 >
-                  View previous
+                  Back to previous
                 </button>
               </div>
             )}

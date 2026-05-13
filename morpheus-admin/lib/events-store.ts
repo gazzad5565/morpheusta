@@ -20,6 +20,10 @@ export type EventType =
   | "shift.checked_out_offsite"
   | "shift.checked_out_early"
   | "shift.auto_checked_out"
+  // Rep paused this shift to check into another one (May 13). Pairs
+  // with shift.resumed when they come back.
+  | "shift.paused_for_other_shift"
+  | "shift.resumed"
   | "shift.deleted"
   // In-shift activity (everything that happens between check-in / check-out)
   | "shift.task_started"
@@ -200,6 +204,8 @@ export const EVENT_LABEL: Record<EventType, string> = {
   "shift.checked_out_offsite": "checked out OFF-SITE",
   "shift.checked_out_early": "checked out EARLY",
   "shift.auto_checked_out": "was auto-checked out",
+  "shift.paused_for_other_shift": "paused this shift to check into another",
+  "shift.resumed": "resumed this shift",
   "shift.deleted": "removed a shift",
   "shift.task_started": "started a task",
   "shift.task_completed": "completed a task",

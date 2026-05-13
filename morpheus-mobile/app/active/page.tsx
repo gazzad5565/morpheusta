@@ -195,6 +195,52 @@ export default function ActiveShiftPage() {
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
   const [openSheet, setOpenSheet] = useState<{ task: Task } | null>(null);
 
+  // ─── Direct-camera flow for photo tasks (May 13) ──────────────────
+  //
+  // Photo tasks open the camera ON TAP, not a sheet — the workflow
+  // is "tap → camera → upload → next photo → … → done" with the task
+  // auto-completing after the last upload. The sheet only opens for
+  // non-photo tasks or for COMPLETED photo tasks (where the rep
+  // might want to retake / review).
+  //
+  // Drives the page-level hidden file input below. photoFlow.taskId
+  // identifies which task is currently capturing; nextSlot is the
+  // empty slot index (0..N-1) the next capture should fill.
+  const [photoFlow, setPhotoFlow] = useState<{
+    taskId: string;
+    nextSlot: number;
+    totalSlots: number;
+    /** Whether an upload is in flight — drives the overlay. */
+    uploading: boolean;
+    /** Error from the last upload attempt, surfaced as a banner. */
+    error: string | null;
+  } | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Map (taskId → photo count) so the TaskRow can show progress
+  // ("2 of 3 photos") without each row independently subscribing.
+  // Hydrated lazily — initial empty Map is fine, gets filled as the
+  // rep interacts and the page-level refresh runs.
+  const [taskPhotoCounts, setTaskPhotoCounts] = useState<Map<string, number>>(
+    () => new Map()
+  );
+
+  // Refresh the photo count for a given task. Called on mount for
+  // photo tasks + after each upload.
+  const refreshPhotoCount = useCallback(
+    async (taskId: string): Promise<number> => {
+      if (!shiftData?.shiftId) return 0;
+      const photos = await listShiftTaskPhotos(shiftData.shiftId, taskId);
+      setTaskPhotoCounts((prev) => {
+        const next = new Map(prev);
+        next.set(taskId, photos.length);
+        return next;
+      });
+      return photos.length;
+    },
+    [shiftData?.shiftId]
+  );
+
   // Persist the in-flight task across screen sleep / app close. The
   // rep starts a task → puts the phone in their pocket → does the
   // physical work → unlocks → taps Complete. If the browser discarded
@@ -481,6 +527,140 @@ export default function ActiveShiftPage() {
       }
     }
   };
+
+  // ─── Photo-flow logic (Feature C — May 13 cleanup) ────────────────
+  //
+  // Entry point: called when the rep taps a photo task with empty
+  // slots. Fetches current photo state, finds the next empty slot,
+  // and triggers the page-level file input (which opens the device
+  // camera). Subsequent captures chain via the input's onChange.
+
+  /** Auto-complete a photo task when its last slot just got filled.
+   *  Mirrors the logic in completeTask() but operates on a taskId
+   *  directly (no openSheet dependency). */
+  const autoCompletePhotoTask = useCallback(
+    (taskId: string) => {
+      const wasActive = activeTaskId === taskId;
+      if (wasActive) {
+        setActiveTaskId(null);
+        setActiveTaskStartedAt(null);
+      }
+      setCompletedTaskIds((ids) => (ids.includes(taskId) ? ids : [...ids, taskId]));
+      if (shiftData?.shiftId) {
+        const elapsedSec =
+          wasActive && activeTaskStartedAt
+            ? Math.floor((Date.now() - activeTaskStartedAt) / 1000)
+            : null;
+        void markTaskComplete(shiftData.shiftId, taskId).then((r) => {
+          if (!r.ok) {
+            // eslint-disable-next-line no-console
+            console.warn("[active] auto-mark task complete failed:", r.error);
+          }
+        });
+        const completed = tasks.find((t) => t.id === taskId);
+        void logEvent({
+          event_type: "shift.task_completed",
+          shift_id: shiftData.shiftId,
+          customer_id: shiftData.customerId,
+          message: `Completed task: ${completed?.name ?? "photo task"}`,
+          meta: {
+            task_id: taskId,
+            task_name: completed?.name,
+            duration_min: completed?.duration,
+            elapsed_sec: elapsedSec,
+            auto_completed: "photos_filled",
+          },
+        });
+      }
+    },
+    [activeTaskId, activeTaskStartedAt, shiftData, tasks]
+  );
+
+  const startPhotoFlow = useCallback(
+    async (task: Task) => {
+      const totalSlots = task.photoCount ?? 0;
+      if (totalSlots === 0 || !shiftData?.shiftId) return;
+      // Refresh photos first so we don't ask the rep to retake a slot
+      // they already filled (race condition: another tab/device).
+      const existingCount = await refreshPhotoCount(task.id);
+      if (existingCount >= totalSlots) {
+        // Already done — auto-complete and bail.
+        autoCompletePhotoTask(task.id);
+        return;
+      }
+      setPhotoFlow({
+        taskId: task.id,
+        nextSlot: existingCount, // first empty index
+        totalSlots,
+        uploading: false,
+        error: null,
+      });
+      // Tick to the next frame so React mounts the input first.
+      // Then synchronously click — iOS needs the click to happen
+      // inside the user-gesture call stack, but a microtask delay
+      // is still within the same activation window.
+      requestAnimationFrame(() => photoInputRef.current?.click());
+    },
+    [shiftData?.shiftId, refreshPhotoCount, autoCompletePhotoTask]
+  );
+
+  const onPhotoCaptureFile = useCallback(
+    async (file: File) => {
+      if (!photoFlow || !shiftData?.shiftId) return;
+      setPhotoFlow((prev) =>
+        prev ? { ...prev, uploading: true, error: null } : prev
+      );
+      const r = await uploadShiftTaskPhoto({
+        shiftId: shiftData.shiftId,
+        taskId: photoFlow.taskId,
+        slotIndex: photoFlow.nextSlot,
+        file,
+      });
+      if (!r.ok) {
+        setPhotoFlow((prev) =>
+          prev ? { ...prev, uploading: false, error: r.error } : prev
+        );
+        return;
+      }
+      const newCount = await refreshPhotoCount(photoFlow.taskId);
+      if (newCount >= photoFlow.totalSlots) {
+        // All slots filled — auto-complete the task + dismiss flow.
+        autoCompletePhotoTask(photoFlow.taskId);
+        setPhotoFlow(null);
+        return;
+      }
+      // More slots to go — advance + re-trigger the camera. iOS will
+      // re-prompt for the camera since this is still inside the user-
+      // gesture chain (the upload promise resolves quickly).
+      setPhotoFlow((prev) =>
+        prev
+          ? {
+              ...prev,
+              nextSlot: newCount,
+              uploading: false,
+              error: null,
+            }
+          : prev
+      );
+      requestAnimationFrame(() => photoInputRef.current?.click());
+    },
+    [
+      photoFlow,
+      shiftData?.shiftId,
+      refreshPhotoCount,
+      autoCompletePhotoTask,
+    ]
+  );
+
+  // Hydrate photo counts for all photo tasks on mount + whenever the
+  // task list changes. Used by the TaskRow progress pill so the rep
+  // sees "2/3 photos" without opening anything.
+  useEffect(() => {
+    const photoTasks = tasks.filter((t) => (t.photoCount ?? 0) > 0);
+    photoTasks.forEach((t) => {
+      void refreshPhotoCount(t.id);
+    });
+  }, [tasks, refreshPhotoCount]);
 
   const sheetMode = openSheet
     ? completedTaskIds.includes(openSheet.task.id)
@@ -875,7 +1055,20 @@ export default function ActiveShiftPage() {
                   task={t}
                   completed={completedTaskIds.includes(t.id)}
                   active={activeTaskId === t.id}
-                  onClick={() => setOpenSheet({ task: t })}
+                  photosTaken={taskPhotoCounts.get(t.id) ?? 0}
+                  onClick={() => {
+                    const photoNeeded = t.photoCount ?? 0;
+                    const taken = taskPhotoCounts.get(t.id) ?? 0;
+                    const photoFlowApplicable =
+                      photoNeeded > 0 &&
+                      !completedTaskIds.includes(t.id) &&
+                      taken < photoNeeded;
+                    if (photoFlowApplicable) {
+                      void startPhotoFlow(t);
+                    } else {
+                      setOpenSheet({ task: t });
+                    }
+                  }}
                 />
               ))
             )}
@@ -919,7 +1112,20 @@ export default function ActiveShiftPage() {
                   task={t}
                   completed={completedTaskIds.includes(t.id)}
                   active={activeTaskId === t.id}
-                  onClick={() => setOpenSheet({ task: t })}
+                  photosTaken={taskPhotoCounts.get(t.id) ?? 0}
+                  onClick={() => {
+                    const photoNeeded = t.photoCount ?? 0;
+                    const taken = taskPhotoCounts.get(t.id) ?? 0;
+                    const photoFlowApplicable =
+                      photoNeeded > 0 &&
+                      !completedTaskIds.includes(t.id) &&
+                      taken < photoNeeded;
+                    if (photoFlowApplicable) {
+                      void startPhotoFlow(t);
+                    } else {
+                      setOpenSheet({ task: t });
+                    }
+                  }}
                 />
               ))
             )}
@@ -992,6 +1198,122 @@ export default function ActiveShiftPage() {
           customerName={opening.customerName}
           phase="submitting"
         />
+      )}
+
+      {/* Page-level file input for the photo-flow (Feature C — May 13
+          cleanup). One input that's re-used for every photo task;
+          startPhotoFlow stashes which task / slot it's targeting,
+          this onChange dispatches the upload + decides whether to
+          chain to the next photo or mark the task complete.
+
+          Single input vs one-per-slot makes the chain logic simpler
+          and dodges the iOS-Safari quirk where multiple file inputs
+          in close succession can confuse the OS picker. */}
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          // ALWAYS clear so re-picking the same file fires onChange again.
+          e.target.value = "";
+          if (!f) return;
+          void onPhotoCaptureFile(f);
+        }}
+        style={{ display: "none" }}
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+
+      {/* Upload overlay for the photo-flow. Shown while a capture is
+          being compressed + uploaded between camera shots so the rep
+          gets clear feedback rather than a moment of "did anything
+          happen?". Also surfaces errors with a Retry CTA. */}
+      {photoFlow && (photoFlow.uploading || photoFlow.error) && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            bottom: "calc(86px + env(safe-area-inset-bottom, 0px))",
+            left: 14,
+            right: 14,
+            zIndex: 55,
+            background: photoFlow.error ? "#fff" : MC.ink,
+            color: photoFlow.error ? MC.ink : "#fff",
+            border: photoFlow.error
+              ? `1px solid ${MC.danger}55`
+              : "none",
+            borderLeft: photoFlow.error
+              ? `3px solid ${MC.danger}`
+              : "none",
+            borderRadius: 14,
+            padding: "12px 14px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            fontFamily: MC.font,
+            boxShadow: "0 12px 30px rgba(10,15,30,.25)",
+          }}
+        >
+          {photoFlow.uploading ? (
+            <>
+              <Spinner size={16} color="#fff" />
+              <span style={{ fontSize: 13, fontWeight: 600 }}>
+                Uploading photo {photoFlow.nextSlot + 1} of{" "}
+                {photoFlow.totalSlots}…
+              </span>
+            </>
+          ) : (
+            <>
+              <Glyph
+                name="warn"
+                size={16}
+                color={MC.danger}
+                strokeWidth={2.4}
+              />
+              <span
+                style={{ fontSize: 12.5, flex: 1, minWidth: 0, lineHeight: 1.35 }}
+              >
+                {photoFlow.error}
+              </span>
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                style={{
+                  background: MC.brandDeep,
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "6px 10px",
+                  fontFamily: MC.font,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={() => setPhotoFlow(null)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: MC.mute,
+                  fontFamily: MC.font,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  padding: "6px 4px",
+                }}
+              >
+                Cancel
+              </button>
+            </>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1089,13 +1411,21 @@ function TaskRow({
   task,
   completed,
   active,
+  photosTaken,
   onClick,
 }: {
   task: Task;
   completed: boolean;
   active: boolean;
+  /** For photo tasks: how many photos have been captured so far. */
+  photosTaken: number;
   onClick: () => void;
 }) {
+  const photoCount = task.photoCount ?? 0;
+  const isPhotoTask = photoCount > 0;
+  // For photo tasks, the row's primary visual cue is the camera pill.
+  // The pill is brand-tinted when in-progress (some photos taken),
+  // neutral when none yet, and green-checked when complete.
   return (
     <button
       type="button"
@@ -1143,18 +1473,80 @@ function TaskRow({
         >
           {task.name}
         </div>
-        {task.duration != null && (
-          <div
-            style={{
-              fontFamily: MC.font,
-              fontSize: 12,
-              color: MC.hint,
-              marginTop: 2,
-            }}
-          >
-            ~{task.duration} min{active ? " · in progress" : ""}
-          </div>
-        )}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 4,
+            flexWrap: "wrap",
+          }}
+        >
+          {task.duration != null && (
+            <span
+              style={{
+                fontFamily: MC.font,
+                fontSize: 12,
+                color: MC.hint,
+              }}
+            >
+              ~{task.duration} min{active ? " · in progress" : ""}
+            </span>
+          )}
+          {isPhotoTask && (
+            // Camera-required pill — makes the photo affordance
+            // unmistakable. Tone changes with progress so the rep
+            // can glance at the list and see what's left.
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "2px 8px 2px 6px",
+                borderRadius: 999,
+                fontFamily: MC.font,
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 0.2,
+                background: completed
+                  ? `${MC.ok}1A`
+                  : photosTaken > 0
+                  ? MC.brandTint
+                  : MC.warnTint,
+                color: completed
+                  ? "#0d6a45"
+                  : photosTaken > 0
+                  ? MC.brandDeep
+                  : "#7A560A",
+                border: `1px solid ${
+                  completed
+                    ? `${MC.ok}55`
+                    : photosTaken > 0
+                    ? `${MC.brand}33`
+                    : `${MC.warn}55`
+                }`,
+              }}
+            >
+              <Glyph
+                name="camera"
+                size={11}
+                color={
+                  completed
+                    ? "#0d6a45"
+                    : photosTaken > 0
+                    ? MC.brandDeep
+                    : "#7A560A"
+                }
+                strokeWidth={2.4}
+              />
+              {completed
+                ? `${photosTaken}/${photoCount} photos`
+                : photosTaken === 0
+                ? `Camera · ${photoCount} photo${photoCount === 1 ? "" : "s"}`
+                : `${photosTaken}/${photoCount} photos`}
+            </span>
+          )}
+        </div>
       </div>
       {active && !completed && (
         <span

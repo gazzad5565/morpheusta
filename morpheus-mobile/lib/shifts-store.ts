@@ -697,30 +697,39 @@ export async function getTasksForCustomer(customerId: string): Promise<TaskRow[]
 }
 
 /**
- * Atomically switch from one in-progress shift to another (May 13).
+ * Pause one in-progress shift and check into another (May 13).
  *
  * Used when the rep is already checked into shift A and taps Check
  * in on shift B (chains, mall runs, "swing by next door" cases).
- * Without this, the rep would end up with two shifts both in
- * `in-progress` simultaneously — data corruption that the auto-
- * checkout cron only catches overnight, and surfaces as a stuck
- * shift in admin Live Ops in the meantime.
+ * The rep typically WANTS to return to A afterwards, so we pause
+ * A (state='on-break') rather than closing it. The rep can resume
+ * A from the /shifts list once they're done with B — re-opening
+ * A flips it back to 'in-progress' via the existing on-break flow.
  *
- * Order matters: we close A FIRST, then open B. If anything fails
- * partway through:
- *   - A closes but B fails to open → rep is "checked out everywhere"
- *     and the /check-in page shows the error. They can retry.
- *   - A fails to close → we don't open B, surface error, no
+ * (Initial design closed A entirely with state='complete'. Gary
+ * pointed out this destroys the use case: the rep needs to come
+ * back to A after the detour. Pausing instead of closing is the
+ * fix — same atomicity, different end state.)
+ *
+ * Order matters: we pause A FIRST, then check into B. If anything
+ * fails partway through:
+ *   - A paused but B fails → A is on-break, rep can resume via
+ *     /shifts. /check-in surfaces the error so they can retry B.
+ *   - A fails to pause → we don't touch B, surface error, no
  *     corruption.
  *
- * Audit trail: A gets a `shift.auto_checked_out` event with
- * meta.reason='switched_to_other_shift' and meta.next_shift_id=B
- * so admin Live Feed shows the rep moved between sites (vs the
- * generic auto-checkout-cron sweep with meta.source='cron').
- * checkInToShift handles B's audit + claim semantics.
+ * Audit trail: A gets a `shift.paused_for_other_shift` event with
+ * meta.next_shift_id=B so admin Live Feed shows the rep paused
+ * one shift to handle another — distinct from a regular break or
+ * an auto-checkout sweep. checkInToShift handles B's audit + claim.
+ *
+ * Note: invariant "exactly one in-progress shift per rep" still
+ * holds — paused shifts are on-break, not in-progress. Multiple
+ * paused shifts CAN coexist (rep paused A, started B, paused B,
+ * started C). That's fine; the resume UI lists all paused shifts.
  */
-export async function switchToShift(args: {
-  /** The shift the rep is currently checked into (will be closed). */
+export async function pauseAndCheckIn(args: {
+  /** The shift the rep is currently checked into (will be paused). */
   fromShiftId: string;
   /** The shift the rep is moving to (will be opened). */
   toShiftId: string;
@@ -744,38 +753,34 @@ export async function switchToShift(args: {
   const fromCheckInIso =
     (fromRow as { check_in_at?: string } | null)?.check_in_at || null;
 
-  // 1. Close the FROM shift.
-  const closeAt = new Date();
-  const { error: closeErr } = await supabase
+  // 1. Pause the FROM shift (state='on-break'). NO check_out_at
+  //    stamped — the shift isn't done yet, the rep is coming back.
+  const pausedAt = new Date();
+  const { error: pauseErr } = await supabase
     .from("shifts")
-    .update({
-      state: "complete",
-      check_out_at: closeAt.toISOString(),
-    })
+    .update({ state: "on-break" })
     .eq("id", fromShiftId);
-  if (closeErr) {
-    return { ok: false, error: `Couldn't close previous shift: ${closeErr.message}` };
+  if (pauseErr) {
+    return { ok: false, error: `Couldn't pause previous shift: ${pauseErr.message}` };
   }
 
-  // 2. Log the switch on the FROM shift. Duration helps admin spot
-  //    "rep forgot to check out for 6h before switching" patterns
-  //    later if we want coaching nudges.
+  // 2. Log the pause. Duration is "time since check-in" — gives
+  //    admin context for how much was done at A before the detour.
   const durationMin =
     fromCheckInIso != null
       ? Math.max(
           0,
           Math.round(
-            (closeAt.getTime() - new Date(fromCheckInIso).getTime()) / 60_000
+            (pausedAt.getTime() - new Date(fromCheckInIso).getTime()) / 60_000
           )
         )
       : null;
   await logEvent({
-    event_type: "shift.auto_checked_out",
+    event_type: "shift.paused_for_other_shift",
     shift_id: fromShiftId,
     customer_id: fromCustomerId,
-    message: `Switched to another shift — auto-closed ${fromCustomerName}`,
+    message: `Paused ${fromCustomerName} to switch to another shift`,
     meta: {
-      reason: "switched_to_other_shift",
       next_shift_id: toShiftId,
       duration_min: durationMin,
     },
@@ -788,9 +793,56 @@ export async function switchToShift(args: {
   if (!inResult.ok) {
     return {
       ok: false,
-      error: `Closed your previous shift but couldn't open the new one: ${inResult.error}`,
+      error: `Paused your previous shift but couldn't open the new one: ${inResult.error}`,
     };
   }
+  return { ok: true };
+}
+
+/**
+ * Resume a paused shift — flips it from 'on-break' back to
+ * 'in-progress'. Used when the rep returns to a shift that was
+ * paused via pauseAndCheckIn or via a regular break.
+ *
+ * Refuses if the shift isn't currently on-break (defensive: we
+ * don't want a stray Resume tap to bump an already-complete shift
+ * back to in-progress and corrupt the timesheet).
+ */
+export async function resumePausedShift(
+  shiftId: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { data: existing } = await supabase
+    .from("shifts")
+    .select("state, customer_id, customers(name)")
+    .eq("id", shiftId)
+    .maybeSingle();
+  const currentState = (existing as { state?: string } | null)?.state;
+  if (currentState !== "on-break") {
+    return {
+      ok: false,
+      error: `Can't resume — this shift is currently ${currentState ?? "unknown"}.`,
+    };
+  }
+  const { error } = await supabase
+    .from("shifts")
+    .update({ state: "in-progress" })
+    .eq("id", shiftId);
+  if (error) return { ok: false, error: error.message };
+
+  const customerName =
+    (existing as { customers?: { name?: string } } | null)?.customers?.name ||
+    "shift";
+  const customerId =
+    (existing as { customer_id?: string } | null)?.customer_id || null;
+  await logEvent({
+    event_type: "shift.resumed",
+    shift_id: shiftId,
+    customer_id: customerId,
+    message: `Resumed ${customerName}`,
+  });
   return { ok: true };
 }
 

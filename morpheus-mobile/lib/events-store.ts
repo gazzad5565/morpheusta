@@ -16,6 +16,11 @@ export type EventType =
   | "shift.checked_out_offsite"
   | "shift.checked_out_early"
   | "shift.auto_checked_out"
+  // Rep paused this shift to check into another one. Pairs with a
+  // shift.resumed when they come back (or shift.checked_out if they
+  // finish the other shift and end the day without resuming).
+  | "shift.paused_for_other_shift"
+  | "shift.resumed"
   | "shift.deleted"
   | "shift.task_started"
   | "shift.task_completed"
