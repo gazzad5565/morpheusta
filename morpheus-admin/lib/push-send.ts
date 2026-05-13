@@ -13,6 +13,13 @@
  * Failures are swallowed and logged. A push failing to deliver
  * should never break the surrounding admin operation (e.g. shift
  * creation succeeded — push delivery is best-effort).
+ *
+ * Phase-2 (May 13) additions:
+ *   - Org-wide kill-switch gate at the top of both sendPushTo*
+ *     functions reads app_settings.push_notifications_enabled.
+ *   - Three new payload builders for late / EOD / attention-raised.
+ *   - sendPushToManagers fan-out (used by the attention-raised
+ *     broadcast path).
  */
 
 import webpush from "web-push";
