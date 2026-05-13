@@ -10,6 +10,7 @@ import { logEvent } from "./events-store";
 import { getAutoCheckoutTime } from "./settings-store";
 import { todayLocalISO } from "./format";
 import { notifySaved, notifySaveError } from "./save-status";
+import { notifyShiftEvent } from "./push-notify";
 
 export interface ShiftRow {
   id: string;
@@ -247,6 +248,12 @@ export async function createShift(
     message: `Scheduled ${customerName} on ${s.shift_date} ${s.start_time}–${s.end_time}`,
     meta: { rep_assigned: s.rep_id ? true : false },
   });
+  // Push the assigned rep so they don't have to refresh /shifts to
+  // see the new row. Skip when the shift is unassigned — there's
+  // nobody to tell, and the claim flow is the discovery path.
+  if (s.rep_id && data?.id) {
+    notifyShiftEvent("shift-assigned", data.id);
+  }
   notifySaved("shift");
   return { ok: true, id: data?.id };
 }
@@ -281,10 +288,11 @@ export async function updateShift(
   // an in-progress row.
   const { data: cur } = await supabase
     .from("shifts")
-    .select("state, customer_id, customers(name)")
+    .select("state, customer_id, rep_id, customers(name)")
     .eq("id", id)
     .maybeSingle();
   const currentState = (cur as { state?: string } | null)?.state ?? "scheduled";
+  const currentRepId = (cur as { rep_id?: string | null } | null)?.rep_id ?? null;
   if (currentState !== "scheduled") {
     return {
       ok: false,
@@ -318,6 +326,20 @@ export async function updateShift(
     message: `Updated shift at ${customerName}`,
     meta: { fields: Object.keys(cleaned) },
   });
+  // Detect rep change: only notify if patch explicitly sets rep_id
+  // to a non-null value that differs from the previous owner. Null
+  // (release-to-claimable) doesn't notify — reps aren't told they
+  // lost a shift in v1; that's a follow-up scope.
+  if (
+    "rep_id" in patch &&
+    typeof patch.rep_id === "string" &&
+    patch.rep_id !== currentRepId
+  ) {
+    const event: "shift-assigned" | "shift-reassigned" = currentRepId
+      ? "shift-reassigned"
+      : "shift-assigned";
+    notifyShiftEvent(event, id, { previousRepId: currentRepId });
+  }
   notifySaved("shift");
   return { ok: true };
 }
@@ -1092,6 +1114,9 @@ export async function reassignShift(
       reason: ctx?.attention_reason ?? null,
     },
   });
+  notifyShiftEvent("shift-reassigned", shiftId, {
+    previousRepId: ctx?.original_rep_id ?? null,
+  });
   notifySaved("shift");
   return { ok: true };
 }
@@ -1212,6 +1237,14 @@ export async function cancelShiftFromAttention(
       reason: ctx?.attention_reason ?? null,
     },
   });
+  // The shift's rep_id may still be set (cancel-from-attention
+  // doesn't null it) — push the original rep so they know their
+  // raised flag was actioned and the shift is officially cancelled.
+  if (ctx?.original_rep_id) {
+    notifyShiftEvent("shift-cancelled", shiftId, {
+      previousRepId: ctx.original_rep_id,
+    });
+  }
   notifySaved("shift");
   return { ok: true };
 }

@@ -1085,15 +1085,74 @@ Top of the queue (in priority order):
 
 1. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
 2. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-3. **Web Push notifications (PWA-native, no Capacitor)** — works on Android Chrome + iOS Safari-as-PWA since iOS 16.4. Scope: VAPID key pair, service worker `push` handler, `push_subscriptions` table on Supabase (rep_id, endpoint, p256dh, auth), Edge Function or Vercel route sending via `web-push`. On iOS, prompt "Install to home screen for notifications" when `display-mode: standalone` is false. Triggers worth wiring: shift assigned, shift cancelled, "you're running late", manager left a note, end-of-day "Don't forget to check out". 2–3 days of work.
+3. **Web Push phase 2 follow-ups** (foundation shipped May 13 — see "Web Push notifications" section below). Two add-ons:
+   - **"Running late" + "EOD checkout reminder" triggers** — need a Vercel Cron job or `pg_cron`. Foundation lib `morpheus-admin/lib/push-send.ts` is ready; just need scheduled callers.
+   - **Manager-side pushes** — e.g. "rep raised attention flag" → push to managers. Reps-only in v1; managers keep the in-app realtime "Needs action" pill.
 4. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
 5. **Custom report builder** if reporting is the priority.
 
 Recently cleared (May 13):
+- ✅ **Web Push v1 shipped** (rep notifications for shift assigned / reassigned / cancelled). See dedicated section below.
+- ✅ "Plan my day" renamed to "Route" + icon-only status pill on `/shifts` so the page stops shouting wordy "Optimized · 2:42 PM" when there's nothing to act on.
 - ✅ All May 7 / 11 / 12 migrations applied to Supabase.
 - ✅ `saveShiftOrder` atomicity — order + meta now written in one `setItem` (v2 payload in `lib/shift-order-store.ts`, with v1 read fallback for one release).
 - ✅ Home segmented pill — "Day complete" calm state mirrors `/shifts`; pill no longer shouts "Plan route" when the celebration card is showing.
 - ✅ `qa/QA_PLAN.md` already refreshed (May 12) — `/check-in/success` + `/summary` are documented as dead routes, `M-CHECKOUT-OK` asserts the new "routes to `/`" behaviour.
+
+### Web Push notifications (shipped May 13)
+
+**What works end-to-end now:**
+- Rep opens `/profile` → **Notifications** card. iOS Safari shows "Add to Home Screen first" instructions; installed PWAs + Android show the Enable button. Tap → browser asks permission → subscription is saved to `push_subscriptions` in Supabase.
+- Admin schedules / reassigns / cancels a shift → push fires automatically to the affected rep's device(s). Tapping the notification opens the app on `/shifts`.
+- Multi-device support: one rep + N devices = N subscription rows. All get the push.
+- Dead-subscription cleanup is automatic: `web-push` returns 404/410 → admin-side lib prunes the row.
+
+**Architecture (left to right):**
+
+```
+Rep's phone           Mobile app               Admin code              Push service
+─────────────         ──────────────           ──────────────          ────────────
+SW: /sw.js     ◀──    /api/push/subscribe  ──▶ push_subscriptions     (FCM / Mozilla / Apple)
+   ▲              (saves endpoint+keys)          table
+   │
+   └─────── push delivery ◀───── /api/push/notify (manager-gated)
+                                      │
+                                      ▼
+                                 lib/push-send.ts (signs with VAPID, sends, prunes 410s)
+```
+
+**Files of note:**
+- `db/migrations/2026_05_13_push_subscriptions.sql` — table + RLS (rep owns own rows)
+- `morpheus-mobile/public/sw.js` — service worker, push + notificationclick handlers (no offline caching — deliberate)
+- `morpheus-mobile/lib/push.ts` — client API: `pushSupportState()`, `subscribeToPush()`, `unsubscribeFromPush()`, plus the iOS-needs-install detection (`navigator.standalone` + `display-mode: standalone` checks)
+- `morpheus-mobile/app/api/push/subscribe/route.ts` — saves/deletes subscriptions using the rep's bearer token (RLS enforces ownership)
+- `morpheus-mobile/app/profile/page.tsx` — `<NotificationsCard>` (inline at the bottom of the file). Renders 7 distinct states: loading / unsupported / ios-needs-install / needs-vapid-key / denied / off / on.
+- `morpheus-admin/lib/push-send.ts` — server-side `sendPushToRep()` + payload builders (`buildShiftAssignedPayload` etc). Reads `VAPID_PRIVATE_KEY` from env; configures `web-push` once.
+- `morpheus-admin/lib/push-notify.ts` — fire-and-forget client helper used by admin store code
+- `morpheus-admin/app/api/push/notify/route.ts` — manager-gated dispatch; takes `{event, shiftId, previousRepId?}`, looks up the shift + customer, builds payload server-side, sends.
+- Triggers wired in `morpheus-admin/lib/shifts-store.ts`: `createShift` (when `rep_id` set), `updateShift` (when `rep_id` changes), `reassignShift`, `cancelShiftFromAttention`.
+
+**Env vars (all set May 13 in Vercel by Gary):**
+- `NEXT_PUBLIC_VAPID_PUBLIC_KEY` — both apps, all 3 environments
+- `VAPID_PRIVATE_KEY` — admin only, marked Sensitive
+- `VAPID_SUBJECT=mailto:gazzad@mac.com` — admin only
+
+**iOS install requirement (non-obvious):**
+iOS Safari (16.4+) refuses to expose the permission API to plain browser tabs. The PWA must be installed to home screen first. The Notifications card detects this and shows a 4-step installer card instead of an Enable button. Reps need to (1) tap Share, (2) tap "Add to Home Screen", (3) tap Add, (4) open the app from the home-screen icon and try again.
+
+**Smoke test (after Vercel deploys):**
+1. On Android Chrome OR an installed-as-PWA iPhone: open `/profile` → Notifications card. Tap **Enable**.
+2. Browser permission popup → Allow.
+3. Card should flip to "Notifications on" + green check.
+4. In Supabase Table Editor → `push_subscriptions` should show a new row for your `rep_id`.
+5. On admin (separate browser, signed in as a manager): `/schedule/new` → create a shift assigned to that rep → Save.
+6. Phone should buzz with "New shift assigned · {customer name} · today · {time}".
+7. Tap the notification → app opens (or focuses) on `/shifts`.
+
+**Limits / deferred:**
+- "Running late" / EOD reminder pushes need a scheduled trigger (Vercel Cron or `pg_cron`). Not wired in v1.
+- Manager-side pushes (e.g. "rep raised attention") not wired — managers keep the realtime Needs-action badge.
+- No admin UI for sending arbitrary test pushes. Could be added on `/reps/[id]` as a "Send test" button if useful for debugging.
 
 The May 11 "calendar — add second shift to occupied slot" ask
 shipped on May 12 (commits `adc7ed6`, `8197bf1`, `2bf4e8a`): the
@@ -1332,7 +1391,7 @@ biggest first:
 5. **Custom report builder.** The 3 fixed reports (Operations / Rep performance / Timesheet) are good but the user wanted "users can build their own". Picture: a builder UI where a manager picks metrics, dimensions, filters, and a chart type, then saves. Multi-week project — needs builder UI + query AST + saved-report storage + per-user permissions on saves.
 6. **Background sweep (`pg_cron`).** Today `sweepStaleShifts()` only runs when an admin opens the Live Ops home or focuses the tab. If no admin opens for several days, stale shifts and orphan rep_locations rows accumulate. Either a Vercel Cron route hitting `/api/sweep` or a Postgres `pg_cron` job (cleaner). 1-hour task.
 7. **Error monitoring.** Drop in Sentry or Vercel Analytics before user count grows past ~10. You're flying blind on prod errors right now. ~30 minutes of work, saves a lot of guessing.
-8. **Push notifications via Web Push.** Service worker + VAPID setup. Works on Chrome/Firefox/Safari 16+. Cleaner alternative to Capacitor if iOS install isn't a priority. ~1 day of work.
+8. ~~**Push notifications via Web Push.**~~ ✅ SHIPPED May 13 — see "Web Push notifications (shipped May 13)" section above. Foundation + assigned/reassigned/cancelled triggers. Phase 2 follow-ups (late/EOD reminders, manager-side pushes) deferred.
 9. **Email confirmation** turned back on for production self-signups. Admin-created users are already auto-confirmed.
 10. **Tests.** Skeleton already in `qa/` (May 7). Run the Playwright suite against a non-prod Supabase project (needs you to create one + seed an admin/rep user) and start filling in the high-priority spec files from `qa/QA_PLAN.md`.
 
