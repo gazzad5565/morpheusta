@@ -227,9 +227,11 @@ export default function NotificationsSettingsPage() {
         </div>
       </Card>
 
-      {/* Plain-language explainer card so a non-technical manager can
-          read this once and know exactly what flipping the switch
-          does (and what it doesn't). */}
+      {/* Notification reference — every push + every automatic
+          action in one place, grouped by category, with the trigger
+          + recipient + whether the kill switch above silences it.
+          Plain-language so a non-technical manager can scan it once
+          and know what fires when. Nothing fancy. */}
       <Card padding={20} style={{ marginBottom: 14 }}>
         <div
           style={{
@@ -238,23 +240,94 @@ export default function NotificationsSettingsPage() {
             fontWeight: 700,
             color: AC.ink,
             letterSpacing: -0.1,
-            marginBottom: 8,
+            marginBottom: 4,
           }}
         >
-          What this toggle covers
+          Notification reference
         </div>
-        <Bullet>New shift assigned to a rep</Bullet>
-        <Bullet>Existing shift reassigned to a different rep</Bullet>
-        <Bullet>Shift cancelled (manager-actioned or from a rep flag)</Bullet>
-        <Bullet>
-          Running-late reminder when a rep&apos;s shift start has passed by
-          the late-grace period without a check-in
-        </Bullet>
-        <Bullet>
-          Check-out reminder when a rep&apos;s shift end has passed by 30
-          minutes and they&apos;re still in-progress
-        </Bullet>
-        <Bullet>Rep raises an unable-to-attend flag (notifies all managers)</Bullet>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 12,
+            color: AC.mute,
+            marginBottom: 14,
+            lineHeight: 1.5,
+          }}
+        >
+          Every notification + every automatic action the system fires.
+          Push items are silenced when the toggle above is OFF;
+          auto-actions always run.
+        </div>
+
+        <NotifGroup title="Push notifications · sent to reps">
+          <NotifRow
+            name="Shift assigned"
+            when="Admin assigns a rep to a new shift"
+            recipient="The assigned rep"
+            kind="push"
+          />
+          <NotifRow
+            name="Shift reassigned"
+            when="Admin changes an existing shift's rep"
+            recipient="The new rep"
+            kind="push"
+          />
+          <NotifRow
+            name="Shift cancelled"
+            when="Admin cancels a shift, or actions a rep's can't-make-it flag as cancelled"
+            recipient="The rep who was assigned"
+            kind="push"
+          />
+          <NotifRow
+            name="Running late"
+            when="The rep hasn't checked in and their start time has passed by the late-grace period"
+            recipient="The assigned rep"
+            kind="push"
+            footnote="Late grace lives on Check-in rules (default 10 min). Cron checks every 5 min."
+          />
+          <NotifRow
+            name="Check-out reminder"
+            when="A rep is still in-progress and their end time has passed by the EOD reminder buffer"
+            recipient="The rep"
+            kind="push"
+            footnote="EOD buffer is the field above (default 30 min). Cron checks every 5 min."
+          />
+        </NotifGroup>
+
+        <NotifGroup title="Push notifications · sent to managers">
+          <NotifRow
+            name="Attention raised"
+            when="A rep submits an unable-to-attend flag on the mobile app"
+            recipient="Every manager who's subscribed to notifications"
+            kind="push"
+          />
+        </NotifGroup>
+
+        <NotifGroup title="Automatic actions · always run (not silenced by the toggle)">
+          <NotifRow
+            name="Auto check-out"
+            when="A shift is still active past the configured cutoff time"
+            recipient="No push — shift state is force-completed and an audit event is logged"
+            kind="auto"
+            footnote="Cutoff lives on Check-in rules (default 23:59). Runs via Vercel Cron every 15 min plus an opportunistic sweep whenever a manager opens Live Ops."
+          />
+          <NotifRow
+            name="Orphan location cleanup"
+            when="A rep's location dot is on the admin map but they no longer have an active shift"
+            recipient="No push — the orphaned rep_locations row is deleted"
+            kind="auto"
+            footnote="Piggybacks on the auto check-out sweep."
+          />
+        </NotifGroup>
+
+        <NotifGroup title="In-app realtime · not push, not silenced">
+          <NotifRow
+            name="Needs-action badge"
+            when="A rep raises an attention flag, submits a shift request, or any other event that needs a manager's eye"
+            recipient="Anyone with the Live Ops page open"
+            kind="inapp"
+          />
+        </NotifGroup>
       </Card>
 
       <Card padding={20}>
@@ -310,32 +383,133 @@ export default function NotificationsSettingsPage() {
   );
 }
 
-function Bullet({ children }: { children: React.ReactNode }) {
+/** Section header for the notification reference list. Visually
+ *  separates push / auto-action / in-app categories. */
+function NotifGroup({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 10.5,
+          fontWeight: 700,
+          letterSpacing: 0.6,
+          textTransform: "uppercase",
+          color: AC.mute,
+          marginBottom: 8,
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 0,
+          border: `1px solid ${AC.lineDim}`,
+          borderRadius: 10,
+          overflow: "hidden",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** One notification reference row. Renders four cells in a compact
+ *  stack: name + tag · when · recipient · optional footnote. */
+function NotifRow({
+  name,
+  when,
+  recipient,
+  kind,
+  footnote,
+}: {
+  name: string;
+  when: string;
+  recipient: string;
+  kind: "push" | "auto" | "inapp";
+  footnote?: string;
+}) {
+  const tagPalette = {
+    push: { bg: AC.brandTint, fg: AC.brandDeep, label: "Push" },
+    auto: { bg: AC.okTint, fg: "#0d6a45", label: "Auto" },
+    inapp: { bg: AC.bg, fg: AC.ink2, label: "In-app" },
+  }[kind];
   return (
     <div
       style={{
-        display: "flex",
-        gap: 8,
-        alignItems: "flex-start",
+        padding: "10px 12px",
+        borderBottom: `1px solid ${AC.lineDim}`,
+        background: "#fff",
         fontFamily: AC.font,
         fontSize: 12.5,
-        color: AC.ink2,
-        marginBottom: 6,
         lineHeight: 1.5,
+        color: AC.ink2,
       }}
     >
-      <span
-        aria-hidden
+      <div
         style={{
-          width: 4,
-          height: 4,
-          borderRadius: "50%",
-          background: AC.mute,
-          marginTop: 7,
-          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 2,
         }}
-      />
-      <span>{children}</span>
+      >
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: AC.ink,
+            letterSpacing: -0.1,
+          }}
+        >
+          {name}
+        </span>
+        <span
+          style={{
+            fontSize: 10.5,
+            fontWeight: 700,
+            letterSpacing: 0.3,
+            textTransform: "uppercase",
+            color: tagPalette.fg,
+            background: tagPalette.bg,
+            padding: "2px 6px",
+            borderRadius: 4,
+          }}
+        >
+          {tagPalette.label}
+        </span>
+      </div>
+      <div style={{ fontSize: 12, marginBottom: 2 }}>
+        <span style={{ color: AC.mute, fontWeight: 500 }}>Fires when:</span>{" "}
+        {when}
+      </div>
+      <div style={{ fontSize: 12 }}>
+        <span style={{ color: AC.mute, fontWeight: 500 }}>Recipient:</span>{" "}
+        {recipient}
+      </div>
+      {footnote && (
+        <div
+          style={{
+            fontSize: 11.5,
+            color: AC.mute,
+            marginTop: 6,
+            paddingTop: 6,
+            borderTop: `1px dashed ${AC.lineDim}`,
+            lineHeight: 1.4,
+          }}
+        >
+          {footnote}
+        </div>
+      )}
     </div>
   );
 }
