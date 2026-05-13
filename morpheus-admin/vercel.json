@@ -1,12 +1,3 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/shift-reminders",
-      "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/cron/auto-checkout",
-      "schedule": "30 0 * * *"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json"
 }
