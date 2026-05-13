@@ -40,12 +40,18 @@ import { AppHeader, AppFooter } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
 import { createCustomer, geocodeAddress } from "@/lib/customers-store";
 import { requestGeolocationOnce } from "@/lib/route-planner";
+import { AddressAutocomplete } from "@/components/AddressAutocomplete";
 
 interface Pin {
-  /** "gps"     — captured from device GPS at the moment the rep
-   *              tapped "Use my current location".
-   *  "address" — resolved by Nominatim from the typed address. */
-  source: "gps" | "address";
+  /** "gps"        — captured from device GPS at the moment the rep
+   *                 tapped "Use my current location".
+   *  "address"    — resolved by Nominatim from the typed address
+   *                 via the "Geocode address" button.
+   *  "suggestion" — captured automatically when the rep picked a
+   *                 suggestion from the address-field typeahead.
+   *                 Same data quality as "address" but the rep
+   *                 didn't have to tap a second button. */
+  source: "gps" | "address" | "suggestion";
   latitude: number;
   longitude: number;
 }
@@ -178,18 +184,59 @@ export default function AddCustomerPage() {
             placeholder="e.g. GreenWave Innovations"
             autoFocus
           />
-          <Field
-            label="Address"
-            value={address}
-            onChange={setAddress}
-            placeholder="Street, suburb, city — or leave empty and pin below"
-            multiline
-            hint={
-              pin
+          {/* Address — typeahead via Nominatim. Picking a suggestion
+              captures lat/lng automatically (source: "suggestion")
+              so the rep gets the pin "for free"; the "Geocode
+              address" button below is still here for the case
+              where Nominatim doesn't surface a match for what they
+              typed, and "Use my GPS" handles the on-site case. */}
+          <div>
+            <label
+              style={{
+                display: "block",
+                fontFamily: MC.font,
+                fontSize: 12.5,
+                fontWeight: 700,
+                color: MC.ink2,
+                marginBottom: 6,
+                letterSpacing: -0.05,
+              }}
+            >
+              Address
+            </label>
+            <AddressAutocomplete
+              value={address}
+              onChange={(v) => {
+                setAddress(v);
+                // Typing after a suggestion was picked doesn't clear
+                // the pin — coords stay locked, the rep can rename
+                // the display label freely. They can tap the chip's
+                // × to clear if they want to redo the lookup.
+              }}
+              onSelect={(s) => {
+                setPin({
+                  source: "suggestion",
+                  latitude: s.latitude,
+                  longitude: s.longitude,
+                });
+                setPinError(null);
+              }}
+              placeholder="Start typing — e.g. 12 Loop St Cape Town"
+            />
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 11.5,
+                color: MC.hint,
+                marginTop: 6,
+                lineHeight: 1.4,
+              }}
+            >
+              {pin
                 ? "Pinned — you can rename this freely; the geofence stays locked to the pin."
-                : "Type it, or pin the location below. One of the two is needed."
-            }
-          />
+                : "Pick a suggestion to auto-pin, or pin manually below. One of the two is needed."}
+            </div>
+          </div>
 
           {/* Pin buttons — let the rep capture coords either from
               their current GPS (most accurate when actually on-site)
@@ -280,7 +327,11 @@ export default function AddCustomerPage() {
                 <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
                   {pin.latitude.toFixed(5)}, {pin.longitude.toFixed(5)}
                 </span>
-                {pin.source === "gps" ? " (your GPS)" : " (from address)"}
+                {pin.source === "gps"
+                  ? " (your GPS)"
+                  : pin.source === "suggestion"
+                  ? " (from suggestion)"
+                  : " (from address)"}
               </span>
               <button
                 type="button"
