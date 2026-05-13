@@ -2,20 +2,22 @@ import type { NextConfig } from "next";
 
 /**
  * Monorepo gotcha: morpheus-admin lives in a subdirectory of a
- * larger repo (alongside morpheus-mobile, qa, db). On Vercel
- * builds, `outputFileTracingRoot` defaults to the repo root
- * (/vercel/path0). Turbopack also expects a root — if those two
- * diverge, Next.js 16 fires a warning AND can include too many
- * files in the tracing output, bloating the deploy.
+ * larger repo (alongside morpheus-mobile, qa, db). Setting
+ * turbopack.root anchors local dev's filesystem tracing here so
+ * Turbopack doesn't try to crawl the entire monorepo.
  *
- * Setting both to the same `import.meta.dirname` (= this directory,
- * i.e. /path/to/repo/morpheus-admin) keeps them aligned. Each value
- * resolves at build time on Vercel to /vercel/path0/morpheus-admin,
- * matching what the Vercel project's "Root Directory" setting
- * expects.
+ * NOTE on outputFileTracingRoot: do NOT set this to
+ * import.meta.dirname. It produces a Next.js 16 warning
+ * ("outputFileTracingRoot and turbopack.root must match"), and
+ * the previous attempt to align them by hard-coding both to the
+ * admin subdir broke Vercel's post-build deployment step — the
+ * deploy silently failed after "Build Completed". Leaving
+ * outputFileTracingRoot unset means Vercel picks /vercel/path0
+ * at build time, which is what the platform's post-build
+ * validator expects. The warning is cosmetic and worth living
+ * with vs the alternative of broken deploys.
  */
 const nextConfig: NextConfig = {
-  outputFileTracingRoot: import.meta.dirname,
   turbopack: {
     root: import.meta.dirname,
   },
