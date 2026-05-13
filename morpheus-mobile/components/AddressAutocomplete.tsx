@@ -49,16 +49,28 @@ export function AddressAutocomplete({
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<Suggestion[]>([]);
   const [highlight, setHighlight] = useState(-1);
+  // Surface failures explicitly in the dropdown so the rep isn't
+  // left wondering "did it search?" — distinguishes a network /
+  // service error from a genuine "no matches" empty result.
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const lastQueryRef = useRef<string>("");
 
   // Debounced lookup — fires 350 ms after the rep stops typing,
   // and only when the trimmed query has at least 3 chars to avoid
   // burning Nominatim quota on partial words.
+  //
+  // Identical request shape to the admin's /api/geocode/suggest
+  // route (same params, same upstream Nominatim endpoint). So
+  // anything that returns a match in admin should return one here
+  // too — and vice versa. If a rep reports "my address didn't
+  // surface", the issue is upstream (Nominatim didn't index it)
+  // not a divergence between the two apps.
   useEffect(() => {
     const q = value.trim();
     if (q.length < MIN_QUERY) {
       setResults([]);
       setLoading(false);
+      setFetchError(null);
       return;
     }
     if (q === lastQueryRef.current) return;
@@ -66,19 +78,34 @@ export function AddressAutocomplete({
     const handle = setTimeout(async () => {
       lastQueryRef.current = q;
       setLoading(true);
+      setFetchError(null);
       try {
         const res = await fetch(
           `/api/geocode/suggest?q=${encodeURIComponent(q)}`
         );
         if (!res.ok) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[geocode] suggest fetch failed",
+            res.status,
+            res.statusText
+          );
           setResults([]);
+          setFetchError(
+            res.status === 502
+              ? "Address service is busy — try again in a moment."
+              : `Address service returned ${res.status}.`
+          );
           return;
         }
         const data = (await res.json()) as { results: Suggestion[] };
         setResults(data.results ?? []);
         setHighlight(-1);
-      } catch {
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[geocode] suggest threw", err);
         setResults([]);
+        setFetchError("Couldn't reach the address service — check your connection.");
       } finally {
         setLoading(false);
       }
@@ -196,6 +223,21 @@ export function AddressAutocomplete({
               </div>
             )}
             {!loading &&
+              fetchError && (
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    color: "#9c1a3c",
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {fetchError}
+                </div>
+              )}
+            {!loading &&
+              !fetchError &&
               results.length === 0 &&
               value.trim().length >= MIN_QUERY && (
                 <div
@@ -204,9 +246,14 @@ export function AddressAutocomplete({
                     fontFamily: MC.font,
                     fontSize: 13,
                     color: MC.mute,
+                    lineHeight: 1.4,
                   }}
                 >
-                  No matches — keep typing or tap “Geocode address” below.
+                  No matches for &ldquo;{value.trim()}&rdquo;. Try a
+                  shorter version (e.g. just the street + city), or
+                  tap &ldquo;Geocode what I typed&rdquo; below — the
+                  manual lookup sometimes catches what the typeahead
+                  misses.
                 </div>
               )}
             {!loading &&

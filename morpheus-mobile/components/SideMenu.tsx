@@ -319,7 +319,24 @@ export function SideMenu() {
           >
             Last sync · {formatSyncTime(new Date())}
           </div>
-          <div style={{ fontSize: 11, color: MC.hint }}>Powered by Morpheus</div>
+          <div
+            style={{
+              fontSize: 11,
+              color: MC.hint,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+            }}
+          >
+            Powered by{" "}
+            <span style={{ fontWeight: 800, color: MC.ink2, letterSpacing: 0.4 }}>
+              MORPHEUS
+            </span>
+            <span style={{ fontWeight: 800, color: MC.brand, letterSpacing: 0.4 }}>
+              OPS
+            </span>
+          </div>
         </div>
       </div>
     </div>
