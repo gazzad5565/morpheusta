@@ -2,11 +2,11 @@
   "crons": [
     {
       "path": "/api/cron/shift-reminders",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/cron/auto-checkout",
-      "schedule": "*/15 * * * *"
+      "schedule": "30 0 * * *"
     }
   ]
 }
