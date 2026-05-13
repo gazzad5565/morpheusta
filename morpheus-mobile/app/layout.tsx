@@ -6,6 +6,7 @@ import { AuthGate } from "@/components/AuthGate";
 import { RequestResolutionWatcher } from "@/components/RequestResolutionWatcher";
 import { ShiftAssignmentWatcher } from "@/components/ShiftAssignmentWatcher";
 import { PendingRequestPill } from "@/components/PendingRequestPill";
+import { MessageBanner } from "@/components/MessageBanner";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -67,6 +68,11 @@ export default function RootLayout({
                 this gives full closure: a pill while waiting + a
                 banner when the result lands. */}
             <PendingRequestPill />
+            {/* In-app banner for manager-sent messages (Feature E).
+                Renders top-of-screen for ~6s when a new message
+                arrives. Suppressed when the rep is already on
+                /messages. */}
+            <MessageBanner />
           </AuthGate>
         </div>
       </body>

@@ -7,7 +7,8 @@ export type GlyphName =
   | "pin" | "clock" | "warn" | "info"
   | "log" | "leave" | "book" | "target"
   | "close" | "mic" | "camera" | "note"
-  | "sparkle" | "house" | "face";
+  | "sparkle" | "house" | "face"
+  | "send" | "edit";
 
 interface Props {
   name: GlyphName | string;
@@ -53,6 +54,8 @@ export function Glyph({ name, size = 22, color = "currentColor", strokeWidth = 1
     case "sparkle":  return <svg {...common}><path d="M12 3v6M12 15v6M3 12h6M15 12h6M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/></svg>;
     case "house":    return <svg {...common}><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V11z"/></svg>;
     case "face":     return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>;
+    case "send":     return <svg {...common}><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>;
+    case "edit":     return <svg {...common}><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>;
     default:         return null;
   }
 }

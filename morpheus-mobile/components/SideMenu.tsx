@@ -9,6 +9,7 @@ import { useMenu } from "./MenuShell";
 import { signOut } from "@/lib/auth";
 import { getMyProfile, type Profile } from "@/lib/profiles-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
+import { countMyUnread, subscribeMyInbox } from "@/lib/messaging-store";
 
 // Local deriveInitials removed — now uses shared initialsFromNameOrEmail.
 
@@ -34,6 +35,10 @@ const ITEMS: Item[] = [
   // Reps either need a NEW customer (this flow) or want to schedule
   // against an EXISTING one (/add-shift).
   { id: "add-customer", label: "Add customer", icon: "house", color: "#10897F", href: "/add-customer" },
+  // Messaging (May 13) — manager-to-rep messages with optional
+  // push delivery. Unread count appears as a brand-tinted badge
+  // alongside the label.
+  { id: "messages",  label: "Messages",       icon: "send",  color: MC.brand,  href: "/messages" },
   { id: "library",   label: "Library",         icon: "book",  color: "#5b3da5", href: "/library" },
   { id: "support",   label: "Support",         icon: "mic",   color: "#9c4a2c", href: "/support" },
   { id: "profile",   label: "Profile", icon: "leave", color: MC.mute,   href: "/profile" },
@@ -65,14 +70,26 @@ export function SideMenu() {
   const pathname = usePathname() || "/";
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
+  // Unread Messages count for the Messages menu badge. Realtime-
+  // subscribed so opening the menu always shows a fresh count, and
+  // marking a message read elsewhere bumps the badge down live.
+  const [unreadMessages, setUnreadMessages] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
     getMyProfile().then((p) => {
       if (!cancelled) setProfile(p);
     });
+    const refreshUnread = () => {
+      void countMyUnread().then((n) => {
+        if (!cancelled) setUnreadMessages(n);
+      });
+    };
+    refreshUnread();
+    const unsub = subscribeMyInbox({ onChange: refreshUnread });
     return () => {
       cancelled = true;
+      unsub();
     };
   }, []);
 
@@ -279,7 +296,35 @@ export function SideMenu() {
                 >
                   {it.label}
                 </div>
-                {isCurrent && (
+                {/* Messages unread badge — brand-tinted pill with the
+                    raw count (caps display at 99+). Hidden when 0
+                    so the menu stays calm when there's nothing new. */}
+                {it.id === "messages" && unreadMessages > 0 && (
+                  <span
+                    style={{
+                      marginLeft: "auto",
+                      background: MC.brand,
+                      color: "#fff",
+                      fontFamily: MC.font,
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      letterSpacing: 0.3,
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      minWidth: 22,
+                      textAlign: "center",
+                    }}
+                  >
+                    {unreadMessages > 99 ? "99+" : unreadMessages}
+                  </span>
+                )}
+                {/* Dot indicator for the currently-active page. We
+                    suppress it on the Messages row WHEN there's an
+                    unread badge already drawing attention there;
+                    otherwise (zero unread but currently on /messages)
+                    the dot still renders so the menu reflects the
+                    current page consistently. */}
+                {isCurrent && !(it.id === "messages" && unreadMessages > 0) && (
                   <div
                     style={{
                       marginLeft: "auto",
