@@ -26,6 +26,7 @@ import { AGlyph } from "@/components/ui/AGlyph";
 import { RepAvatar } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { listShifts, subscribeShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
+import { LIVE_FEED_NEEDS_ACTION_HASH } from "@/components/screens/live-ops/LiveFeedPanel";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import { countTasksForCustomers } from "@/lib/tasks-store";
@@ -334,6 +335,13 @@ export function ShiftsList() {
             }
           />
         ) : (
+          // Needs Action override: when this filter is active, BOTH
+          // row kinds redirect to the Live Feed's Needs Action tab
+          // (#live-feed-needs-action) instead of their usual detail
+          // page. Reason: the manager already has inline approve /
+          // decline / reassign affordances in that panel; the shift
+          // detail page just sends them on a detour for the same
+          // result. Per product, May 13.
           filtered.map((r) =>
             r.kind === "shift" ? (
               <ShiftRowView
@@ -341,9 +349,22 @@ export function ShiftsList() {
                 row={r.shift}
                 rep={r.shift.rep_id ? reps[r.shift.rep_id] : undefined}
                 liveTaskTotal={taskCountByCustomer.get(r.shift.customer_id)}
+                linkOverride={
+                  active === "Needs action"
+                    ? `#${LIVE_FEED_NEEDS_ACTION_HASH}`
+                    : undefined
+                }
               />
             ) : (
-              <RequestRowView key={`r-${r.request.id}`} request={r.request} />
+              <RequestRowView
+                key={`r-${r.request.id}`}
+                request={r.request}
+                linkOverride={
+                  active === "Needs action"
+                    ? `#${LIVE_FEED_NEEDS_ACTION_HASH}`
+                    : undefined
+                }
+              />
             )
           )
         )}
@@ -396,6 +417,7 @@ function ShiftRowView({
   rep,
   header,
   liveTaskTotal,
+  linkOverride,
 }: {
   row?: ShiftRow;
   rep?: RepLite;
@@ -406,6 +428,10 @@ function ShiftRowView({
    *  when a customer's task list grows after the shift was scheduled. */
   liveTaskTotal?: number;
   header?: boolean;
+  /** When set, overrides the default shiftHref. Used by the Needs
+   *  Action filter to send clicks to the Live Feed panel above
+   *  instead of the shift detail page. */
+  linkOverride?: string;
 }) {
   if (header) {
     return (
@@ -427,10 +453,12 @@ function ShiftRowView({
   const state = STATE_MAP[stateKey] || STATE_MAP.scheduled;
   const checkIn = formatCheckIn(row.check_in_at);
 
-  // Make the row a link to the shift detail page.
+  // Make the row a link to the shift detail page — UNLESS the
+  // parent told us to redirect (Needs Action filter sends clicks
+  // to the Live Feed panel above instead).
   return (
     <a
-      href={shiftHref(row)}
+      href={linkOverride ?? shiftHref(row)}
       style={{
         ...shiftRowGrid(),
         textDecoration: "none",
@@ -642,10 +670,19 @@ function TaskBar({ done, total }: { done: number; total: number }) {
  * left rail, "Requested" pill in the State column). Click → /requests
  * for approve / decline.
  */
-function RequestRowView({ request: r }: { request: PendingRequest }) {
+function RequestRowView({
+  request: r,
+  linkOverride,
+}: {
+  request: PendingRequest;
+  /** When set, overrides the default /requests link. Used by the
+   *  Needs Action filter to send clicks to the Live Feed panel
+   *  above instead. */
+  linkOverride?: string;
+}) {
   return (
     <Link
-      href="/requests"
+      href={linkOverride ?? "/requests"}
       style={{
         ...shiftRowGrid(),
         textDecoration: "none",

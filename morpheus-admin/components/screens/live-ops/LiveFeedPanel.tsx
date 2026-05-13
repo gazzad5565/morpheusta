@@ -132,12 +132,38 @@ function formatRelative(iso: string): string {
   return `${days}d`;
 }
 
+/**
+ * URL fragment used to deep-link directly to the Needs Action tab.
+ *
+ * Today's Shifts (the ShiftsList panel below the fold) renders a
+ * "Needs action" filter that mixes pending requests + attention-
+ * flagged shifts. Per product (May 13) clicking a row in THAT filter
+ * shouldn't navigate to the shift detail — the manager already has
+ * the inline approve/decline + reassign affordances in this panel,
+ * so a row click there scrolls back up here and flips this tab on.
+ *
+ * Using a URL hash keeps the two panels decoupled (no event bus or
+ * lifted state), it's deep-linkable, and the browser's native
+ * fragment scrolling handles the scroll-into-view for free.
+ */
+export const LIVE_FEED_NEEDS_ACTION_HASH = "live-feed-needs-action";
+
 export function LiveFeedPanel() {
   const router = useRouter();
   // Default tab = "All activity" — the feed is the primary thing
   // managers want to see. The "Needs action" pill below already pulses
   // when there's something to deal with, so they won't miss it.
-  const [activeTab, setActiveTab] = useState<TabKey>("all");
+  //
+  // Override: if the page was loaded with a #live-feed-needs-action
+  // hash (e.g. ShiftsList row click), start ON the Needs Action tab.
+  // The hashchange listener below handles in-session jumps; this
+  // initial-state branch handles first paint and full reloads.
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    if (typeof window === "undefined") return "all";
+    return window.location.hash === `#${LIVE_FEED_NEEDS_ACTION_HASH}`
+      ? "needs-action"
+      : "all";
+  });
   // Date range for the All activity feed. Default = Today since the
   // event log grows quickly and "today's pulse" is what the manager
   // most often needs. The feed itself is capped to 50 most-recent
@@ -426,6 +452,22 @@ export function LiveFeedPanel() {
       setActiveTab("all");
     }
   }, [activeTab, needsActionCount]);
+
+  // Hashchange handler: when ShiftsList sends the manager to
+  // /#live-feed-needs-action (clicking a row in its "Needs action"
+  // filter), flip THIS tab to Needs Action. The browser's native
+  // fragment scrolling handles bringing the panel into view via
+  // the matching id on the Card wrapper below.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onHashChange = () => {
+      if (window.location.hash === `#${LIVE_FEED_NEEDS_ACTION_HASH}`) {
+        setActiveTab("needs-action");
+      }
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
   const tabs: {
     key: TabKey;
     label: string;
@@ -447,7 +489,15 @@ export function LiveFeedPanel() {
   ];
 
   return (
+    // Anchor id lets ShiftsList' "Needs action" filter deep-link a row
+    // click into this panel — see LIVE_FEED_NEEDS_ACTION_HASH above.
+    // scrollMarginTop reserves room for the sticky topbar so the panel
+    // doesn't get tucked under the chrome when the browser scrolls to it.
     <Card padding={0}>
+      <div
+        id={LIVE_FEED_NEEDS_ACTION_HASH}
+        style={{ scrollMarginTop: 80 }}
+      >
       <div style={{ padding: "12px 14px 0", borderBottom: `1px solid ${AC.line}` }}>
         <div
           style={{
@@ -608,6 +658,7 @@ export function LiveFeedPanel() {
           range={range}
         />
       )}
+      </div>{/* end #live-feed-needs-action anchor wrapper */}
     </Card>
   );
 }
