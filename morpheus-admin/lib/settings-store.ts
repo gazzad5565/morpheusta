@@ -366,6 +366,38 @@ export async function setRouteOptimizationAllowed(
   return writeSetting("route_optimization_allowed", !!on);
 }
 
+// ─── Push notifications kill switch ──────────────────────────────
+//
+// Org-wide on/off for ALL Web Push delivery — covers:
+//   - rep-targeted pushes (shift assigned / reassigned / cancelled,
+//     running late, EOD checkout reminder)
+//   - manager-targeted pushes (rep raised attention)
+// The gate is enforced inside lib/push-send.ts (the bottleneck every
+// path funnels through) so adding a new event type can't accidentally
+// bypass it.
+//
+// IMPORTANT: this DOES NOT affect the auto-checkout sweep. That logic
+// lives in sweepStaleShifts() and is the safety net that actually
+// closes a forgotten shift at app_settings.auto_checkout_time. Push
+// reminders are a separate nudge layer — flipping pushes off just
+// means the rep won't see a "Don't forget to check out" notification;
+// the shift still gets force-completed by the sweep when the cutoff
+// elapses.
+//
+// Default ON so a brand-new install delivers pushes immediately
+// (matches every other notification-style feature in the app).
+
+export async function getPushNotificationsEnabled(): Promise<boolean> {
+  const v = await readSetting<boolean>("push_notifications_enabled", true);
+  return v === false ? false : true;
+}
+
+export async function setPushNotificationsEnabled(
+  on: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting("push_notifications_enabled", !!on, "notifications");
+}
+
 /** One-shot fetch of every org text field for a settings form. */
 export async function getOrganisationDetails(): Promise<{
   address: string;

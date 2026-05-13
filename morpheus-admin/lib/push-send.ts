@@ -38,6 +38,39 @@ function serviceClient() {
   });
 }
 
+/**
+ * Org-wide kill switch check. Reads app_settings.push_notifications_enabled
+ * directly with the service-role client (we're already inside a server-
+ * only module so no RLS round-trip needed). Default ON when the row is
+ * missing or unparseable — a brand-new install still gets pushes.
+ *
+ * IMPORTANT: this guards push DELIVERY only. Auto-checkout
+ * (sweepStaleShifts) is a completely separate code path and is NOT
+ * affected by this flag.
+ */
+async function pushNotificationsEnabled(): Promise<boolean> {
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+    // Without service-role we can't read app_settings; fall back to ON
+    // so the env-var misconfig doesn't silently disable pushes.
+    return true;
+  }
+  try {
+    const sb = serviceClient();
+    const { data } = await sb
+      .from("app_settings")
+      .select("value")
+      .eq("key", "push_notifications_enabled")
+      .maybeSingle();
+    const v = (data as { value?: unknown } | null)?.value;
+    if (v === false) return false;
+    return true;
+  } catch (err) {
+    // Don't let a transient DB blip kill all pushes. Log and default ON.
+    console.warn("[push] kill-switch read failed; defaulting ON", err);
+    return true;
+  }
+}
+
 export interface PushPayload {
   title: string;
   body: string;
@@ -71,6 +104,12 @@ export async function sendPushToRep(
 
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
     console.warn("[push] missing Supabase config — skipping send");
+    return result;
+  }
+  // Org-wide kill switch — managers can flip all pushes off from
+  // /settings/notifications. Auto-checkout is unaffected.
+  if (!(await pushNotificationsEnabled())) {
+    console.info("[push] org has notifications disabled — skipping rep send");
     return result;
   }
   configureVapidOnce();
@@ -276,6 +315,12 @@ export async function sendPushToManagers(
 
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
     console.warn("[push] missing Supabase config — skipping managers send");
+    return result;
+  }
+  // Same kill-switch check as sendPushToRep so a "notifications off"
+  // org silences manager broadcasts too. Auto-checkout is unaffected.
+  if (!(await pushNotificationsEnabled())) {
+    console.info("[push] org has notifications disabled — skipping managers send");
     return result;
   }
   configureVapidOnce();

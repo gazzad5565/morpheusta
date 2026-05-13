@@ -73,8 +73,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: "Notifications",
     href: "/settings/notifications",
     glyph: "send",
-    description: "Email + push notifications.",
-    available: false,
+    description: "Org-wide push notifications on/off. Auto-checkout is independent.",
+    available: true,
   },
   {
     id: "billing",

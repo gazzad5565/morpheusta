@@ -1,44 +1,291 @@
 "use client";
 
 /**
- * /settings/notifications — placeholder. The rail item is marked SOON
- * and rendered as non-clickable, but if someone hits the URL directly
- * we still want a friendly page rather than a 404.
+ * /settings/notifications — org-wide push notifications controls.
+ *
+ * Single setting today: `push_notifications_enabled` (default ON).
+ * Flipping it OFF immediately silences every Web Push delivery path:
+ *   - Shift assigned / reassigned / cancelled (manager actions)
+ *   - Running late / EOD checkout reminders (Vercel Cron sweep)
+ *   - Rep raised attention flag (mobile → admin broadcast)
+ *
+ * What this setting DOES NOT touch:
+ *   - Auto-checkout sweep (sweepStaleShifts). A rep who forgets to
+ *     check out still gets force-completed at app_settings.auto_checkout_time
+ *     regardless of this toggle.
+ *   - In-app notification banners (the realtime "Needs action" badge
+ *     on Live Ops keeps firing — that's a separate channel).
+ *   - Push subscription registration. Reps can still opt in / opt
+ *     out from /profile on the mobile app while pushes are globally
+ *     off, so flipping the switch back on later resumes delivery
+ *     without anyone having to re-subscribe.
+ *
+ * The gate is enforced inside lib/push-send.ts (the bottleneck every
+ * push path funnels through) so adding a new event type later can't
+ * accidentally bypass it.
  */
 
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { SettingsShell } from "@/components/shell/SettingsShell";
 import { AC } from "@/lib/tokens";
+import {
+  getPushNotificationsEnabled,
+  setPushNotificationsEnabled,
+} from "@/lib/settings-store";
 
 export default function NotificationsSettingsPage() {
+  const [enabled, setEnabled] = useState<boolean>(true);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    getPushNotificationsEnabled().then((on) => {
+      setEnabled(on);
+      setLoaded(true);
+    });
+  }, []);
+
+  const onToggle = async (next: boolean) => {
+    // Optimistic flip so the switch animates immediately; revert if
+    // the write fails so the UI never lies.
+    setEnabled(next);
+    setSaving(true);
+    setMessage(null);
+    const r = await setPushNotificationsEnabled(next);
+    setSaving(false);
+    if (!r.ok) {
+      setEnabled(!next);
+      setMessage(r.error || "Couldn't save.");
+      return;
+    }
+    setMessage(
+      next
+        ? "Push notifications enabled — reps + managers will get pushes for shift events and reminders."
+        : "Push notifications disabled. Auto-checkout still runs at the scheduled cutoff."
+    );
+  };
+
   return (
-    <SettingsShell section="notifications">
-      <Card padding={36}>
+    <SettingsShell
+      section="notifications"
+      description="Org-wide on/off for every Web Push notification. Reps still subscribe / unsubscribe from /profile on the mobile app; this just controls whether the server actually delivers."
+    >
+      <Card padding={20} style={{ marginBottom: 14 }}>
+        <ToggleRow
+          title="Send push notifications"
+          subtitle="Shift assignments, reassignments, cancellations, running-late nudges, EOD check-out reminders, and rep attention flags. Auto-checkout is not affected by this toggle."
+          on={enabled}
+          saving={saving}
+          disabled={!loaded}
+          onChange={onToggle}
+        />
+      </Card>
+
+      {/* Plain-language explainer card so a non-technical manager can
+          read this once and know exactly what flipping the switch
+          does (and what it doesn't). */}
+      <Card padding={20} style={{ marginBottom: 14 }}>
         <div
           style={{
             fontFamily: AC.font,
-            fontSize: 14,
-            color: AC.ink2,
-            textAlign: "center",
-            fontWeight: 600,
+            fontSize: 13,
+            fontWeight: 700,
+            color: AC.ink,
+            letterSpacing: -0.1,
+            marginBottom: 8,
           }}
         >
-          Coming soon
+          What this toggle covers
+        </div>
+        <Bullet>New shift assigned to a rep</Bullet>
+        <Bullet>Existing shift reassigned to a different rep</Bullet>
+        <Bullet>Shift cancelled (manager-actioned or from a rep flag)</Bullet>
+        <Bullet>
+          Running-late reminder when a rep&apos;s shift start has passed by
+          the late-grace period without a check-in
+        </Bullet>
+        <Bullet>
+          Check-out reminder when a rep&apos;s shift end has passed by 30
+          minutes and they&apos;re still in-progress
+        </Bullet>
+        <Bullet>Rep raises an unable-to-attend flag (notifies all managers)</Bullet>
+      </Card>
+
+      <Card padding={20}>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 13,
+            fontWeight: 700,
+            color: AC.ink,
+            letterSpacing: -0.1,
+            marginBottom: 8,
+          }}
+        >
+          Auto-checkout still runs
         </div>
         <div
           style={{
             fontFamily: AC.font,
             fontSize: 12,
             color: AC.mute,
-            textAlign: "center",
-            marginTop: 6,
+            lineHeight: 1.55,
+          }}
+        >
+          Push notifications are a <strong>nudge layer</strong>. Auto-checkout
+          is the <strong>safety net</strong>. If a rep forgets to check out,
+          the system force-completes their shift at the cutoff time
+          regardless of whether push notifications are on or off. Configure
+          the cutoff under{" "}
+          <a
+            href="/settings/check-in-rules"
+            style={{ color: AC.brandDeep, textDecoration: "underline" }}
+          >
+            Check-in rules → Auto check-out time
+          </a>{" "}
+          (default 23:59).
+        </div>
+      </Card>
+
+      {message && (
+        <div
+          style={{
+            marginTop: 12,
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            color: AC.brandDeep,
             lineHeight: 1.5,
           }}
         >
-          Email + push notifications for shift changes, late check-ins, and
-          escalations. Stay tuned.
+          {message}
         </div>
-      </Card>
+      )}
     </SettingsShell>
+  );
+}
+
+function Bullet({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        alignItems: "flex-start",
+        fontFamily: AC.font,
+        fontSize: 12.5,
+        color: AC.ink2,
+        marginBottom: 6,
+        lineHeight: 1.5,
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 4,
+          height: 4,
+          borderRadius: "50%",
+          background: AC.mute,
+          marginTop: 7,
+          flexShrink: 0,
+        }}
+      />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+/** Mirrors the ToggleRow shape used on /settings/check-in-rules so
+ *  the two pages feel identical. Inlined rather than extracted —
+ *  it's 80 lines and there are only two consumers. */
+function ToggleRow({
+  title,
+  subtitle,
+  on,
+  saving,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  subtitle: string;
+  on: boolean;
+  saving: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const isOff = !disabled && !on;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => !disabled && !saving && onChange(!on)}
+      disabled={disabled || saving}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        width: "100%",
+        padding: "8px 4px",
+        border: "none",
+        background: "transparent",
+        cursor: disabled || saving ? "not-allowed" : "pointer",
+        textAlign: "left",
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 13.5,
+            fontWeight: 600,
+            color: AC.ink,
+            letterSpacing: -0.1,
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 11.5,
+            color: AC.mute,
+            marginTop: 3,
+            lineHeight: 1.4,
+          }}
+        >
+          {subtitle}
+        </div>
+      </div>
+      <div
+        aria-hidden
+        style={{
+          width: 42,
+          height: 24,
+          borderRadius: 99,
+          background: on ? AC.brand : isOff ? "#cbd5e1" : AC.line,
+          position: "relative",
+          transition: "background .2s ease",
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            background: "#fff",
+            position: "absolute",
+            top: 3,
+            left: on ? 21 : 3,
+            transition: "left .2s ease",
+            boxShadow: "0 1px 2px rgba(0,0,0,.18)",
+            opacity: saving ? 0.6 : 1,
+          }}
+        />
+      </div>
+    </button>
   );
 }

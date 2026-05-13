@@ -1210,6 +1210,62 @@ CORS: `/api/push/notify` exposes `Access-Control-Allow-Origin` to the mobile ori
 - No admin UI for sending arbitrary test pushes. Could be added on `/reps/[id]` as a "Send test" button if useful for debugging.
 - EOD_BUFFER_MINUTES is a constant (30) — could be promoted to `app_settings` if managers want to tune it.
 
+### Push kill switch — `/settings/notifications` (shipped May 13)
+
+Org-wide on/off for every Web Push delivery path. The toggle lives at
+`/settings/notifications` on the admin console; the backing setting is
+`app_settings.push_notifications_enabled` (boolean, default ON).
+
+**What this toggle covers (gated inside `lib/push-send.ts`):**
+- Shift assigned / reassigned / cancelled (manager-initiated)
+- Running-late + EOD-checkout reminders (Vercel Cron sweep)
+- Rep raised attention flag → broadcast to managers
+
+The gate is enforced inside `pushNotificationsEnabled()` in `push-send.ts`,
+called at the top of BOTH `sendPushToRep` and `sendPushToManagers`. Every
+push path funnels through one of those two functions, so adding a new
+event type can't accidentally bypass the gate.
+
+**What this toggle does NOT touch — IMPORTANT:**
+- **Auto-checkout sweep (`sweepStaleShifts`)** still runs unchanged.
+  A rep who forgets to check out gets force-completed at
+  `app_settings.auto_checkout_time` (default 23:59) regardless of
+  whether pushes are on or off. The push reminder is the **nudge**;
+  auto-checkout is the **safety net**.
+- In-app realtime notifications (the manager's "Needs action" badge)
+  keep firing — that's a separate channel.
+- Push subscription registration is unaffected. Reps can still
+  subscribe / unsubscribe from `/profile`; if a manager flips the
+  org switch back on later, delivery resumes without anyone having
+  to re-subscribe.
+
+### Auto-checkout vs push reminders — precise timing
+
+Two completely independent code paths. Don't confuse them.
+
+| Concern | Push reminder | Auto-checkout |
+|---|---|---|
+| **Code** | `morpheus-admin/app/api/cron/shift-reminders/route.ts` | `morpheus-admin/lib/shifts-store.ts → sweepStaleShifts()` |
+| **Trigger** | Vercel Cron, every 5 min | Admin Live Ops home mount + tab-focus event |
+| **Frequency** | Predictable, server-driven | Opportunistic — only runs when a manager has the admin tab open |
+| **What it does** | Sends a push notification to the rep's phone | Marks the shift as `state='complete'`, stamps `check_out_at`, logs `shift.auto_checked_out` |
+| **EOD threshold** | 30 min past `end_time` (constant `EOD_BUFFER_MINUTES`) | `app_settings.auto_checkout_time` (default `23:59`) |
+| **Modifies shift state?** | ❌ No — only sends a notification | ✅ Yes — sets `state='complete'` + `check_out_at` |
+| **Affected by push kill switch?** | ✅ Yes — silenced when the toggle is off | ❌ No — completely independent |
+| **Required for production?** | Nice-to-have nudge | Mandatory safety net |
+
+**The chain of events on a "rep forgot to check out" day:**
+
+1. Rep's shift `end_time` = 17:00. They check in at 13:00, work, then leave without tapping Check out.
+2. **17:30** (end_time + 30 min) — `/api/cron/shift-reminders` fires the EOD push. Rep sees "Don't forget to check out" on their phone.
+3. **17:30+** — rep either taps the notification → `/active` → Check out (resolves cleanly), OR ignores it.
+4. **23:59** (or whatever `auto_checkout_time` is) — the next admin tab focus triggers `sweepStaleShifts()` which force-completes the shift. `check_out_at = NOW()`, state → `complete`, `shift.auto_checked_out` event logged.
+5. Timesheet shows the shift as complete with the auto-checkout timestamp; the audit event distinguishes it from a real rep check-out.
+
+**If push notifications are OFF in the org settings**, step 2 silently no-ops. Steps 1, 3, 4, 5 all still work. The rep just doesn't get the nudge. The shift still closes.
+
+**Known limitation that pre-dates phase 2:** `sweepStaleShifts()` only runs when an admin has the Live Ops page open. If no manager opens the admin for several days, stale shifts accumulate. The fix is a `pg_cron` job or a separate Vercel Cron route — already on the deferred list as "Background sweep (`pg_cron`)". Phase 2 didn't address this; it's orthogonal.
+
 The May 11 "calendar — add second shift to occupied slot" ask
 shipped on May 12 (commits `adc7ed6`, `8197bf1`, `2bf4e8a`): the
 quick popover now has "Add another here" + "Edit here" inline
