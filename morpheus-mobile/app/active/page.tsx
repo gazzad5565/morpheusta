@@ -1953,21 +1953,50 @@ function PhotoSlotGrid({
   );
   const [previewing, setPreviewing] = useState<UploadedPhoto | null>(null);
 
+  // One hidden <input type="file"> per slot. Keyed by slot index so
+  // each tap on a slot triggers EXACTLY that slot's input. Using a
+  // ref + programmatic .click() (instead of an absolute-positioned
+  // input overlaid on a <label>) is the bullet-proof iOS/Android
+  // pattern — the label-overlay approach silently no-opped on a
+  // device in the field (May 13 bug report from Gary).
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const openPicker = (slotIndex: number) => {
+    if (busySlot !== null) return;
+    setSlotError(null);
+    // Synchronous .click() inside the user-initiated tap handler — iOS
+    // Safari only allows file pickers to open from a user gesture, and
+    // this synchronous call inside onClick qualifies.
+    inputRefs.current[slotIndex]?.click();
+  };
+
   const handleFile = async (slotIndex: number, file: File) => {
     setSlotError(null);
     setBusySlot(slotIndex);
-    const r = await uploadShiftTaskPhoto({
-      shiftId,
-      taskId,
-      slotIndex,
-      file,
-    });
-    setBusySlot(null);
-    if (!r.ok) {
-      setSlotError({ slot: slotIndex, msg: r.error });
+    try {
+      const r = await uploadShiftTaskPhoto({
+        shiftId,
+        taskId,
+        slotIndex,
+        file,
+      });
+      setBusySlot(null);
+      if (!r.ok) {
+        setSlotError({ slot: slotIndex, msg: r.error });
+      }
+      // No state push needed — the realtime sub on the parent will
+      // refresh the photos array within a fraction of a second.
+    } catch (err) {
+      // Defensive catch — if compression or upload throws (not a
+      // returned {ok:false}), surface the error to the rep instead
+      // of leaving the slot stuck in busy state. Helps debug
+      // intermittent device-side failures.
+      setBusySlot(null);
+      const msg = err instanceof Error ? err.message : "Upload crashed";
+      setSlotError({ slot: slotIndex, msg });
+      // eslint-disable-next-line no-console
+      console.warn("[photos] handleFile threw:", err);
     }
-    // No state push needed — the realtime sub on the parent will
-    // refresh the photos array within a fraction of a second.
   };
 
   const handleDelete = async (photo: UploadedPhoto) => {
@@ -2048,79 +2077,89 @@ function PhotoSlotGrid({
                   </span>
                 </button>
               ) : (
-                // Empty slot — label wraps a full-cover invisible
-                // file input that opens the device camera on tap.
-                // `capture="environment"` hints the rear camera; the
-                // rep can still switch to the photo library from the
-                // native picker.
+                // Empty slot — REAL <button> with onClick that
+                // programmatically clicks a hidden file input via
+                // ref. This is the rock-solid file-picker pattern
+                // that every battle-tested upload library uses
+                // (react-dropzone, formik, etc) and works in:
                 //
-                // iOS Safari note: the input MUST be positioned to
-                // fill the label, with opacity:0 (NOT display:none and
-                // NOT width:0 height:0 — both break the tap-to-open).
-                // The label's position:relative anchors the absolute
-                // overlay. We avoid `disabled` while busy so iOS
-                // doesn't enter a stuck state on the next tap; the
-                // onChange guards re-entry instead.
-                <label
-                  style={{
-                    position: "relative",
-                    width: "100%",
-                    aspectRatio: "1 / 1",
-                    borderRadius: 10,
-                    border: `1.5px dashed ${isBusy ? MC.brand : MC.line}`,
-                    background: isBusy ? MC.brandTint : MC.bg,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 4,
-                    cursor: isBusy ? "wait" : "pointer",
-                    color: isBusy ? MC.brandDeep : MC.mute,
-                    overflow: "hidden",
-                  }}
-                >
+                //   - iOS Safari (regular + standalone PWA)
+                //   - Android Chrome
+                //   - Desktop browsers
+                //
+                // Why this beats the <label>-wrapping-input approach:
+                //   - <button onClick> is a real, unambiguous tap
+                //     target; iOS routes the tap correctly every time.
+                //   - The synchronous .click() inside the user-gesture
+                //     handler satisfies iOS Safari's "user activation"
+                //     requirement for the file picker to open.
+                //   - display:none on the input works for programmatic
+                //     .click() (the no-no was for tap routing, which
+                //     we no longer rely on).
+                //
+                // capture="environment" hints the rear camera; the rep
+                // can still switch to the photo library from the OS
+                // picker's overflow menu.
+                <>
                   <input
+                    ref={(el) => {
+                      inputRefs.current[i] = el;
+                    }}
                     type="file"
                     accept="image/*"
                     capture="environment"
                     onChange={(e) => {
-                      if (isBusy) {
-                        e.target.value = "";
-                        return;
-                      }
                       const f = e.target.files?.[0];
-                      if (f) void handleFile(i, f);
-                      e.target.value = ""; // allow re-pick of same file
+                      // Always clear the value so re-picking the same
+                      // file fires onChange again. Must happen even
+                      // when no file (rep cancelled the camera).
+                      e.target.value = "";
+                      if (!f) return;
+                      if (isBusy) return;
+                      void handleFile(i, f);
                     }}
+                    style={{ display: "none" }}
+                    aria-hidden="true"
+                    tabIndex={-1}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openPicker(i)}
+                    aria-label={`Take photo for slot ${i + 1}`}
                     style={{
-                      position: "absolute",
-                      inset: 0,
                       width: "100%",
-                      height: "100%",
-                      opacity: 0,
-                      cursor: "pointer",
-                      // Belt-and-braces: tap target lives on top of
-                      // the label content so iOS routes the tap to
-                      // the input itself, not just the label.
-                      zIndex: 1,
-                    }}
-                  />
-                  <Glyph
-                    name="camera"
-                    size={20}
-                    color={isBusy ? MC.brandDeep : MC.mute}
-                    strokeWidth={2.2}
-                  />
-                  <span
-                    style={{
+                      aspectRatio: "1 / 1",
+                      borderRadius: 10,
+                      border: `1.5px dashed ${isBusy ? MC.brand : MC.line}`,
+                      background: isBusy ? MC.brandTint : MC.bg,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 4,
+                      cursor: isBusy ? "wait" : "pointer",
+                      color: isBusy ? MC.brandDeep : MC.mute,
+                      padding: 0,
                       fontFamily: MC.font,
-                      fontSize: 11,
-                      fontWeight: 600,
                     }}
                   >
-                    {isBusy ? "Uploading…" : `Slot ${i + 1}`}
-                  </span>
-                </label>
+                    <Glyph
+                      name="camera"
+                      size={20}
+                      color={isBusy ? MC.brandDeep : MC.mute}
+                      strokeWidth={2.2}
+                    />
+                    <span
+                      style={{
+                        fontFamily: MC.font,
+                        fontSize: 11,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {isBusy ? "Uploading…" : `Slot ${i + 1}`}
+                    </span>
+                  </button>
+                </>
               )}
               {slotError?.slot === i && (
                 <div
