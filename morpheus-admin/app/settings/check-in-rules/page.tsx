@@ -31,6 +31,8 @@ import {
   setTimingExceptionsEnabled,
   getRouteOptimizationAllowed,
   setRouteOptimizationAllowed,
+  getShiftRequestAutoApprove,
+  setShiftRequestAutoApprove,
 } from "@/lib/settings-store";
 
 export default function CheckInRulesPage() {
@@ -41,6 +43,7 @@ export default function CheckInRulesPage() {
   const [locationOn, setLocationOn] = useState<boolean>(true);
   const [timingOn, setTimingOn] = useState<boolean>(true);
   const [routeOptimizeOn, setRouteOptimizeOn] = useState<boolean>(true);
+  const [autoApproveOn, setAutoApproveOn] = useState<boolean>(false);
   const [loaded, setLoaded] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -54,7 +57,8 @@ export default function CheckInRulesPage() {
       getLocationExceptionsEnabled(),
       getTimingExceptionsEnabled(),
       getRouteOptimizationAllowed(),
-    ]).then(([late, early, radius, autoTime, locOn, timeOn, routeOn]) => {
+      getShiftRequestAutoApprove(),
+    ]).then(([late, early, radius, autoTime, locOn, timeOn, routeOn, autoApprove]) => {
       setLateMin(String(late));
       setEarlyMin(String(early));
       setDefaultRadius(String(radius));
@@ -62,6 +66,7 @@ export default function CheckInRulesPage() {
       setLocationOn(locOn);
       setTimingOn(timeOn);
       setRouteOptimizeOn(routeOn);
+      setAutoApproveOn(autoApprove);
       setLoaded(true);
     });
   }, []);
@@ -114,6 +119,22 @@ export default function CheckInRulesPage() {
       next
         ? "Route optimization enabled — reps can reorder their day on Route."
         : "Route optimization disabled — reps see their shifts in chronological order only."
+    );
+  };
+  const toggleAutoApprove = async (next: boolean) => {
+    setAutoApproveOn(next);
+    setSavingKey("autoApprove");
+    const r = await setShiftRequestAutoApprove(next);
+    setSavingKey(null);
+    if (!r.ok) {
+      setAutoApproveOn(!next);
+      setMessage(r.error || "Couldn't save.");
+      return;
+    }
+    setMessage(
+      next
+        ? "Approval bypass on. Reps' new shift requests now schedule themselves immediately."
+        : "Approval bypass off. Reps' new shift requests now go to your inbox."
     );
   };
 
@@ -229,6 +250,22 @@ export default function CheckInRulesPage() {
           saving={savingKey === "routeOpt"}
           disabled={!loaded}
           onChange={toggleRouteOptimize}
+        />
+        <div style={{ height: 1, background: AC.lineDim, margin: "10px 0" }} />
+        {/* Shift-request auto-approve. Moved here from
+            /settings/organisation (May 13) so all rep-workflow
+            governance toggles sit in one place. When on, reps
+            tapping "Request a customer" on the mobile app bypass
+            the requested_shifts queue and the shift is scheduled
+            immediately for them. Default off so a fresh install
+            routes everything through the manager. */}
+        <ToggleRow
+          title="Auto-approve shift requests from reps"
+          subtitle="When on, reps' shift requests skip your inbox and the shift is scheduled straight away. You can still edit / cancel the resulting shifts via Schedule."
+          on={autoApproveOn}
+          saving={savingKey === "autoApprove"}
+          disabled={!loaded}
+          onChange={toggleAutoApprove}
         />
       </Card>
 
