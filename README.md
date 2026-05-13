@@ -1212,6 +1212,58 @@ CORS: `/api/push/notify` exposes `Access-Control-Allow-Origin` to the mobile ori
 - No admin UI for sending arbitrary test pushes. Could be added on `/reps/[id]` as a "Send test" button if useful for debugging.
 - ~~EOD_BUFFER_MINUTES is a constant (30) — could be promoted to `app_settings`~~ ✅ Done. Now `app_settings.eod_reminder_buffer_minutes`, editable from `/settings/notifications`. Cron reads it on every tick with a 30-min fallback if the row's missing or unparseable.
 
+### ⚠ Vercel deployment traps (learned the hard way May 13)
+
+Spent ~45 minutes debugging "admin won't deploy" — leaving notes
+so the next person doesn't hit the same wall.
+
+**Trap 1: Vercel Hobby plan + sub-daily crons silently kills the deploy.**
+
+If `vercel.json` contains a cron with a schedule like `"*/5 * * * *"`
+and the project is on **Hobby**, Vercel rejects the entire deploy
+(not just the cron) with:
+> Hobby accounts are limited to daily cron jobs. This cron
+> expression (*/5 * * * *) would run more than once per day.
+
+The error surfaces in the deployment detail page but **does not
+appear** in the deployments list view. Every push silently fails
+the build pipeline. Mobile (`morpheusta`) deploys fine because it
+has no `vercel.json`.
+
+**Current state:** `morpheus-admin/vercel.json` has the crons
+parked (empty config). When upgrading to Vercel Pro, restore:
+```json
+{
+  "crons": [
+    { "path": "/api/cron/shift-reminders", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/auto-checkout",   "schedule": "*/15 * * * *" }
+  ]
+}
+```
+
+Or — even on Hobby — daily-only schedules sometimes still fail
+the post-build step (untested theory: Hobby caps cron count at 1).
+If you must run cron on Hobby, register just one endpoint and
+have it dispatch to both sweep functions internally.
+
+**Trap 2: `outputFileTracingRoot` in next.config breaks Vercel
+post-build silently.**
+
+Setting `outputFileTracingRoot: import.meta.dirname` in
+`morpheus-admin/next.config.ts` silences the Next.js 16 warning
+about it mismatching `turbopack.root`, but causes the Vercel
+deploy to fail AFTER "Build Completed in /vercel/output [N s]"
+with status: Error and no further explanation in the logs.
+
+Vercel's platform expects `outputFileTracingRoot` to resolve to
+`/vercel/path0` (the monorepo root) and validates the deploy
+artifact against that path. Hard-coding it to the admin subdir
+breaks that contract.
+
+**Rule:** leave `outputFileTracingRoot` unset in next.config.
+Live with the cosmetic warning. See the comment block in
+`morpheus-admin/next.config.ts` for the longer version.
+
 ### Push kill switch — `/settings/notifications` (shipped May 13)
 
 Org-wide on/off for every Web Push delivery path. The toggle lives at
