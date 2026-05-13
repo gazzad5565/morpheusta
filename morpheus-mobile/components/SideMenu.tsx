@@ -28,9 +28,14 @@ const ITEMS: Item[] = [
   // shifts" is a far more frequent destination than "request a new
   // customer". Reps reach /add-shift either via that pill or via the
   // home page's Add affordance.
-  { id: "shifts",    label: "Shifts",  icon: "log",   color: MC.brand,  href: "/shifts" },
-  { id: "library",   label: "Library", icon: "book",  color: "#5b3da5", href: "/library" },
-  { id: "support",   label: "Support", icon: "mic",   color: "#9c4a2c", href: "/support" },
+  { id: "shifts",    label: "Shifts",         icon: "log",   color: MC.brand,  href: "/shifts" },
+  // /add-customer is mounted in the side menu only — per Gary
+  // (May 13). Not surfaced on /add-shift or anywhere else.
+  // Reps either need a NEW customer (this flow) or want to schedule
+  // against an EXISTING one (/add-shift).
+  { id: "add-customer", label: "Add customer", icon: "house", color: "#10897F", href: "/add-customer" },
+  { id: "library",   label: "Library",         icon: "book",  color: "#5b3da5", href: "/library" },
+  { id: "support",   label: "Support",         icon: "mic",   color: "#9c4a2c", href: "/support" },
   { id: "profile",   label: "Profile", icon: "leave", color: MC.mute,   href: "/profile" },
   { id: "logout",    label: "Log out", icon: "leave", color: MC.danger, href: "/login" },
 ];

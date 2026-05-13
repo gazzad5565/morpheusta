@@ -37,6 +37,12 @@ export interface Customer {
    *  Null = use the initials-tile fallback. See compressCustomerLogo
    *  in customers-store.ts. */
   logoUrl?: string | null;
+  /** Set when a rep created the customer from the mobile
+   *  /add-customer flow. NULL = manager-created. Drives the "NEW"
+   *  badge on the admin /customers list, which clears once a
+   *  manager opens the customer's detail page.
+   *  See db/migrations/2026_05_13_customers_created_by_rep.sql. */
+  createdByRepId?: string | null;
 }
 
 /**

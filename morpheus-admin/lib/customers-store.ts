@@ -32,6 +32,10 @@ interface DbRow {
    *  tile in that case. See compressCustomerLogo below for the
    *  size/quality recipe. */
   logo_url: string | null;
+  /** Rep's profile id when this customer was created via mobile
+   *  /add-customer (Feature A — May 13). NULL when admin-created.
+   *  Drives the "NEW" badge on the customers list. */
+  created_by_rep_id: string | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -53,6 +57,7 @@ function rowToCustomer(row: DbRow): Customer {
     locationExceptionsEnabled: row.location_exceptions_enabled,
     timingExceptionsEnabled: row.timing_exceptions_enabled,
     logoUrl: row.logo_url ?? null,
+    createdByRepId: row.created_by_rep_id ?? null,
   };
 }
 
@@ -456,4 +461,56 @@ export function subscribeCustomers(onChange: () => void): () => void {
   return () => {
     supabase!.removeChannel(channel);
   };
+}
+
+// ─── Per-manager "seen" markers for rep-added customers ────────────
+//
+// Drives the "NEW" badge on the Customers list. Each (customer_id,
+// manager_id) row in `customer_seen_by_manager` says "this manager
+// has already acknowledged this rep-added customer; don't badge it
+// for them anymore". Reading the rep-added customer in detail view
+// inserts a row.
+
+/** Return the set of customer_ids the current manager has already
+ *  marked as seen. Used by the customers list to suppress the
+ *  badge on rows the manager has already opened. */
+export async function listSeenRepAddedCustomerIds(): Promise<Set<string>> {
+  if (!isSupabaseConfigured() || !supabase) return new Set();
+  const { data: userData } = await supabase.auth.getUser();
+  const managerId = userData.user?.id;
+  if (!managerId) return new Set();
+  const { data, error } = await supabase
+    .from("customer_seen_by_manager")
+    .select("customer_id")
+    .eq("manager_id", managerId);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[customers] seen-list:", error.message);
+    return new Set();
+  }
+  return new Set(
+    ((data as { customer_id: string }[]) || []).map((r) => r.customer_id)
+  );
+}
+
+/** Mark a rep-added customer as seen by the current manager. Called
+ *  when the manager opens the customer's detail page. Idempotent
+ *  (the (customer_id, manager_id) PK absorbs repeat inserts). No-op
+ *  for admin-created customers — we don't even insert the row. */
+export async function markCustomerSeen(customerId: string): Promise<void> {
+  if (!isSupabaseConfigured() || !supabase) return;
+  const { data: userData } = await supabase.auth.getUser();
+  const managerId = userData.user?.id;
+  if (!managerId) return;
+  // Use upsert to absorb the duplicate-key case cleanly.
+  const { error } = await supabase
+    .from("customer_seen_by_manager")
+    .upsert(
+      { customer_id: customerId, manager_id: managerId },
+      { onConflict: "customer_id,manager_id" }
+    );
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[customers] mark-seen:", error.message);
+  }
 }

@@ -41,6 +41,7 @@ import {
   setCustomerActive,
   deleteCustomer,
   updateCustomer,
+  markCustomerSeen,
 } from "@/lib/customers-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import {
@@ -131,6 +132,14 @@ export default function CustomerDetailPage() {
       setFiles(fileRows);
       setShifts(shiftRows.filter((s) => s.customer_id === id));
       setLoading(false);
+
+      // Mark this rep-added customer as "seen" by the current
+      // manager so the NEW badge clears on the Customers list.
+      // No-op for admin-created customers (createdByRepId null).
+      // Idempotent on the DB side, fine to call every mount.
+      if (customerRow?.createdByRepId) {
+        void markCustomerSeen(id);
+      }
     })();
     return () => {
       cancelled = true;

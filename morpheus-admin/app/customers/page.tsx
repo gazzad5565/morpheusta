@@ -27,7 +27,11 @@ import {
   type SortState,
 } from "@/components/ui/SortableHeader";
 import { AC } from "@/lib/tokens";
-import { listCustomers, subscribeCustomers } from "@/lib/customers-store";
+import {
+  listCustomers,
+  subscribeCustomers,
+  listSeenRepAddedCustomerIds,
+} from "@/lib/customers-store";
 import type { Customer } from "@/lib/types";
 
 type CustomerSortKey = "name" | "code" | "address" | "status";
@@ -105,12 +109,23 @@ export default function CustomersPage() {
     }
   }, [view, statusFilter, withAddressOnly, search, sort.key, sort.dir]);
 
+  // Per-manager set of rep-added customer ids that this manager has
+  // already opened. Used to suppress the "NEW" badge on rows the
+  // manager has already acknowledged. Reload alongside the customer
+  // list so realtime inserts of new customers AND the manager's own
+  // "I've seen this" marker both feed the badge state.
+  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
+
   useEffect(() => {
     let cancelled = false;
-    const load = () =>
-      listCustomers().then((rows) => {
+    const load = () => {
+      void listCustomers().then((rows) => {
         if (!cancelled) setCustomers(rows);
       });
+      void listSeenRepAddedCustomerIds().then((s) => {
+        if (!cancelled) setSeenIds(s);
+      });
+    };
     load();
     // Refresh on customer CRUD from any tab/manager — INSERT, UPDATE,
     // soft-delete (active flag flip), hard delete. Previously this
@@ -122,6 +137,10 @@ export default function CustomersPage() {
       unsub();
     };
   }, []);
+
+  /** "NEW" badge gate: rep-added AND not yet seen by this manager. */
+  const isNew = (c: Customer): boolean =>
+    !!c.createdByRepId && !seenIds.has(c.id);
 
   const counts = useMemo(() => {
     const total = customers?.length ?? 0;
@@ -298,9 +317,9 @@ export default function CustomersPage() {
             </div>
           </Card>
         ) : view === "Grid" ? (
-          <GridView customers={filtered} />
+          <GridView customers={filtered} seenIds={seenIds} />
         ) : view === "Table" ? (
-          <TableView customers={filtered} sort={sort} onSort={setSort} />
+          <TableView customers={filtered} seenIds={seenIds} sort={sort} onSort={setSort} />
         ) : (
           <CustomersMap customers={filtered} />
         )}
@@ -311,7 +330,15 @@ export default function CustomersPage() {
 
 // ─── Views ──────────────────────────────────────────────────────────────
 
-function GridView({ customers }: { customers: Customer[] }) {
+function GridView({
+  customers,
+  seenIds,
+}: {
+  customers: Customer[];
+  seenIds: Set<string>;
+}) {
+  const isNew = (c: Customer) =>
+    !!c.createdByRepId && !seenIds.has(c.id);
   return (
     // minmax(0, 1fr) instead of 1fr — `1fr` is `minmax(auto, 1fr)` which
     // lets a cell grow past its share to fit min-content (e.g. an address
@@ -369,9 +396,13 @@ function GridView({ customers }: { customers: Customer[] }) {
                   fontWeight: 700,
                   color: AC.ink,
                   letterSpacing: -0.2,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
                 }}
               >
-                {c.name}
+                <span>{c.name}</span>
+                {isNew(c) && <NewByRepBadge />}
               </div>
               <div
                 style={{
@@ -428,13 +459,17 @@ function GridView({ customers }: { customers: Customer[] }) {
 
 function TableView({
   customers,
+  seenIds,
   sort,
   onSort,
 }: {
   customers: Customer[];
+  seenIds: Set<string>;
   sort: SortState<CustomerSortKey>;
   onSort: (s: SortState<CustomerSortKey>) => void;
 }) {
+  const isNew = (c: Customer) =>
+    !!c.createdByRepId && !seenIds.has(c.id);
   return (
     <Card padding={0}>
       <div
@@ -497,9 +532,14 @@ function TableView({
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  minWidth: 0,
                 }}
               >
-                {c.name}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
+                {isNew(c) && <NewByRepBadge />}
               </div>
             </div>
             <div
@@ -549,5 +589,38 @@ function TableView({
         </Link>
       ))}
     </Card>
+  );
+}
+
+/** Small "NEW" pill rendered next to a customer name on the list
+ *  when:
+ *    - The row was created by a rep (created_by_rep_id IS NOT NULL)
+ *    - AND the current manager has not yet opened its detail page
+ *
+ *  Clears for THIS manager when they open the detail page
+ *  (markCustomerSeen() is called on /customers/[id] mount). Other
+ *  managers still see the badge until each of them opens it. */
+function NewByRepBadge() {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "1px 6px",
+        borderRadius: 999,
+        background: AC.brand,
+        color: "#fff",
+        fontFamily: AC.font,
+        fontSize: 9.5,
+        fontWeight: 800,
+        letterSpacing: 0.6,
+        textTransform: "uppercase",
+        flexShrink: 0,
+        boxShadow: `0 1px 3px ${AC.brand}55`,
+      }}
+      title="Added by a rep on the mobile app — open the customer's detail page to dismiss this badge"
+    >
+      New
+    </span>
   );
 }
