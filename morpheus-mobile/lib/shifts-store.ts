@@ -697,6 +697,104 @@ export async function getTasksForCustomer(customerId: string): Promise<TaskRow[]
 }
 
 /**
+ * Atomically switch from one in-progress shift to another (May 13).
+ *
+ * Used when the rep is already checked into shift A and taps Check
+ * in on shift B (chains, mall runs, "swing by next door" cases).
+ * Without this, the rep would end up with two shifts both in
+ * `in-progress` simultaneously — data corruption that the auto-
+ * checkout cron only catches overnight, and surfaces as a stuck
+ * shift in admin Live Ops in the meantime.
+ *
+ * Order matters: we close A FIRST, then open B. If anything fails
+ * partway through:
+ *   - A closes but B fails to open → rep is "checked out everywhere"
+ *     and the /check-in page shows the error. They can retry.
+ *   - A fails to close → we don't open B, surface error, no
+ *     corruption.
+ *
+ * Audit trail: A gets a `shift.auto_checked_out` event with
+ * meta.reason='switched_to_other_shift' and meta.next_shift_id=B
+ * so admin Live Feed shows the rep moved between sites (vs the
+ * generic auto-checkout-cron sweep with meta.source='cron').
+ * checkInToShift handles B's audit + claim semantics.
+ */
+export async function switchToShift(args: {
+  /** The shift the rep is currently checked into (will be closed). */
+  fromShiftId: string;
+  /** The shift the rep is moving to (will be opened). */
+  toShiftId: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { fromShiftId, toShiftId } = args;
+
+  // Pull the FROM shift's customer block for the audit message.
+  const { data: fromRow } = await supabase
+    .from("shifts")
+    .select("customer_id, check_in_at, customers(name)")
+    .eq("id", fromShiftId)
+    .maybeSingle();
+  const fromCustomerId =
+    (fromRow as { customer_id?: string } | null)?.customer_id || null;
+  const fromCustomerName =
+    (fromRow as { customers?: { name?: string } } | null)?.customers?.name ||
+    "previous customer";
+  const fromCheckInIso =
+    (fromRow as { check_in_at?: string } | null)?.check_in_at || null;
+
+  // 1. Close the FROM shift.
+  const closeAt = new Date();
+  const { error: closeErr } = await supabase
+    .from("shifts")
+    .update({
+      state: "complete",
+      check_out_at: closeAt.toISOString(),
+    })
+    .eq("id", fromShiftId);
+  if (closeErr) {
+    return { ok: false, error: `Couldn't close previous shift: ${closeErr.message}` };
+  }
+
+  // 2. Log the switch on the FROM shift. Duration helps admin spot
+  //    "rep forgot to check out for 6h before switching" patterns
+  //    later if we want coaching nudges.
+  const durationMin =
+    fromCheckInIso != null
+      ? Math.max(
+          0,
+          Math.round(
+            (closeAt.getTime() - new Date(fromCheckInIso).getTime()) / 60_000
+          )
+        )
+      : null;
+  await logEvent({
+    event_type: "shift.auto_checked_out",
+    shift_id: fromShiftId,
+    customer_id: fromCustomerId,
+    message: `Switched to another shift — auto-closed ${fromCustomerName}`,
+    meta: {
+      reason: "switched_to_other_shift",
+      next_shift_id: toShiftId,
+      duration_min: durationMin,
+    },
+  });
+
+  // 3. Check in to the NEW shift. Re-uses the standard helper so the
+  //    rep_id claim + check-in audit event + travel-end cleanup all
+  //    fire as normal.
+  const inResult = await checkInToShift(toShiftId);
+  if (!inResult.ok) {
+    return {
+      ok: false,
+      error: `Closed your previous shift but couldn't open the new one: ${inResult.error}`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Check out of a shift — sets state='complete'. Also accepts a tasksDone
  * value so the admin can see how many tasks the rep finished.
  */

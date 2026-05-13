@@ -7,7 +7,13 @@ import { AppHeader, CustomerTile, ReasonChip, PrimaryButton } from "@/components
 import { LoadingBar } from "@/components/Loading";
 import { CheckingInOverlay, type CheckInPhase } from "@/components/CheckingInOverlay";
 import { Glyph, type GlyphName } from "@/components/Glyph";
-import { getShiftById, checkInToShift, type ShiftWithMeta } from "@/lib/shifts-store";
+import {
+  getShiftById,
+  checkInToShift,
+  getMyActiveShift,
+  switchToShift,
+  type ShiftWithMeta,
+} from "@/lib/shifts-store";
 import { getCustomerById } from "@/lib/customers-store";
 import {
   getLateGraceMinutes,
@@ -98,6 +104,16 @@ function CheckInPage() {
   const [shift, setShift] = useState<ShiftWithMeta | null>(null);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [shiftError, setShiftError] = useState<string | null>(null);
+  // The rep's currently in-progress shift, if any — detected on mount
+  // alongside the target shift. Drives the "switch shifts" warning
+  // banner: when this is non-null AND it's a DIFFERENT shift than
+  // the one we're checking into, the rep needs to acknowledge that
+  // proceeding will auto-close the existing one. When it's the
+  // SAME shift, we just route them to /active (they're already in).
+  const [activeShift, setActiveShift] = useState<ShiftWithMeta | null>(null);
+  // Whether the rep has acknowledged the switch warning. Gates the
+  // Proceed button so they can't accidentally tap through.
+  const [switchAcknowledged, setSwitchAcknowledged] = useState(false);
   const [graceMinutes, setGraceMinutes] = useState<number>(10);
   // Early-check-in uses the same setting as early check-out — they're
   // symmetric concepts: don't clock in too soon, don't clock out too soon.
@@ -127,13 +143,28 @@ function CheckInPage() {
       getEarlyGraceMinutes(),
       getLocationExceptionsEnabled(),
       getTimingExceptionsEnabled(),
-    ]).then(async ([s, grace, earlyGrace, locOn, timeOn]) => {
+      // Active-shift detection — load in parallel so we don't add a
+      // second round-trip. May 13: prevents the "rep checked into
+      // two shifts at once" data-corruption path that the
+      // auto-checkout cron previously only caught overnight.
+      getMyActiveShift(),
+    ]).then(async ([s, grace, earlyGrace, locOn, timeOn, active]) => {
       if (cancelled) return;
       if (!s) {
         setShiftError("Shift not found.");
         return;
       }
+      // Same shift the rep is already in? Just send them to /active —
+      // no point making them re-fill the exception form for a shift
+      // they already opened.
+      if (active && active.realId === s.realId) {
+        router.replace("/active");
+        return;
+      }
       setShift(s);
+      // Different shift? Stash it so the warning banner renders.
+      // Same-shift case was handled above and short-circuited.
+      if (active) setActiveShift(active);
       setGraceMinutes(grace);
       setEarlyGraceMinutes(earlyGrace);
       setOrgLocationOn(locOn);
@@ -398,7 +429,14 @@ function CheckInPage() {
   const lateResolved = !lateTriggered || !!lateReason;
   const earlyResolved = !earlyTriggered || !!earlyReason;
   const allResolved = offsiteResolved && lateResolved && earlyResolved;
-  const canProceed = !!shift && allResolved && !submitting && !positionLoading;
+  // When switching from another shift, also require the rep to
+  // explicitly acknowledge the warning before they can proceed.
+  // Acts as a soft confirmation — they tap once on the banner to
+  // arm the Proceed button, then again on Proceed to actually
+  // switch. Two-tap protection against accidental shift abandonment.
+  const switchOK = !activeShift || switchAcknowledged;
+  const canProceed =
+    !!shift && allResolved && switchOK && !submitting && !positionLoading;
 
   const handleSetLocationReason = (newValue: string | null) => {
     setLocationReasonRaw(newValue);
@@ -424,8 +462,17 @@ function CheckInPage() {
     if (!canProceed || !shift) return;
     setSubmitting(true);
     setCheckInPhase("submitting");
-    // 1. Mark shift in-progress (writes the standard shift.checked_in event).
-    const result = await checkInToShift(shift.realId);
+    // 1. Open the new shift. If the rep was already checked into a
+    //    different shift, use switchToShift which atomically closes
+    //    the old one (with a shift.auto_checked_out audit event
+    //    tagged reason='switched_to_other_shift') before opening the
+    //    new one. Otherwise, regular checkInToShift.
+    const result = activeShift
+      ? await switchToShift({
+          fromShiftId: activeShift.realId,
+          toShiftId: shift.realId,
+        })
+      : await checkInToShift(shift.realId);
     if (!result.ok) {
       setSubmitting(false);
       setCheckInPhase(null);
@@ -560,6 +607,129 @@ function CheckInPage() {
             <Glyph name="target" size={18} color={MC.brandDeep} />
           </div>
         </div>
+
+        {/* Switch-shifts warning (May 13) — when the rep is already
+            checked into a different shift, surface a banner here
+            BEFORE the exception cards so they can't tap through to
+            Proceed without acknowledging that the previous shift
+            will be auto-closed. Tap "Switch shifts" to arm the
+            Proceed button; "View previous" to bail and go back to
+            the active shift instead. */}
+        {activeShift && (
+          <div
+            style={{
+              marginTop: 10,
+              background: switchAcknowledged ? MC.brandTint : MC.warnTint,
+              border: `1px solid ${switchAcknowledged ? MC.brand : MC.warn}55`,
+              borderRadius: MC.radiusCard,
+              padding: 14,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+              }}
+            >
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 999,
+                  background: switchAcknowledged
+                    ? `${MC.brand}33`
+                    : `${MC.warn}33`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <Glyph
+                  name={switchAcknowledged ? "check-circle" : "warn"}
+                  size={15}
+                  color={switchAcknowledged ? MC.brandDeep : MC.warn}
+                  strokeWidth={2.4}
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 13.5,
+                    fontWeight: 700,
+                    color: switchAcknowledged ? MC.brandInk : "#7A560A",
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  {switchAcknowledged
+                    ? `Switching from ${activeShift.name}`
+                    : `You're still checked into ${activeShift.name}`}
+                </div>
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 12,
+                    color: switchAcknowledged ? MC.ink2 : "#7A560A",
+                    marginTop: 4,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {switchAcknowledged
+                    ? `We'll check you out of ${activeShift.name} and into ${shift?.name ?? "this shift"} when you tap Proceed. Tasks already completed there stay saved.`
+                    : `Checking in here will auto-close that shift first. Any tasks or photos you've already completed at ${activeShift.name} stay saved.`}
+                </div>
+              </div>
+            </div>
+            {!switchAcknowledged && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  marginTop: 12,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSwitchAcknowledged(true)}
+                  style={{
+                    flex: 1,
+                    minHeight: 40,
+                    borderRadius: 10,
+                    background: MC.brandDeep,
+                    color: "#fff",
+                    border: "none",
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  Switch shifts
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.replace("/active")}
+                  style={{
+                    flex: 1,
+                    minHeight: 40,
+                    borderRadius: 10,
+                    background: "#fff",
+                    color: "#7A560A",
+                    border: `1px solid ${MC.warn}55`,
+                    fontFamily: MC.font,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  View previous
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Quick "Call the site" pill — when the rep is off-site or
             running late, this is the fastest way to reach the contact
