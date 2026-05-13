@@ -308,6 +308,371 @@ Done as one push, in narrative order:
 
 Both apps build clean (`npm run build`). Mobile + admin TypeScript clean (`npx tsc --noEmit`).
 
+### Today's session — what shipped (May 13, 2026)
+
+The big features day before go-live. Five new end-to-end features
+(A–E), plus a substantial pass of polish + bug fixes + the Morpheus
+Ops rebrand. ~30 commits between `d11675b` and `0c9bcb0`.
+
+**TL;DR for the next chat:**
+- Feature A — rep adds customer from mobile + admin NEW badge
+- Feature B — rep geocodes existing customer's site
+- Feature C — photos on tasks (camera-first tap flow, auto-complete)
+- Feature D — customer signature on tasks (signature pad, auto-complete)
+- Feature E — Messaging (admin composer, push + in-app, scheduled)
+- Pause-and-switch for check-in collisions (max 2 paused)
+- Live Ops Needs-Action deep-link from sidebar badge + row click
+- Mobile pending-pill expand-on-tap
+- Add-customer flow polished + map preview
+- Shift dashboard surfaces site address
+- Morpheus Ops rebrand (brand-tinted "Ops" pill everywhere)
+- iOS photo capture fix (button + useRef + programmatic .click pattern)
+- AddressAutocomplete error visibility
+
+**Migrations to run (in any order — all idempotent):**
+```
+db/migrations/2026_05_13_customers_created_by_rep.sql
+db/migrations/2026_05_13_task_photos.sql
+db/migrations/2026_05_13_task_signatures.sql
+db/migrations/2026_05_13_messages.sql
+db/migrations/2026_05_13_push_subscriptions.sql   (already shipped — see Web Push section below)
+```
+
+#### Feature A — Rep adds customer from mobile (`d11675b`, `0d17da1`)
+
+`/add-customer` (mobile) — side-menu-only entry. Minimum fields: name,
+address, optional contact + phone. Admin sees the new customer
+immediately in `/customers` with a brand-cyan **NEW** badge until a
+manager opens its detail page (per-manager dismissal — each manager
+clears their own badge).
+
+- New column `customers.created_by_rep_id` references `profiles(id)`.
+  NULL = admin-created (the default for everything existing).
+- New table `customer_seen_by_manager (customer_id, manager_id,
+  seen_at)` for the per-manager badge dismissal.
+- Mobile `createCustomer` auto-generates: slug-style id (with random
+  4-char suffix), initials from first two words, brand colour from an
+  8-colour palette, code = max(code)+1, active=true. Also writes a
+  paired `customer_sites` "Head office" row with the address — every
+  customer always has ≥1 site.
+- Bug fix mid-day: the initial implementation passed
+  `is_head_office: true` to the `customer_sites` insert, but that
+  column doesn't exist (the 2026-05-08 migration uses the literal
+  name "Head office" as the primary-site signal, not a boolean).
+  Postgres rejected the row and the swallow-the-error code path made
+  it silent. Fix in `b7f129c`: drop the bad column, capture the
+  error, and ROLL BACK the parent customer row on failure so the rep
+  can retry instead of leaving an orphan customer.
+
+**Bonus feature added same day** — pin at creation time. Rep can
+either type an address (with Nominatim typeahead suggestions that
+auto-pin lat/lng), tap "Use my GPS", or tap "Geocode what I typed"
+as a manual fallback. The whole address+location block was reworked
+into a single bordered card with a clear two-step flow + map preview
+(see Map Preview / Add-customer polish below).
+
+#### Feature B — Rep geocodes existing customer's site (`8465ff5`)
+
+A synthetic "Add location pin" task appears on `/active` when the
+customer's `customer_sites` row has null lat/lng. Tapping it opens
+a card with the same two-option layout (GPS + address geocode);
+saving writes coords to BOTH the site AND the parent customer row
+(if also missing), and logs a `customer.geocoded` event in the
+admin Live Feed.
+
+- Uses `requestGeolocationOnce()` (existing shared GPS cache) so
+  multiple pin flows in one shift don't re-prompt the OS.
+- Geocode uses the local `/api/geocode` Nominatim proxy. Mobile
+  has a parallel `/api/geocode/suggest` route for typeahead, which
+  is line-for-line functionally identical to admin's same route.
+
+#### Feature C — Photos on tasks (`3ae6d6f`, refactored in `cda34ac`)
+
+Admin marks a task with `photo_count > 0`. The rep app then forces
+that many photo captures before the task can be marked complete.
+Combined with the existing "Required" toggle: when both, the rep
+genuinely cannot end the day with the task open and zero photos.
+
+**Schema:**
+- `customer_tasks` gains `photo_count int DEFAULT 0` and
+  `photos_compulsory boolean DEFAULT true`.
+- New table `shift_task_photos (id, shift_id, task_id, rep_id,
+  slot_index, storage_path, public_url, width, height,
+  file_size_bytes, quality_tier)`.
+- Supabase Storage bucket `shift_photos` (public-read, auth-write,
+  5 MB cap). Storage RLS on `storage.objects` scoped to that bucket.
+- Both tables added to `supabase_realtime` so the slot grid updates
+  live across devices.
+
+**Mobile flow (final, May 13 PM):**
+- Photo tasks wear an unmistakable **"Camera · N photos"** pill in
+  the task list. Yellow when 0 taken, brand-cyan when in-progress,
+  green when complete.
+- Tap a photo task with empty slots → camera opens DIRECTLY (no
+  intermediate sheet). Page-level `<input type="file"
+  capture="environment">` referenced via `useRef` and clicked
+  programmatically from a `<button onClick>` — bullet-proof iOS
+  pattern that works in standalone PWA mode (the label-wrap-input
+  pattern silently no-ops in standalone iOS Safari, which was the
+  May 13 PM bug report).
+- After each capture: upload runs, photo count refreshes, camera
+  reopens automatically for the next slot until N are taken. The
+  LAST upload auto-marks the task complete (no manual "Complete"
+  tap) and logs `shift.task_completed` with
+  `meta.auto_completed='photos_filled'`.
+- Inline upload overlay shows "Uploading photo 2 of 3…" between
+  shots. On error, surfaces a Retry button.
+- Tapping a completed photo task opens the TaskSheet's PhotoSlotGrid
+  for view/retake/delete.
+- Compression: org-level admin setting at
+  `/settings/check-in-rules` → "Photo quality" (standard / high /
+  maximum) — `1600px / 1920px / 2400px` max edge, 0.8 / 0.88 / 0.92
+  JPEG quality. Hard cap of 2 MB per photo; retries at lower
+  quality until under cap.
+
+#### Feature D — Customer signature on tasks (`a44a579`)
+
+Admin marks a task `requires_signature=true`. On mobile, tapping
+that task opens a full-screen signature pad — customer signs on
+screen, rep saves, the data URL gets stored in
+`shift_task_signatures` and the task auto-completes (or, if it ALSO
+requires photos, the chain runs photos → signature → complete).
+
+**Schema:**
+- `customer_tasks.requires_signature boolean DEFAULT false`.
+- `shift_task_signatures (id, shift_id, task_id, rep_id,
+  signature_data_url, signer_name, signed_at)` with
+  `UNIQUE(shift_id, task_id)` — re-signs replace via delete + insert.
+- Storage as base64 PNG data URL in a `text` column (not Supabase
+  Storage). Typical signature: 5–20 KB. Justification in the
+  migration comments.
+
+**Files:**
+- `morpheus-mobile/components/SignaturePad.tsx` — canvas with
+  Pointer Events (covers pen / touch / mouse uniformly), DPR-aware
+  drawing, downscale-to-export at 600×240, optional signer-name
+  field, full safe-area-respecting overlay.
+- `morpheus-mobile/lib/signature-store.ts` — insert/list/delete/
+  subscribe helpers.
+- Combined photo + signature gating wired in
+  `morpheus-mobile/app/active/page.tsx` — `onPhotoCaptureFile`
+  detects "all slots filled" and chains into `setSignaturePad(...)`
+  rather than auto-completing, when the task also needs a signature.
+
+#### Feature E — Messaging (`54b70ab`)
+
+Manager → rep messaging with two delivery channels (push and/or
+in-app banner), audience picker (all reps / all managers / everyone
+/ specific users multi-select), and optional scheduling for a
+future time. Replaces the `/notify` "Coming soon" placeholder.
+
+**Schema:**
+- `messages` — id, subject, body, created_by, audience_kind
+  (all / all_reps / all_managers / specific), audience_user_ids[],
+  deliver_push, deliver_in_app, scheduled_at, status (pending /
+  sending / sent / failed / cancelled), sent_at, meta jsonb.
+  CHECK: at least one channel true.
+- `message_recipients` — id, message_id, recipient_id, read_at,
+  push_sent_at, push_error. UNIQUE(message_id, recipient_id).
+- Both added to `supabase_realtime`.
+
+**Why materialise recipients at compose-time:** audience changes
+between compose and send (e.g. rep gets hired after a scheduled
+broadcast is queued) don't retroactively shift who got it.
+
+**Flow:**
+- Admin `/notify`: pill picker → typeahead user picker (when
+  "specific") → subject/body → channel toggles → schedule input
+  → Send Now / Schedule button. Recent + scheduled list on right
+  with status pills + Cancel for pending scheduled.
+- `composeMessage()` validates → resolves recipients → INSERTs the
+  message → bulk-INSERTs message_recipients → if send-now, POSTs
+  `/api/messages/send`.
+- `/api/messages/send` advisory-locks via atomic
+  `UPDATE WHERE status='pending'` (prevents double-send under
+  cron + admin race), fans out push via existing `sendPushToRep`,
+  marks `status='sent'` with delivery counts in meta.
+- `/api/cron/messages` (parked in vercel.json until Pro lands)
+  sweeps `status='pending' AND scheduled_at <= now()` every
+  minute and hits `/api/messages/send` for each.
+- Mobile `/messages`: full inbox with realtime updates, expand-to-
+  read, mark-all-read, `?id=<message_id>` deep-link from push taps.
+- `MessageBanner` at layout level: top-of-screen banner on new
+  in-app message arrival, auto-dismisses 6.5s. Suppressed when
+  already on `/messages`.
+- Side-menu "Messages" entry with brand-tinted unread badge.
+
+**Cron entry to restore when Vercel Pro is active:**
+```json
+{ "path": "/api/cron/messages", "schedule": "* * * * *" }
+```
+
+#### Polish + bug fixes (same day)
+
+**Live Ops needs-action wiring (`37860b0`, `f9f73e9`):**
+- Today's Shifts → "Needs action" filter → clicking a row no longer
+  navigates to /shifts/[id]/edit. Instead routes to
+  `/#live-feed-needs-action` which scrolls up to the Live Feed
+  panel above (where the inline approve/decline/reassign UI lives).
+- Sidebar Live Ops nav item also deep-links to the Needs Action
+  anchor WHEN the badge is hot. Cold badge = plain `/` link.
+- Implementation uses a URL hash (`LIVE_FEED_NEEDS_ACTION_HASH =
+  "live-feed-needs-action"`) so the panels stay decoupled. Browser
+  native fragment-scrolling handles the scroll-into-view.
+
+**Mobile pending-request pill expand-on-tap (`f9f73e9`):**
+- The floating "1 pending · Awaiting approval" pill used to silently
+  navigate to /shifts on tap, which reps reported as "I tap it and
+  nothing happens". Now expands in place into a small info card
+  showing each pending customer + a clear "View your shifts →" CTA.
+  Chevron rotates 90° on expand so the affordance reads as
+  disclosure, not navigation.
+
+**Check-in pause-and-switch (`cda34ac`, `038ba80`):**
+- When a rep taps Check-in on shift B while still in shift A, the
+  warning banner now offers TWO modes:
+  - **"Check out of A & switch"** (default, primary) — closes A
+    entirely (state='complete' + check_out_at), logs
+    `shift.checked_out` with meta.reason='switched_to_other_shift'.
+    For the common case (rep finished at A and moving on).
+  - **"Pause & come back later"** (secondary) — pauses A
+    (state='on-break'), logs `shift.paused_for_other_shift` with
+    meta.next_shift_id. For the "swing by next door" case.
+- New helpers in `shifts-store`: `pauseAndCheckIn`,
+  `checkOutAndCheckIn`, `resumePausedShift`, `countMyPausedShifts`.
+- Hard cap **MAX_PAUSED_SHIFTS = 2** — third Pause attempt is
+  disabled with explainer copy. The Check-out path is always
+  available (doesn't increase the paused count).
+- Same-shift collision (rep taps Check-in on the shift they're
+  already in) silently routes to `/active`.
+- New event types added to `events-store` (both apps):
+  `shift.paused_for_other_shift`, `shift.resumed`. With matching
+  EVENT_LABEL entries in admin.
+
+**Add-customer flow polish + map preview (`038ba80`):**
+- Address + pin section regrouped into a single bordered card with
+  clear status header ("Location needed" → "Location pinned") that
+  turns green when pinned.
+- Two-step flow: (1) typeahead [primary, auto-pins on suggestion
+  pick], (2) stacked manual fallbacks [GPS / Geocode] visible
+  BEFORE pinning, hidden after.
+- `components/MapPreview.tsx` — read-only MapLibre map renders
+  inside the card once pinned, with a brand-cyan marker and the
+  address as a caption. flyTo + marker reposition on coord change.
+  Reuses `maplibre-gl` (already a dep). Free OpenFreeMap tiles.
+
+**Shift dashboard address surface (`a44a579`):**
+- `/active`'s customer card now surfaces the site address on a
+  dedicated row with a pin icon. Tap → opens Google Maps. When
+  no address on file, an explicit warn-toned "No address — flag
+  with your manager" empty state replaces the silent omission.
+
+**Morpheus Ops rebrand (`038ba80`, `0c9bcb0`):**
+- "Morpheus TA" / "Morpheus t&a²" → **MORPHEUS Ops** everywhere.
+- Brand-tinted rounded chip on "Ops" (rgba(21,180,214,0.18)
+  background, radius 4) matching admin sidebar pill across:
+  AppFooter wordmark, SideMenu footer, admin sidebar.
+
+**iOS photo capture fix (`ab9a4db`):**
+- The original PhotoSlotGrid used a `<label>` wrapping an
+  absolute-positioned `<input type="file">` with opacity:0.
+  Silently no-ops in iOS standalone PWA mode. Rewrote with the
+  bullet-proof pattern every battle-tested upload library uses:
+  real `<button onClick>` that calls `inputRef.current?.click()`
+  synchronously inside the user-gesture handler. `display: none`
+  on the hidden input is fine for programmatic `.click()`.
+
+**AddressAutocomplete error visibility (`4b54dc6`):**
+- Distinguishes network/HTTP errors from a genuine "no matches"
+  empty result. Network/502 surfaces a red inline message
+  ("Address service is busy" / "Couldn't reach the address
+  service"). Real empty result echoes the query and points at
+  the manual "Geocode what I typed" fallback.
+
+**Side-menu Messaging badge (`54b70ab`):**
+- Brand-cyan unread badge alongside the Messages label (caps at
+  99+). Realtime-fed via `subscribeMyInbox`.
+
+#### Cleanup pass (`0c9bcb0`)
+
+- `lib/geo.ts` (new) — consolidated three near-identical
+  `haversineMeters` implementations from `/check-in`, `/check-out`,
+  and `lib/shifts-store` (filterClaimableByRadius). Overload-based
+  function handles both call shapes (scalar quadruple + LatLng
+  pair). `formatDistanceMeters` moved into the same module.
+- Deleted orphan `MapPlaceholder` (152 lines) in `/check-in` —
+  static SVG/gradient illustration from an earlier design
+  iteration, never imported or rendered.
+- `lib/mock-data.ts` — flipped `comingSoon: true` off the Messaging
+  nav entry now that the route is real (was greying out the link
+  in the sidebar).
+
+#### Files touched today
+
+**Migrations (in `db/migrations/`):**
+- `2026_05_13_customers_created_by_rep.sql`
+- `2026_05_13_task_photos.sql`
+- `2026_05_13_task_signatures.sql`
+- `2026_05_13_messages.sql`
+- `2026_05_13_push_subscriptions.sql` (Web Push — covered separately below)
+
+**New mobile files:**
+- `lib/customers-store.ts` extensions (`createCustomer`,
+  `setCustomerSiteCoords`, `geocodeAddress`)
+- `lib/photo-store.ts`
+- `lib/signature-store.ts`
+- `lib/messaging-store.ts`
+- `lib/geo.ts`
+- `components/AddressAutocomplete.tsx`
+- `components/MapPreview.tsx`
+- `components/SignaturePad.tsx`
+- `components/MessageBanner.tsx`
+- `app/add-customer/page.tsx`
+- `app/messages/page.tsx`
+- `app/api/geocode/route.ts`
+- `app/api/geocode/suggest/route.ts`
+
+**New admin files:**
+- `lib/messaging-store.ts`
+- `app/api/messages/send/route.ts`
+- `app/api/cron/messages/route.ts`
+- (`/notify/page.tsx` rewritten end-to-end)
+
+**Modified mobile files (highlights):**
+- `app/active/page.tsx` — direct-camera photo flow, signature flow,
+  GeocodeTaskCard, PhotoSlotGrid, page-level photo input ref,
+  address row on customer card
+- `app/check-in/page.tsx` — pause-and-switch banner + two-mode
+  picker, MAX_PAUSED_SHIFTS cap
+- `components/PendingRequestPill.tsx` — expand-on-tap info card
+- `components/Glyph.tsx` — added "send" + "edit" icons, brand-pill
+  styling on MorpheusMark
+- `components/SideMenu.tsx` — Messages entry + unread badge
+- `app/layout.tsx` — MessageBanner mounted at root
+- `lib/shifts-store.ts` — `pauseAndCheckIn`, `checkOutAndCheckIn`,
+  `resumePausedShift`, `countMyPausedShifts`,
+  `MAX_PAUSED_SHIFTS`, `switchToShift` aliasing
+
+**Modified admin files (highlights):**
+- `app/notify/page.tsx` — full rewrite from placeholder to composer
+- `app/tasks/new/page.tsx`, `app/tasks/[id]/edit/page.tsx` —
+  photo + signature requirement controls, linked-compulsory rule
+- `app/customers/page.tsx`, `app/customers/[id]/page.tsx` —
+  NEW-by-rep badge + per-manager dismissal
+- `app/page.tsx`, `components/screens/live-ops/*` — Needs Action
+  row routing + sidebar deep-link
+- `components/shell/Sidebar.tsx` — Live Ops badge hash-link,
+  Morpheus Ops pill
+- `components/shell/SettingsShell.tsx` — "Notifications" →
+  "Messaging" rename
+- `lib/messaging-store.ts`, `lib/tasks-store.ts`,
+  `lib/customers-store.ts`, `lib/events-store.ts` extensions
+- `app/settings/check-in-rules/page.tsx` — shift-request
+  auto-approve toggle moved here, photo quality picker added
+
+Both apps build clean (`npm run build`). TypeScript clean
+(`npx tsc --noEmit`) on both.
+
 ### Today's session — what shipped (May 12, 2026)
 
 A long iteration day on Plan-my-day, the /shifts list, and the
@@ -1044,7 +1409,25 @@ Big day. Roughly in order:
 
 ### Migrations applied today (cloud status)
 
-**All migrations through May 12 have been applied to the shared Supabase project.** Nothing pending. The lists below are kept as a record of what landed and when; each file is safe to re-run on a fresh Supabase environment.
+**Status as of end of May 13 session:**
+- May 12 and earlier — all applied.
+- May 13 — `2026_05_13_push_subscriptions.sql`,
+  `2026_05_13_customers_created_by_rep.sql`, and
+  `2026_05_13_task_photos.sql` applied during the session
+  (Gary confirmed "i did them").
+- **Pending — run before next test pass:**
+  - `db/migrations/2026_05_13_task_signatures.sql` (Feature D)
+  - `db/migrations/2026_05_13_messages.sql` (Feature E)
+
+Each file is idempotent — safe to re-run.
+
+May 13 (applied or pending — see status above):
+
+- `2026_05_13_push_subscriptions.sql` — Web Push subscriptions table + RLS
+- `2026_05_13_customers_created_by_rep.sql` — Feature A column + per-manager-seen table
+- `2026_05_13_task_photos.sql` — Feature C columns, table, storage bucket + RLS
+- `2026_05_13_task_signatures.sql` — Feature D column + table (PENDING)
+- `2026_05_13_messages.sql` — Feature E messages + message_recipients tables (PENDING)
 
 May 12 (applied):
 
@@ -1083,15 +1466,54 @@ May 6 (already in cloud):
 
 Top of the queue (in priority order):
 
-1. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
-2. **Add `CRON_SECRET` to Vercel `morpheus-admin` + `NEXT_PUBLIC_ADMIN_URL` to Vercel `morpheusta`** — Web Push phase 2 needs both:
-   - `CRON_SECRET` on admin → any random hex string. Vercel Cron sends this as a Bearer token to authenticate the `/api/cron/shift-reminders` endpoint. Without it the cron returns 500.
-   - `NEXT_PUBLIC_ADMIN_URL` on mobile → e.g. `https://morpheus-admin.vercel.app`. Mobile's `notifyManagersOfAttention()` POSTs cross-origin to this URL when a rep raises an unable-to-attend flag.
-3. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-4. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
-5. **Custom report builder** if reporting is the priority.
+1. **Run the two pending May 13 migrations in Supabase** (idempotent):
+   - `db/migrations/2026_05_13_task_signatures.sql` — Feature D
+   - `db/migrations/2026_05_13_messages.sql` — Feature E
 
-Recently cleared (May 13):
+   Without these the signature pad upload + the messaging compose
+   will hard-fail at the DB layer.
+2. **Vercel Pro upgrade** — multiple crons are parked in
+   `morpheus-admin/vercel.json` because Hobby plan rejects sub-daily
+   schedules. Once Pro is active, restore:
+   ```json
+   {
+     "crons": [
+       { "path": "/api/cron/shift-reminders", "schedule": "*/5 * * * *" },
+       { "path": "/api/cron/auto-checkout",   "schedule": "*/15 * * * *" },
+       { "path": "/api/cron/messages",        "schedule": "* * * * *" }
+     ]
+   }
+   ```
+   Send-now messaging works without cron — only scheduled-future
+   messages need it. Shift reminders + auto-checkout work without
+   the cron via the client-side `StaleShiftSweeper` fallback but
+   only fire when an admin has Live Ops open.
+3. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
+4. **Confirm `CRON_SECRET` + `NEXT_PUBLIC_ADMIN_URL`** are set on Vercel (added during May 13 — the README's earlier check). Required by the cron routes and by mobile's cross-origin manager-push.
+5. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
+6. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
+7. **Custom report builder** if reporting is the priority. The
+   foundations are now in place (photos + signatures are stored
+   per-(shift, task) and a future generator can embed them in a
+   customer-facing PDF).
+
+Recently cleared (May 13 — afternoon + evening session):
+
+- ✅ **Feature A — Rep adds customer + NEW badge** (`d11675b`, `b7f129c` bugfix)
+- ✅ **Feature B — Rep geocodes existing site** (`8465ff5`)
+- ✅ **Feature C — Photos on tasks** end-to-end with direct-camera flow + iOS PWA fix (`3ae6d6f`, `ab9a4db`, `cda34ac`)
+- ✅ **Feature D — Customer signatures on tasks** with photo+sig chain (`a44a579`)
+- ✅ **Feature E — Messaging** (admin composer, push + in-app, scheduled) (`54b70ab`)
+- ✅ **Live Ops Needs Action deep-link** from sidebar badge + Today's Shifts rows (`37860b0`, `f9f73e9`)
+- ✅ **Pending-pill expand-on-tap** (`f9f73e9`)
+- ✅ **Pause-and-switch check-in** with max-2-paused cap (`cda34ac`, `038ba80`)
+- ✅ **Add-customer typeahead + map preview + flow polish** (`2bf42b0`, `038ba80`)
+- ✅ **Shift dashboard address surface** (`a44a579`)
+- ✅ **Morpheus Ops rebrand** with brand-tinted pill everywhere (`038ba80`, `0c9bcb0`)
+- ✅ **Compulsory linking** — task `compulsory` and `photos_compulsory` now share one toggle so they can't drift
+- ✅ **Messaging nav entry de-greyed** — was `comingSoon: true` from the placeholder era
+
+Recently cleared (May 13 — morning):
 - ✅ **Auto-checkout cron shipped** — `/api/cron/auto-checkout` runs every 15 min via Vercel Cron. The "auto-checkout only fires when an admin has Live Ops open" pre-existing limitation is now closed. Client-side `StaleShiftSweeper` kept as a belt-and-braces opportunistic sweep.
 - ✅ **Push kill switch + notification reference shipped** — org-wide on/off at `/settings/notifications`, with a structured reference list of every notification + automatic action grouped by category (push to reps / push to managers / auto-actions / in-app realtime). EOD reminder buffer is now an admin setting too.
 - ✅ **Web Push phase 2 shipped** — scheduled "Running late" + "EOD checkout" reminders (Vercel Cron every 5 min) and manager broadcast pushes when a rep raises an unable-to-attend flag. See "Web Push notifications" section below.

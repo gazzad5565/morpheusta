@@ -23,6 +23,10 @@ export const NAV_ITEMS = [
   // org-wide push-notifications inbox/settings; the next iteration
   // will let managers compose and send messages to reps individually
   // or in bulk, with optional scheduling — hence the broader label.
-  { id: "notify", label: "Messaging", glyph: "send", href: "/notify", comingSoon: true },
+  // Messaging shipped on May 13 (Feature E) — was previously
+  // comingSoon=true while the route was a placeholder. The composer
+  // at /notify is now real (audience picker, schedule, push + in-app
+  // delivery), so the nav entry is live.
+  { id: "notify", label: "Messaging", glyph: "send", href: "/notify" },
   { id: "settings", label: "Settings", glyph: "settings", href: "/settings" },
 ] as const;

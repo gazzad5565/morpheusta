@@ -363,7 +363,11 @@ export function Sidebar() {
               label={item.label}
               glyph={item.glyph as GlyphName}
               active={isActive(item.href)}
-              comingSoon={"comingSoon" in item ? item.comingSoon : false}
+              comingSoon={
+                "comingSoon" in item
+                  ? (item as { comingSoon?: boolean }).comingSoon ?? false
+                  : false
+              }
               badgeCount={item.id === "ops" ? needsActionCount : 0}
             />
           );
