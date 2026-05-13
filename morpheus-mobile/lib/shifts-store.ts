@@ -11,6 +11,7 @@
 
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent } from "./events-store";
+import { notifyManagersOfAttention } from "./push-notify-managers";
 import type { Shift } from "./mock-data";
 
 interface ShiftRow {
@@ -1051,6 +1052,16 @@ export async function raiseUnableToAttend(
     message: `Rep flagged unable to attend (${reason})`,
     meta: { reason, hasNote: !!note?.trim() },
   });
+
+  // Fire-and-forget push to every manager in the org. The admin's
+  // /api/push/notify endpoint validates the rep's JWT, confirms
+  // they own the shift, and only sends if the shift actually has
+  // the attention flag set (just persisted above). Push is
+  // best-effort — never await, never let it surface failures here
+  // (the DB write has already succeeded, which is what the rep
+  // cares about).
+  notifyManagersOfAttention("attention-raised", shiftId);
+
   // eslint-disable-next-line no-console
   console.warn("[unable] raise: success");
   return { ok: true };

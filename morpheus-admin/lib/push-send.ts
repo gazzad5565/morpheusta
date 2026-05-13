@@ -207,3 +207,152 @@ export function buildShiftCancelledPayload(shift: ShiftLike): PushPayload {
     url: "/shifts",
   };
 }
+
+// ─── Phase 2 payloads (May 13) ────────────────────────────────────
+//
+// Scheduled-reminder + manager-side payloads. All three share the
+// same ShiftLike + formatShiftWhen helpers so wording stays in
+// lockstep with the v1 builders above.
+
+/** "Running late" reminder fired by the /api/cron/shift-reminders
+ *  job when the rep's shift start has passed by `late_grace_minutes`
+ *  and they haven't checked in yet. */
+export function buildRunningLatePayload(shift: ShiftLike): PushPayload {
+  const when = formatShiftWhen(shift);
+  const customer = shift.customer_name || "your shift";
+  return {
+    title: "Running late?",
+    body: when ? `${customer} · ${when}` : customer,
+    url: "/shifts",
+  };
+}
+
+/** "Did you forget to check out?" reminder fired by the cron job
+ *  when the rep's shift end is past, they're still in-progress or
+ *  on-break, and `eod_buffer_minutes` has elapsed. */
+export function buildEODCheckoutPayload(shift: ShiftLike): PushPayload {
+  const customer = shift.customer_name || "your shift";
+  return {
+    title: "Don't forget to check out",
+    body: `${customer} — your shift ended a while ago.`,
+    // Direct to /active so the rep can tap Check out in one move.
+    url: "/active",
+  };
+}
+
+/** "Rep raised attention flag" — broadcast to every manager when a
+ *  rep submits an unable-to-attend on the mobile app. */
+export function buildAttentionRaisedPayload(
+  shift: ShiftLike,
+  repName: string | null,
+  reason: string | null
+): PushPayload {
+  const when = formatShiftWhen(shift);
+  const who = repName || "A rep";
+  const customer = shift.customer_name || "a customer";
+  const reasonClause = reason ? ` (${reason})` : "";
+  return {
+    title: "Rep raised attention",
+    body: `${who} can't make ${customer}${reasonClause}${when ? ` · ${when}` : ""}`,
+    url: "/", // Admin Live Ops / Needs-action queue
+  };
+}
+
+/**
+ * Fan-out send to every manager in the org.
+ *
+ * Looks up profiles WHERE role='manager', then loads + sends their
+ * push_subscriptions in parallel. Mirrors sendPushToRep's pruning
+ * behaviour for dead endpoints.
+ *
+ * Used by:
+ *   - /api/push/notify event="attention-raised" (rep flagged a shift)
+ *   - any future manager-broadcast trigger
+ */
+export async function sendPushToManagers(
+  payload: PushPayload
+): Promise<SendResult> {
+  const result: SendResult = { attempted: 0, delivered: 0, pruned: 0, errors: 0 };
+
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+    console.warn("[push] missing Supabase config — skipping managers send");
+    return result;
+  }
+  configureVapidOnce();
+  if (!vapidConfigured) {
+    console.warn("[push] VAPID keys not configured — skipping managers send");
+    return result;
+  }
+
+  const sb = serviceClient();
+
+  // Step 1: get every manager profile.
+  const { data: managers, error: profErr } = await sb
+    .from("profiles")
+    .select("id")
+    .eq("role", "manager");
+  if (profErr) {
+    console.warn("[push] manager lookup failed", profErr);
+    return result;
+  }
+  const managerIds = (managers || []).map((m: { id: string }) => m.id);
+  if (managerIds.length === 0) return result;
+
+  // Step 2: get every subscription owned by any of them. Single
+  // round-trip is cheaper than N lookups when an org has 5–50
+  // managers.
+  const { data: subs, error: subErr } = await sb
+    .from("push_subscriptions")
+    .select("id, endpoint, p256dh, auth")
+    .in("rep_id", managerIds);
+  if (subErr) {
+    console.warn("[push] manager subs lookup failed", subErr);
+    return result;
+  }
+  if (!subs || subs.length === 0) return result;
+
+  result.attempted = subs.length;
+  const payloadString = JSON.stringify({
+    title: payload.title,
+    body: payload.body,
+    icon: payload.icon || "/icon-192.png",
+    badge: "/icon-192.png",
+    data: { url: payload.url || "/" },
+  });
+
+  const toPrune: string[] = [];
+
+  await Promise.all(
+    subs.map(async (sub: { id: string; endpoint: string; p256dh: string; auth: string }) => {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          payloadString
+        );
+        result.delivered++;
+      } catch (err: unknown) {
+        const statusCode = (err as { statusCode?: number }).statusCode;
+        if (statusCode === 404 || statusCode === 410) {
+          toPrune.push(sub.id);
+        } else {
+          result.errors++;
+          console.warn("[push] managers send failed", { endpoint: sub.endpoint, err });
+        }
+      }
+    })
+  );
+
+  if (toPrune.length > 0) {
+    const { error: pruneErr } = await sb
+      .from("push_subscriptions")
+      .delete()
+      .in("id", toPrune);
+    if (pruneErr) {
+      console.warn("[push] prune failed", pruneErr);
+    } else {
+      result.pruned = toPrune.length;
+    }
+  }
+
+  return result;
+}

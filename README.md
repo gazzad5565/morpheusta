@@ -1084,14 +1084,15 @@ May 6 (already in cloud):
 Top of the queue (in priority order):
 
 1. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
-2. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-3. **Web Push phase 2 follow-ups** (foundation shipped May 13 — see "Web Push notifications" section below). Two add-ons:
-   - **"Running late" + "EOD checkout reminder" triggers** — need a Vercel Cron job or `pg_cron`. Foundation lib `morpheus-admin/lib/push-send.ts` is ready; just need scheduled callers.
-   - **Manager-side pushes** — e.g. "rep raised attention flag" → push to managers. Reps-only in v1; managers keep the in-app realtime "Needs action" pill.
+2. **Add `CRON_SECRET` to Vercel `morpheus-admin` + `NEXT_PUBLIC_ADMIN_URL` to Vercel `morpheusta`** — Web Push phase 2 needs both:
+   - `CRON_SECRET` on admin → any random hex string. Vercel Cron sends this as a Bearer token to authenticate the `/api/cron/shift-reminders` endpoint. Without it the cron returns 500.
+   - `NEXT_PUBLIC_ADMIN_URL` on mobile → e.g. `https://morpheus-admin.vercel.app`. Mobile's `notifyManagersOfAttention()` POSTs cross-origin to this URL when a rep raises an unable-to-attend flag.
+3. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
 4. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
 5. **Custom report builder** if reporting is the priority.
 
 Recently cleared (May 13):
+- ✅ **Web Push phase 2 shipped** — scheduled "Running late" + "EOD checkout" reminders (Vercel Cron every 5 min) and manager broadcast pushes when a rep raises an unable-to-attend flag. See "Web Push notifications" section below.
 - ✅ **Web Push v1 shipped** (rep notifications for shift assigned / reassigned / cancelled). See dedicated section below.
 - ✅ "Plan my day" renamed to "Route" + icon-only status pill on `/shifts` so the page stops shouting wordy "Optimized · 2:42 PM" when there's nothing to act on.
 - ✅ All May 7 / 11 / 12 migrations applied to Supabase.
@@ -1149,10 +1150,65 @@ iOS Safari (16.4+) refuses to expose the permission API to plain browser tabs. T
 6. Phone should buzz with "New shift assigned · {customer name} · today · {time}".
 7. Tap the notification → app opens (or focuses) on `/shifts`.
 
-**Limits / deferred:**
-- "Running late" / EOD reminder pushes need a scheduled trigger (Vercel Cron or `pg_cron`). Not wired in v1.
-- Manager-side pushes (e.g. "rep raised attention") not wired — managers keep the realtime Needs-action badge.
+### Web Push phase 2 (shipped later May 13)
+
+Two add-ons sitting on the v1 foundation:
+
+**A. Scheduled reminders — Vercel Cron driven.**
+
+Endpoint: `morpheus-admin/app/api/cron/shift-reminders/route.ts`
+Schedule: every 5 minutes (`morpheus-admin/vercel.json` → `*/5 * * * *`).
+Each tick runs two sweeps in parallel:
+
+1. **Running-late sweep** — finds shifts where:
+   - `shift_date` is today or yesterday (TZ fringe safety)
+   - `state = 'scheduled'` (not yet checked in)
+   - `rep_id IS NOT NULL` and `is_flexible_time = false`
+   - `start_time` has passed by ≥ `app_settings.late_grace_minutes` (default 10)
+   - No `shift.reminder_late_sent` event exists for the shift yet
+   Sends `buildRunningLatePayload()` and logs a `shift.reminder_late_sent` event row (idempotency marker — second sweep can't double-send).
+
+2. **EOD-checkout sweep** — finds shifts where:
+   - `state IN ('in-progress', 'on-break')`
+   - `end_time` has passed by ≥ 30 minutes (EOD_BUFFER_MINUTES constant — promote to app_settings later if needed)
+   - No `shift.reminder_eod_sent` event exists for the shift yet
+   Sends `buildEODCheckoutPayload()` directing the rep to `/active` for a one-tap check-out.
+
+Auth: Vercel Cron sends `Authorization: Bearer ${CRON_SECRET}`. The route rejects anything else with 401 so it can't be hit from the open web.
+
+**B. Manager broadcast — rep flags an unable-to-attend.**
+
+When a rep raises an attention flag on the mobile app, the new `notifyManagersOfAttention()` helper POSTs cross-origin to admin's `/api/push/notify` with the rep's Supabase JWT. The admin route:
+1. Validates the JWT.
+2. Confirms the caller is the `rep_id` on that shift.
+3. Sanity-checks that `attention = 'unable_to_attend'` is actually set (prevents a malicious rep from spamming managers with arbitrary "attention raised" pushes).
+4. Calls `sendPushToManagers()` — fans out to every profile with `role='manager'`.
+
+CORS: `/api/push/notify` exposes `Access-Control-Allow-Origin` to the mobile origin only (`NEXT_PUBLIC_MOBILE_URL` env var, falls back to the prod URL). Random sites can't trigger pushes.
+
+**New files:**
+- `morpheus-admin/app/api/cron/shift-reminders/route.ts` — cron sweep endpoint
+- `morpheus-admin/vercel.json` — cron schedule registration
+- `morpheus-mobile/lib/push-notify-managers.ts` — fire-and-forget client helper for rep-initiated manager pushes
+
+**Extended files:**
+- `morpheus-admin/lib/push-send.ts` — added `buildRunningLatePayload`, `buildEODCheckoutPayload`, `buildAttentionRaisedPayload`, and `sendPushToManagers()` (fan-out)
+- `morpheus-admin/app/api/push/notify/route.ts` — added `attention-raised` event with rep-JWT auth + ownership check + CORS for mobile origin
+- `morpheus-mobile/lib/shifts-store.ts` — `raiseUnableToAttend()` now fires `notifyManagersOfAttention()` after the successful DB write
+
+**New env vars (must be set in Vercel before pushing real users at this):**
+- `CRON_SECRET` — admin only. Any random hex string (`openssl rand -hex 32`). Vercel Cron uses this as a Bearer token to authenticate the cron endpoint. Without it the cron returns 500.
+- `NEXT_PUBLIC_MOBILE_URL` — admin only (optional). Defaults to `https://morpheusta.vercel.app`. Override if the mobile project has a different production URL.
+- `NEXT_PUBLIC_ADMIN_URL` — mobile only. Defaults to `https://morpheus-admin.vercel.app`. The mobile push-notify-managers helper POSTs cross-origin to this URL.
+
+**Smoke test (after Vercel deploys + env vars set):**
+1. **Late reminder:** create a shift in the past (today's date, start_time = "08:00:00") assigned to your test rep, leave them as state='scheduled' (don't check in). Within 5 min the cron should fire a "Running late?" push and log a `shift.reminder_late_sent` event.
+2. **EOD reminder:** find a shift you're already checked into, set its `end_time` to 31+ min ago via SQL. Within 5 min you should get "Don't forget to check out" and a `shift.reminder_eod_sent` event.
+3. **Manager broadcast:** as a rep, raise an unable-to-attend on a shift. Every manager subscribed via /profile → Notifications should get "Rep raised attention" within seconds.
+
+**Limits still deferred:**
 - No admin UI for sending arbitrary test pushes. Could be added on `/reps/[id]` as a "Send test" button if useful for debugging.
+- EOD_BUFFER_MINUTES is a constant (30) — could be promoted to `app_settings` if managers want to tune it.
 
 The May 11 "calendar — add second shift to occupied slot" ask
 shipped on May 12 (commits `adc7ed6`, `8197bf1`, `2bf4e8a`): the
