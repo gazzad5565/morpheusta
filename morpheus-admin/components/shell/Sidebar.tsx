@@ -340,21 +340,34 @@ export function Sidebar() {
 
       {/* Nav */}
       <div style={{ padding: "10px 8px", display: "flex", flexDirection: "column", gap: 1 }}>
-        {NAV_ITEMS.map((item) => (
-          <NavItem
-            key={item.id}
-            href={item.href}
-            label={item.label}
-            glyph={item.glyph as GlyphName}
-            active={isActive(item.href)}
-            comingSoon={"comingSoon" in item ? item.comingSoon : false}
-            // Live Ops gets a flashing red badge when there are pending
-            // rep requests — the dashboard's Live Feed is where you go
-            // to deal with them, so this tells the manager "you have
-            // something to handle" from anywhere in the admin.
-            badgeCount={item.id === "ops" ? needsActionCount : 0}
-          />
-        ))}
+        {NAV_ITEMS.map((item) => {
+          // Live Ops gets a flashing red badge when there are pending
+          // rep requests — the dashboard's Live Feed is where you go
+          // to deal with them, so this tells the manager "you have
+          // something to handle" from anywhere in the admin.
+          //
+          // When the badge is HOT (needsActionCount > 0), clicking
+          // Live Ops deep-links into the Needs Action tab of the Live
+          // Feed panel (the #live-feed-needs-action anchor) so the
+          // manager lands directly on the queue they need to clear,
+          // not the all-activity feed. When the badge is cold, plain
+          // /. Per product (May 13).
+          const href =
+            item.id === "ops" && needsActionCount > 0
+              ? "/#live-feed-needs-action"
+              : item.href;
+          return (
+            <NavItem
+              key={item.id}
+              href={href}
+              label={item.label}
+              glyph={item.glyph as GlyphName}
+              active={isActive(item.href)}
+              comingSoon={"comingSoon" in item ? item.comingSoon : false}
+              badgeCount={item.id === "ops" ? needsActionCount : 0}
+            />
+          );
+        })}
       </div>
       {/* Pulse animation for the nav badge — kept here so the keyframe
           is mounted alongside the nav and torn down when the sidebar is. */}
