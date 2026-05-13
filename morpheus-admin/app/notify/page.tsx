@@ -29,6 +29,8 @@ import {
   type MessageRow,
 } from "@/lib/messaging-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import { RepAvatar } from "@/components/ui/Avatars";
+import { initialsFromNameOrEmail } from "@/lib/format";
 
 export default function NotifyPage() {
   // Compose form state
@@ -228,7 +230,14 @@ export default function NotifyPage() {
             </div>
           </Field>
 
-          {/* Specific-user picker — only when audienceKind = specific */}
+          {/* Specific-user picker — only when audienceKind = specific.
+              Each row shows the rep/manager's avatar (their uploaded
+              photo from mobile /profile, falling back to a coloured
+              initials chip) so the manager picking the audience can
+              actually recognise faces, not just match names. Dropdown
+              is a static inline list (not a popover) so it doesn't
+              accidentally close on outside taps — picking is via
+              checkbox tick or full-row click. */}
           {audienceKind === "specific" && (
             <Field label="Pick users">
               <input
@@ -237,10 +246,54 @@ export default function NotifyPage() {
                 placeholder="Search by name or email…"
                 style={inputStyle}
               />
+              {pickedIds.size > 0 && (
+                // Selected-summary strip lets the manager see WHO
+                // they've already picked while scrolling a long list,
+                // and clear all in one tap. Without this, a long
+                // search query can scroll the picked rows out of view
+                // and managers lose track of their selection.
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: "8px 10px",
+                    background: AC.brandSoft,
+                    border: `1px solid ${AC.brand}33`,
+                    borderRadius: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontFamily: AC.font,
+                    fontSize: 12,
+                    color: AC.brandDeep,
+                    fontWeight: 600,
+                  }}
+                >
+                  <span>
+                    {pickedIds.size} picked
+                  </span>
+                  <div style={{ flex: 1 }} />
+                  <button
+                    type="button"
+                    onClick={() => setPickedIds(new Set())}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: AC.brandDeep,
+                      fontFamily: AC.font,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
               <div
                 style={{
                   marginTop: 8,
-                  maxHeight: 200,
+                  maxHeight: 320,
                   overflowY: "auto",
                   border: `1px solid ${AC.line}`,
                   borderRadius: 10,
@@ -250,7 +303,7 @@ export default function NotifyPage() {
                 {filteredProfiles.length === 0 && (
                   <div
                     style={{
-                      padding: "10px 12px",
+                      padding: "12px 14px",
                       fontFamily: AC.font,
                       fontSize: 12.5,
                       color: AC.mute,
@@ -261,6 +314,8 @@ export default function NotifyPage() {
                 )}
                 {filteredProfiles.map((p) => {
                   const picked = pickedIds.has(p.id);
+                  const initials =
+                    initialsFromNameOrEmail(p.name, p.email) || "··";
                   return (
                     <label
                       key={p.id}
@@ -268,17 +323,28 @@ export default function NotifyPage() {
                         display: "flex",
                         alignItems: "center",
                         gap: 10,
-                        padding: "8px 12px",
+                        padding: "10px 12px",
                         cursor: "pointer",
                         borderBottom: `1px solid ${AC.lineDim}`,
                         background: picked ? AC.brandSoft : "#fff",
+                        transition: "background .12s",
                       }}
                     >
                       <input
                         type="checkbox"
                         checked={picked}
                         onChange={() => togglePicked(p.id)}
-                        style={{ accentColor: AC.brand }}
+                        style={{
+                          accentColor: AC.brand,
+                          width: 16,
+                          height: 16,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <RepAvatar
+                        rep={{ initials, avatarUrl: p.avatar_url }}
+                        size={30}
+                        seed={p.id}
                       />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div
@@ -287,6 +353,9 @@ export default function NotifyPage() {
                             fontSize: 13,
                             fontWeight: 600,
                             color: AC.ink,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
                           }}
                         >
                           {displayName(p)}
@@ -296,6 +365,9 @@ export default function NotifyPage() {
                             fontFamily: AC.font,
                             fontSize: 11.5,
                             color: AC.mute,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
                           }}
                         >
                           {p.email} · {p.role}
