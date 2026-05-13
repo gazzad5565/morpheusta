@@ -20,6 +20,13 @@ import {
   geocodeAddress,
 } from "@/lib/customers-store";
 import {
+  uploadShiftTaskPhoto,
+  listShiftTaskPhotos,
+  deleteShiftTaskPhoto,
+  subscribeShiftTaskPhotos,
+  type UploadedPhoto,
+} from "@/lib/photo-store";
+import {
   getMyActiveShift,
   getTasksForCustomer,
   setShiftBreakState,
@@ -137,6 +144,8 @@ export default function ActiveShiftPage() {
           duration: r.duration_min,
           compulsory: r.compulsory,
           description: r.description ?? "",
+          photoCount: r.photo_count ?? 0,
+          photosCompulsory: r.photos_compulsory ?? true,
         }))
       );
       // Hydrate completed-state from the DB so closing/reopening the
@@ -957,9 +966,10 @@ export default function ActiveShiftPage() {
 
       <AppFooter />
 
-      {openSheet && (
+      {openSheet && shiftData && (
         <TaskSheet
           task={openSheet.task}
+          shiftId={shiftData.shiftId}
           mode={sheetMode}
           elapsedSec={sheetElapsed}
           onStart={startTask}
@@ -1218,6 +1228,7 @@ function BreakRow({ breakItem, onClick }: { breakItem: Task; onClick: () => void
 
 function TaskSheet({
   task,
+  shiftId,
   mode,
   onStart,
   onComplete,
@@ -1225,6 +1236,7 @@ function TaskSheet({
   elapsedSec,
 }: {
   task: Task;
+  shiftId: string;
   mode: "idle" | "active" | "done";
   onStart: () => void;
   onComplete: () => void;
@@ -1233,6 +1245,38 @@ function TaskSheet({
 }) {
   const isBreak = task.kind === "break";
   const accent = isBreak ? "#5b3da5" : MC.brand;
+
+  // Feature C — photo capture. Hydrate existing photos for this
+  // (shift, task) so re-opening the sheet doesn't reset slot
+  // state. Realtime sub bumps the list as the rep uploads.
+  const photoCount = task.photoCount ?? 0;
+  const photosCompulsory = task.photosCompulsory ?? true;
+  const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
+  useEffect(() => {
+    if (photoCount === 0) return;
+    let cancelled = false;
+    const refresh = () => {
+      void listShiftTaskPhotos(shiftId, task.id).then((rows) => {
+        if (!cancelled) setPhotos(rows);
+      });
+    };
+    refresh();
+    const unsub = subscribeShiftTaskPhotos(shiftId, task.id, refresh);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [shiftId, task.id, photoCount]);
+
+  const filledSlots = new Set(photos.map((p) => p.slot_index));
+  const photosFilledCount = filledSlots.size;
+  // Block Complete when photos are mandatory and not all slots
+  // are filled. Optional photos (photosCompulsory=false) just
+  // disclose the count and let the rep proceed.
+  const photoGateOpen =
+    photoCount === 0 ||
+    !photosCompulsory ||
+    photosFilledCount >= photoCount;
 
   return (
     <div
@@ -1358,6 +1402,23 @@ function TaskSheet({
             </div>
           )}
 
+          {/* Photo slot grid — Feature C. Only renders when the
+              admin set photo_count > 0 on this task. Each slot
+              opens the device camera via <input type="file" with
+              capture="environment">. Slots fill in real time as
+              the photo store finishes its compress + upload
+              round-trip; cross-device subscribers see the update
+              too via the shift_task_photos realtime channel. */}
+          {photoCount > 0 && !isBreak && (
+            <PhotoSlotGrid
+              shiftId={shiftId}
+              taskId={task.id}
+              photoCount={photoCount}
+              compulsory={photosCompulsory}
+              photos={photos}
+            />
+          )}
+
           <div style={{ marginTop: 18 }}>
             {mode === "idle" && (
               <button
@@ -1383,22 +1444,30 @@ function TaskSheet({
             {mode === "active" && (
               <button
                 type="button"
-                onClick={onComplete}
+                onClick={photoGateOpen ? onComplete : undefined}
+                disabled={!photoGateOpen}
                 style={{
                   width: "100%",
                   height: 54,
                   borderRadius: 14,
                   border: "none",
-                  background: MC.brand,
+                  background: photoGateOpen ? MC.brand : MC.line,
                   color: "#fff",
                   fontFamily: MC.font,
                   fontSize: 16,
                   fontWeight: 600,
-                  cursor: "pointer",
-                  boxShadow: `0 10px 24px ${MC.brand}55`,
+                  cursor: photoGateOpen ? "pointer" : "not-allowed",
+                  boxShadow: photoGateOpen ? `0 10px 24px ${MC.brand}55` : "none",
+                  opacity: photoGateOpen ? 1 : 0.85,
                 }}
               >
-                {isBreak ? "End break" : "Complete task"}
+                {isBreak
+                  ? "End break"
+                  : photoGateOpen
+                  ? "Complete task"
+                  : `Add ${photoCount - photosFilledCount} more photo${
+                      photoCount - photosFilledCount === 1 ? "" : "s"
+                    } to complete`}
               </button>
             )}
             {mode === "done" && (
@@ -1835,6 +1904,290 @@ function GeocodeTaskCard({
           }}
         >
           {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Photo slot grid (Feature C — May 13) ──────────────────────────
+//
+// Renders N camera slots inside the TaskSheet when the admin set
+// photo_count > 0 on the task. Each slot is one of:
+//
+//   - Empty   → camera icon + "Slot N". Tap → native camera/picker.
+//   - Filled  → thumbnail loaded from the public Supabase URL.
+//               Tap → preview overlay with Delete + Retake actions.
+//   - Busy    → spinner overlay while compressing + uploading.
+//
+// Each slot wraps a hidden <input type="file" accept="image/*"
+// capture="environment"> — on iOS Safari / Android Chrome this
+// opens the rear camera directly. With capture omitted it falls
+// back to the OS photo picker, useful for picking an existing
+// shot too if the rep already captured one.
+
+function PhotoSlotGrid({
+  shiftId,
+  taskId,
+  photoCount,
+  compulsory,
+  photos,
+}: {
+  shiftId: string;
+  taskId: string;
+  photoCount: number;
+  compulsory: boolean;
+  photos: UploadedPhoto[];
+}) {
+  // Map slot_index → photo for O(1) lookup. Slots use a stable
+  // 0..N-1 index so re-shoots don't reshuffle thumbnails.
+  const bySlot = useMemo(() => {
+    const m = new Map<number, UploadedPhoto>();
+    for (const p of photos) m.set(p.slot_index, p);
+    return m;
+  }, [photos]);
+
+  const [busySlot, setBusySlot] = useState<number | null>(null);
+  const [slotError, setSlotError] = useState<{ slot: number; msg: string } | null>(
+    null
+  );
+  const [previewing, setPreviewing] = useState<UploadedPhoto | null>(null);
+
+  const handleFile = async (slotIndex: number, file: File) => {
+    setSlotError(null);
+    setBusySlot(slotIndex);
+    const r = await uploadShiftTaskPhoto({
+      shiftId,
+      taskId,
+      slotIndex,
+      file,
+    });
+    setBusySlot(null);
+    if (!r.ok) {
+      setSlotError({ slot: slotIndex, msg: r.error });
+    }
+    // No state push needed — the realtime sub on the parent will
+    // refresh the photos array within a fraction of a second.
+  };
+
+  const handleDelete = async (photo: UploadedPhoto) => {
+    setPreviewing(null);
+    const r = await deleteShiftTaskPhoto(photo);
+    if (!r.ok) setSlotError({ slot: photo.slot_index, msg: r.error ?? "" });
+  };
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div
+        style={{
+          fontFamily: MC.font,
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: 0.5,
+          textTransform: "uppercase",
+          color: MC.hint,
+          marginBottom: 8,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <Glyph name="camera" size={12} color={MC.hint} strokeWidth={2.4} />
+        Photos
+        <span style={{ color: MC.mute, fontWeight: 500 }}>
+          · {bySlot.size}/{photoCount}
+          {compulsory ? "" : " · optional"}
+        </span>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${photoCount <= 3 ? photoCount : 3}, 1fr)`,
+          gap: 8,
+        }}
+      >
+        {Array.from({ length: photoCount }).map((_, i) => {
+          const photo = bySlot.get(i);
+          const isBusy = busySlot === i;
+          return (
+            <div key={i} style={{ position: "relative" }}>
+              {photo ? (
+                // Filled slot — thumbnail tap opens preview.
+                <button
+                  type="button"
+                  onClick={() => setPreviewing(photo)}
+                  style={{
+                    width: "100%",
+                    aspectRatio: "1 / 1",
+                    borderRadius: 10,
+                    border: `1px solid ${MC.line}`,
+                    background: `url(${photo.public_url}) center/cover no-repeat`,
+                    cursor: "pointer",
+                    padding: 0,
+                    position: "relative",
+                  }}
+                  aria-label={`Photo ${i + 1} — tap to preview`}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      position: "absolute",
+                      top: 4,
+                      right: 4,
+                      background: "rgba(10,15,30,.6)",
+                      color: "#fff",
+                      fontFamily: MC.font,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    {i + 1}
+                  </span>
+                </button>
+              ) : (
+                // Empty slot — label wraps a hidden file input that
+                // opens the device camera on tap. `capture` hints
+                // the rear camera; the user can still switch to
+                // the photo library from there.
+                <label
+                  style={{
+                    width: "100%",
+                    aspectRatio: "1 / 1",
+                    borderRadius: 10,
+                    border: `1.5px dashed ${isBusy ? MC.brand : MC.line}`,
+                    background: isBusy ? MC.brandTint : MC.bg,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 4,
+                    cursor: isBusy ? "wait" : "pointer",
+                    color: isBusy ? MC.brandDeep : MC.mute,
+                  }}
+                >
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    disabled={isBusy}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleFile(i, f);
+                      e.target.value = ""; // allow re-pick of same file
+                    }}
+                    style={{
+                      position: "absolute",
+                      opacity: 0,
+                      width: 0,
+                      height: 0,
+                    }}
+                  />
+                  <Glyph
+                    name="camera"
+                    size={20}
+                    color={isBusy ? MC.brandDeep : MC.mute}
+                    strokeWidth={2.2}
+                  />
+                  <span
+                    style={{
+                      fontFamily: MC.font,
+                      fontSize: 11,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {isBusy ? "Uploading…" : `Slot ${i + 1}`}
+                  </span>
+                </label>
+              )}
+              {slotError?.slot === i && (
+                <div
+                  style={{
+                    fontFamily: MC.font,
+                    fontSize: 10.5,
+                    color: "#9c1a3c",
+                    marginTop: 4,
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {slotError.msg || "Upload failed — tap to retry"}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Fullscreen preview overlay — tap outside to close,
+          Delete to remove the photo + clear the slot. */}
+      {previewing && (
+        <div
+          role="dialog"
+          onClick={() => setPreviewing(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 60,
+            background: "rgba(10,15,30,.92)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <img
+            src={previewing.public_url}
+            alt={`Photo for slot ${previewing.slot_index + 1}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "70%",
+              borderRadius: 12,
+              boxShadow: "0 12px 40px rgba(0,0,0,.5)",
+            }}
+          />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: "flex", gap: 10, marginTop: 20 }}
+          >
+            <button
+              type="button"
+              onClick={() => handleDelete(previewing)}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 10,
+                background: MC.danger,
+                color: "#fff",
+                border: "none",
+                fontFamily: MC.font,
+                fontSize: 14,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Delete
+            </button>
+            <button
+              type="button"
+              onClick={() => setPreviewing(null)}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 10,
+                background: "rgba(255,255,255,.15)",
+                color: "#fff",
+                border: "none",
+                fontFamily: MC.font,
+                fontSize: 14,
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              Close
+            </button>
+          </div>
         </div>
       )}
     </div>

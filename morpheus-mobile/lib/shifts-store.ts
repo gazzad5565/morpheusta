@@ -671,6 +671,9 @@ export interface TaskRow {
   duration_min: number;
   compulsory: boolean;
   sort_order: number;
+  /** Feature C — photos on tasks. */
+  photo_count?: number;
+  photos_compulsory?: boolean;
 }
 
 export async function getTasksForCustomer(customerId: string): Promise<TaskRow[]> {
@@ -679,7 +682,9 @@ export async function getTasksForCustomer(customerId: string): Promise<TaskRow[]
   // that apply to all customers.
   const { data, error } = await supabase
     .from("customer_tasks")
-    .select("id, name, description, duration_min, compulsory, sort_order")
+    .select(
+      "id, name, description, duration_min, compulsory, sort_order, photo_count, photos_compulsory"
+    )
     .or(`customer_id.eq.${customerId},customer_id.is.null`)
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });

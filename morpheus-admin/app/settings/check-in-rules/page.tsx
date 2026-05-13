@@ -33,6 +33,10 @@ import {
   setRouteOptimizationAllowed,
   getShiftRequestAutoApprove,
   setShiftRequestAutoApprove,
+  getPhotoQualityTier,
+  setPhotoQualityTier,
+  PHOTO_QUALITY_TIERS,
+  type PhotoQualityTier,
 } from "@/lib/settings-store";
 
 export default function CheckInRulesPage() {
@@ -44,6 +48,7 @@ export default function CheckInRulesPage() {
   const [timingOn, setTimingOn] = useState<boolean>(true);
   const [routeOptimizeOn, setRouteOptimizeOn] = useState<boolean>(true);
   const [autoApproveOn, setAutoApproveOn] = useState<boolean>(false);
+  const [photoTier, setPhotoTier] = useState<PhotoQualityTier>("standard");
   const [loaded, setLoaded] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -58,7 +63,8 @@ export default function CheckInRulesPage() {
       getTimingExceptionsEnabled(),
       getRouteOptimizationAllowed(),
       getShiftRequestAutoApprove(),
-    ]).then(([late, early, radius, autoTime, locOn, timeOn, routeOn, autoApprove]) => {
+      getPhotoQualityTier(),
+    ]).then(([late, early, radius, autoTime, locOn, timeOn, routeOn, autoApprove, tier]) => {
       setLateMin(String(late));
       setEarlyMin(String(early));
       setDefaultRadius(String(radius));
@@ -67,6 +73,7 @@ export default function CheckInRulesPage() {
       setTimingOn(timeOn);
       setRouteOptimizeOn(routeOn);
       setAutoApproveOn(autoApprove);
+      setPhotoTier(tier);
       setLoaded(true);
     });
   }, []);
@@ -121,6 +128,21 @@ export default function CheckInRulesPage() {
         : "Route optimization disabled — reps see their shifts in chronological order only."
     );
   };
+  const changePhotoTier = async (next: PhotoQualityTier) => {
+    const prev = photoTier;
+    setPhotoTier(next);
+    setSavingKey("photoTier");
+    const r = await setPhotoQualityTier(next);
+    setSavingKey(null);
+    if (!r.ok) {
+      setPhotoTier(prev);
+      setMessage(r.error || "Couldn't save.");
+      return;
+    }
+    const t = PHOTO_QUALITY_TIERS[next];
+    setMessage(`Photo quality set to ${t.label} (~${t.expectedKB}KB per photo, max ${t.maxDimension}px).`);
+  };
+
   const toggleAutoApprove = async (next: boolean) => {
     setAutoApproveOn(next);
     setSavingKey("autoApprove");
@@ -378,6 +400,85 @@ export default function CheckInRulesPage() {
             rep's live-map dot is cleared. Default is <b style={{ color: AC.ink2 }}>23:59</b>{" "}
             (just before midnight local time). Yesterday's stragglers are
             always swept regardless of this time.
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: AC.line, margin: "20px 0" }} />
+
+        {/* Photo quality tier (Feature C — May 13). Three named
+            presets pick the maxDimension + JPEG quality for client-
+            side compression before the rep uploads. Drives the size
+            vs sharpness tradeoff for the photos that later end up
+            in client-facing reports. */}
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              color: AC.mute,
+              fontWeight: 700,
+              letterSpacing: 0.3,
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}
+          >
+            Photo quality
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(["standard", "high", "maximum"] as const).map((tier) => {
+              const t = PHOTO_QUALITY_TIERS[tier];
+              const active = photoTier === tier;
+              return (
+                <button
+                  key={tier}
+                  type="button"
+                  onClick={() => changePhotoTier(tier)}
+                  disabled={!loaded || savingKey === "photoTier"}
+                  style={{
+                    flex: "1 1 0",
+                    minWidth: 110,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    background: active ? AC.brand : "#fff",
+                    color: active ? "#fff" : AC.ink,
+                    border: `1px solid ${active ? AC.brand : AC.line}`,
+                    fontFamily: AC.font,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    opacity: !loaded ? 0.55 : 1,
+                  }}
+                >
+                  <div>{t.label}</div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      opacity: 0.85,
+                      marginTop: 2,
+                    }}
+                  >
+                    ~{t.expectedKB}KB · {t.maxDimension}px
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12,
+              color: AC.mute,
+              marginTop: 10,
+              lineHeight: 1.5,
+            }}
+          >
+            Used for rep-uploaded shift photos. <b style={{ color: AC.ink2 }}>Standard</b>{" "}
+            (~400KB) is enough for most client reports. Bump to{" "}
+            <b style={{ color: AC.ink2 }}>High</b> or{" "}
+            <b style={{ color: AC.ink2 }}>Maximum</b> when print-grade quality
+            matters. Hard cap of 2MB per photo is enforced regardless of tier.
           </div>
         </div>
 

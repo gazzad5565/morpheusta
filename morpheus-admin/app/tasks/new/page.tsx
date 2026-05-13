@@ -52,6 +52,12 @@ function NewTaskPage() {
   const [duration, setDuration] = useState("10");
   const [compulsory, setCompulsory] = useState(false);
   const [order, setOrder] = useState("0");
+  // Feature C — photos per task. photoCount=0 hides the requirement
+  // entirely; otherwise the rep must capture N photos (and if
+  // photosCompulsory is on, can't mark the task complete without
+  // them). Default 0 so existing workflows aren't disrupted.
+  const [photoCount, setPhotoCount] = useState("0");
+  const [photosCompulsory, setPhotosCompulsory] = useState(true);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -116,6 +122,12 @@ function NewTaskPage() {
     }
 
     setBusy(true);
+    const photoN = parseInt(photoCount, 10);
+    if (Number.isNaN(photoN) || photoN < 0) {
+      setBusy(false);
+      return setError("Photos count must be a number ≥ 0.");
+    }
+
     const result = await createTask({
       customerIds,
       name: name.trim(),
@@ -123,6 +135,8 @@ function NewTaskPage() {
       duration_min: dur,
       compulsory,
       sort_order: ord,
+      photo_count: photoN,
+      photos_compulsory: photosCompulsory,
     });
     setBusy(false);
     if (!result.ok) {
@@ -367,6 +381,61 @@ function NewTaskPage() {
                   style={{ width: 16, height: 16, accentColor: AC.brand }}
                 />
                 Required
+              </label>
+            </Field>
+          </div>
+
+          {/* Photos requirement — Feature C (May 13). Two fields
+              live together: how many photos and whether they're
+              required to complete the task. photoCount=0 hides
+              the compulsory-photos sub-toggle since it's a no-op. */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+              marginBottom: 14,
+            }}
+          >
+            <Field
+              label="Photos required"
+              hint="Number of photos the rep must capture during this task. 0 = no photos. Photos surface as camera slots on the rep app and feed into client-facing reports later."
+            >
+              <input
+                value={photoCount}
+                onChange={(e) =>
+                  setPhotoCount(e.target.value.replace(/[^0-9]/g, ""))
+                }
+                inputMode="numeric"
+                style={{ ...inputStyle, fontFamily: AC.fontMono }}
+              />
+            </Field>
+            <Field label="Photos compulsory">
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "9px 11px",
+                  border: `1px solid ${AC.line}`,
+                  borderRadius: 10,
+                  background: "#fff",
+                  cursor:
+                    parseInt(photoCount, 10) > 0 ? "pointer" : "not-allowed",
+                  fontFamily: AC.font,
+                  fontSize: 13,
+                  color: parseInt(photoCount, 10) > 0 ? AC.ink : AC.mute,
+                  opacity: parseInt(photoCount, 10) > 0 ? 1 : 0.6,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={photosCompulsory}
+                  disabled={parseInt(photoCount, 10) === 0}
+                  onChange={(e) => setPhotosCompulsory(e.target.checked)}
+                  style={{ width: 16, height: 16, accentColor: AC.brand }}
+                />
+                Required to complete
               </label>
             </Field>
           </div>

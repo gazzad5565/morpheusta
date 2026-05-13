@@ -54,6 +54,12 @@ export interface Task {
   duration: number;
   description: string;
   kind?: "task" | "break";
+  /** Number of photos the rep must capture during this task. 0 =
+   *  no photos. Set by admin per-task on the customer-edit page. */
+  photoCount?: number;
+  /** When photoCount > 0, whether all N photos are required to
+   *  mark the task complete. Default true. */
+  photosCompulsory?: boolean;
 }
 
 export interface LibFile {

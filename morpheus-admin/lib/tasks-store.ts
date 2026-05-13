@@ -20,6 +20,9 @@ export interface TaskRow {
   compulsory: boolean;
   sort_order: number;
   created_at?: string;
+  /** Feature C (May 13): photos on tasks. */
+  photo_count?: number;
+  photos_compulsory?: boolean;
   /** Joined customer summary, when present (null for universal tasks). */
   customers?: {
     id: string;
@@ -43,6 +46,12 @@ export interface NewTask {
   duration_min?: number;
   compulsory?: boolean;
   sort_order?: number;
+  /** Feature C: number of photos the rep must capture during this
+   *  task. 0 = no photos. Default 0. */
+  photo_count?: number;
+  /** Feature C: whether photos are required to mark complete when
+   *  photo_count > 0. Ignored at photo_count = 0. Default true. */
+  photos_compulsory?: boolean;
 }
 
 /** All tasks across all customers (admin /tasks page). */
@@ -51,7 +60,7 @@ export async function listAllTasks(): Promise<TaskRow[]> {
   const { data, error } = await supabase
     .from("customer_tasks")
     .select(
-      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, customers(id,name,initials,color,code)"
+      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory, customers(id,name,initials,color,code)"
     )
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
@@ -117,7 +126,7 @@ export async function listTasksForCustomer(customerId: string): Promise<TaskRow[
   const { data, error } = await supabase
     .from("customer_tasks")
     .select(
-      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at"
+      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory"
     )
     .eq("customer_id", customerId)
     .order("sort_order", { ascending: true })
@@ -143,6 +152,8 @@ export async function createTask(
     duration_min: t.duration_min ?? 10,
     compulsory: t.compulsory ?? false,
     sort_order: t.sort_order ?? 0,
+    photo_count: Math.max(0, Math.round(t.photo_count ?? 0)),
+    photos_compulsory: t.photos_compulsory ?? true,
   };
 
   // Build the rows to insert. NULL customer_id = universal.
@@ -203,7 +214,7 @@ export async function getTask(id: string): Promise<TaskRow | null> {
   const { data, error } = await supabase
     .from("customer_tasks")
     .select(
-      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, customers(id,name,initials,color,code)"
+      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory, customers(id,name,initials,color,code)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -222,6 +233,9 @@ export interface TaskUpdate {
   duration_min?: number;
   compulsory?: boolean;
   sort_order?: number;
+  /** Feature C — photos on tasks. */
+  photo_count?: number;
+  photos_compulsory?: boolean;
 }
 
 export async function updateTask(
@@ -241,6 +255,12 @@ export async function updateTask(
   if (patch.duration_min !== undefined) dbPatch.duration_min = patch.duration_min;
   if (patch.compulsory !== undefined) dbPatch.compulsory = patch.compulsory;
   if (patch.sort_order !== undefined) dbPatch.sort_order = patch.sort_order;
+  if (patch.photo_count !== undefined) {
+    dbPatch.photo_count = Math.max(0, Math.round(patch.photo_count));
+  }
+  if (patch.photos_compulsory !== undefined) {
+    dbPatch.photos_compulsory = patch.photos_compulsory;
+  }
 
   const { error } = await supabase
     .from("customer_tasks")

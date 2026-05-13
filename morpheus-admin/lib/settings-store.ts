@@ -432,6 +432,53 @@ export async function setEodReminderBufferMinutes(
   );
 }
 
+// ─── Photo quality tier (Feature C — May 13) ─────────────────────
+//
+// Three-tier quality preset for rep-uploaded shift photos. Drives
+// the client-side compression (maxDimension + JPEG quality) before
+// upload to Supabase Storage. Picked to balance:
+//   - storage cost (per-photo bytes × photos-per-shift × shifts/day)
+//   - report quality (must look good on a client-facing PDF)
+//   - upload speed on mobile (compression keeps each upload short)
+//
+// Default standard — ~400KB per photo, looks crisp on screen and
+// print. Managers can flip to high or maximum for clients who need
+// sharper images.
+//
+// Hard cap of 2 MB per photo is enforced client-side regardless of
+// tier (compressAndUploadPhoto retries at lower quality if a single
+// image somehow blows the cap).
+
+export type PhotoQualityTier = "standard" | "high" | "maximum";
+export const DEFAULT_PHOTO_QUALITY_TIER: PhotoQualityTier = "standard";
+
+export const PHOTO_QUALITY_TIERS: Record<
+  PhotoQualityTier,
+  { maxDimension: number; jpegQuality: number; expectedKB: number; label: string }
+> = {
+  standard: { maxDimension: 1600, jpegQuality: 0.8, expectedKB: 400, label: "Standard" },
+  high:     { maxDimension: 1920, jpegQuality: 0.88, expectedKB: 700, label: "High" },
+  maximum:  { maxDimension: 2400, jpegQuality: 0.92, expectedKB: 1200, label: "Maximum" },
+};
+
+function isValidTier(v: unknown): v is PhotoQualityTier {
+  return v === "standard" || v === "high" || v === "maximum";
+}
+
+export async function getPhotoQualityTier(): Promise<PhotoQualityTier> {
+  const v = await readSetting<string>("photo_quality_tier", DEFAULT_PHOTO_QUALITY_TIER);
+  return isValidTier(v) ? v : DEFAULT_PHOTO_QUALITY_TIER;
+}
+
+export async function setPhotoQualityTier(
+  tier: PhotoQualityTier
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isValidTier(tier)) {
+    return { ok: false, error: "Invalid tier" };
+  }
+  return writeSetting("photo_quality_tier", tier, "check-in rules");
+}
+
 /** One-shot fetch of every org text field for a settings form. */
 export async function getOrganisationDetails(): Promise<{
   address: string;
