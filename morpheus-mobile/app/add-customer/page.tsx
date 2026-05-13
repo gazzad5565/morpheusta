@@ -38,7 +38,17 @@ import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { AppHeader, AppFooter } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
-import { createCustomer } from "@/lib/customers-store";
+import { createCustomer, geocodeAddress } from "@/lib/customers-store";
+import { requestGeolocationOnce } from "@/lib/route-planner";
+
+interface Pin {
+  /** "gps"     — captured from device GPS at the moment the rep
+   *              tapped "Use my current location".
+   *  "address" — resolved by Nominatim from the typed address. */
+  source: "gps" | "address";
+  latitude: number;
+  longitude: number;
+}
 
 export default function AddCustomerPage() {
   const router = useRouter();
@@ -47,10 +57,22 @@ export default function AddCustomerPage() {
   const [address, setAddress] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
+  // Pinned coords — independent of the address text. The rep can
+  // edit the address freely after pinning (e.g. rename to "Bob's
+  // place — corner unit") while the geofence stays locked to the
+  // captured coords.
+  const [pin, setPin] = useState<Pin | null>(null);
+  const [pinning, setPinning] = useState<"gps" | "address" | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSave = name.trim().length > 0 && address.trim().length > 0 && !saving;
+  // Either address text OR a pin is enough — both work too. Name is
+  // always required.
+  const canSave =
+    name.trim().length > 0 &&
+    (address.trim().length > 0 || pin !== null) &&
+    !saving;
 
   const onSave = async () => {
     if (!canSave) return;
@@ -58,7 +80,9 @@ export default function AddCustomerPage() {
     setSaving(true);
     const r = await createCustomer({
       name: name.trim(),
-      address: address.trim(),
+      address: address.trim() || undefined,
+      latitude: pin?.latitude ?? null,
+      longitude: pin?.longitude ?? null,
       contactName: contactName.trim() || undefined,
       contactPhone: contactPhone.trim() || undefined,
     });
@@ -72,6 +96,46 @@ export default function AddCustomerPage() {
     // path: rep is on-site at a new prospect, adds them, books
     // their visit — one flow.
     router.replace(`/add-shift?customer=${encodeURIComponent(r.id || "")}`);
+  };
+
+  /** Capture the rep's current GPS as the pin. Address text is
+   *  preserved so the rep can keep their custom display label. */
+  const pinViaGps = async () => {
+    setPinError(null);
+    setPinning("gps");
+    const pos = await requestGeolocationOnce();
+    setPinning(null);
+    if (!pos) {
+      setPinError(
+        "Couldn't read your location. Make sure Morpheus has permission to use your device's location."
+      );
+      return;
+    }
+    setPin({ source: "gps", latitude: pos.lat, longitude: pos.lng });
+  };
+
+  /** Resolve the typed address via the local /api/geocode (Nominatim)
+   *  proxy. Falls back with a friendly error if no match. */
+  const pinViaAddress = async () => {
+    setPinError(null);
+    const q = address.trim();
+    if (!q) {
+      setPinError("Type the address first, then tap Geocode.");
+      return;
+    }
+    setPinning("address");
+    const hit = await geocodeAddress(q);
+    setPinning(null);
+    if (!hit) {
+      setPinError("Couldn't find that address. Try GPS, or refine the text.");
+      return;
+    }
+    setPin({ source: "address", latitude: hit.latitude, longitude: hit.longitude });
+  };
+
+  const clearPin = () => {
+    setPin(null);
+    setPinError(null);
   };
 
   return (
@@ -90,8 +154,8 @@ export default function AddCustomerPage() {
           }}
         >
           Adds the customer to the admin&apos;s list immediately. Your manager
-          will see it in their live feed. You can book a shift for them
-          right after.
+          will see it in their live feed. Pin the location now if you&apos;re
+          on-site — it makes the next check-in geofenced.
         </div>
 
         {/* Form */}
@@ -116,13 +180,143 @@ export default function AddCustomerPage() {
           />
           <Field
             label="Address"
-            required
             value={address}
             onChange={setAddress}
-            placeholder="Street, suburb, city"
+            placeholder="Street, suburb, city — or leave empty and pin below"
             multiline
-            hint="Pasting the full address from Google Maps works fine — your manager can clean it up later."
+            hint={
+              pin
+                ? "Pinned — you can rename this freely; the geofence stays locked to the pin."
+                : "Type it, or pin the location below. One of the two is needed."
+            }
           />
+
+          {/* Pin buttons — let the rep capture coords either from
+              their current GPS (most accurate when actually on-site)
+              or from the typed address (good when adding a customer
+              they're not currently at). After pinning, the rep can
+              rename the address freely while coords stay locked. */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              onClick={pinViaGps}
+              disabled={!!pinning}
+              style={{
+                flex: 1,
+                minHeight: 40,
+                padding: "0 12px",
+                borderRadius: 10,
+                background: MC.brandDeep,
+                color: "#fff",
+                border: "none",
+                fontFamily: MC.font,
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: pinning ? "wait" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                opacity: pinning === "gps" ? 0.7 : 1,
+              }}
+            >
+              <Glyph name="target" size={14} color="#fff" strokeWidth={2.4} />
+              {pinning === "gps" ? "Pinning…" : "Use my GPS"}
+            </button>
+            <button
+              type="button"
+              onClick={pinViaAddress}
+              disabled={!!pinning || address.trim().length === 0}
+              style={{
+                flex: 1,
+                minHeight: 40,
+                padding: "0 12px",
+                borderRadius: 10,
+                background: "#fff",
+                color: MC.brandDeep,
+                border: `1px solid ${MC.brand}55`,
+                fontFamily: MC.font,
+                fontSize: 13,
+                fontWeight: 700,
+                cursor:
+                  pinning || address.trim().length === 0
+                    ? "not-allowed"
+                    : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                opacity: pinning === "address" || address.trim().length === 0 ? 0.6 : 1,
+              }}
+            >
+              <Glyph name="pin" size={14} color={MC.brandDeep} strokeWidth={2.4} />
+              {pinning === "address" ? "Looking up…" : "Geocode address"}
+            </button>
+          </div>
+
+          {pin && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 10px",
+                background: MC.okTint,
+                border: `1px solid ${MC.ok}33`,
+                borderRadius: 10,
+                fontFamily: MC.font,
+                fontSize: 12,
+                color: "#0d6a45",
+              }}
+            >
+              <Glyph
+                name="check-circle"
+                size={14}
+                color={MC.ok}
+                strokeWidth={2.4}
+              />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                Location pinned ·{" "}
+                <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
+                  {pin.latitude.toFixed(5)}, {pin.longitude.toFixed(5)}
+                </span>
+                {pin.source === "gps" ? " (your GPS)" : " (from address)"}
+              </span>
+              <button
+                type="button"
+                onClick={clearPin}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#0d6a45",
+                  fontFamily: MC.font,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+                aria-label="Clear pin"
+              >
+                <Glyph name="close" size={12} color="#0d6a45" />
+              </button>
+            </div>
+          )}
+          {pinError && (
+            <div
+              style={{
+                fontFamily: MC.font,
+                fontSize: 11.5,
+                color: "#9c1a3c",
+                lineHeight: 1.4,
+                marginTop: -4,
+              }}
+            >
+              {pinError}
+            </div>
+          )}
           <div style={{ height: 1, background: MC.line, margin: "2px 0" }} />
           <div
             style={{

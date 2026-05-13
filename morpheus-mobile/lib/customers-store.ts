@@ -122,11 +122,18 @@ function buildCustomerId(name: string): string {
 export interface NewCustomerInput {
   /** Required. The display name shown everywhere. */
   name: string;
-  /** Required. Site address used for the auto-created head-office
-   *  site and as the basis for geocoding (Feature B). Empty string
-   *  is allowed but the admin won't be able to fence the geofence
-   *  until coords are filled in. */
-  address: string;
+  /** Optional — the typed address. Acts as both the site address
+   *  string AND the input to a "Geocode address" path. Either this
+   *  OR coords (lat/lng) must be present; createCustomer validates
+   *  that explicitly. */
+  address?: string;
+  /** Optional pinned latitude. Set when the rep tapped "Use my
+   *  current location" or "Geocode address" on the form. Locks
+   *  independently of the address text — the rep can edit the
+   *  display label freely while these coords remain the
+   *  geofence's source of truth. */
+  latitude?: number | null;
+  longitude?: number | null;
   /** Optional head-office contact name + phone. */
   contactName?: string;
   contactPhone?: string;
@@ -154,9 +161,22 @@ export async function createCustomer(
   }
 
   const name = input.name.trim();
-  const address = input.address.trim();
+  const address = (input.address ?? "").trim();
+  const lat = input.latitude;
+  const lng = input.longitude;
+  const hasCoords =
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng);
   if (!name) return { ok: false, error: "Customer name is required." };
-  if (!address) return { ok: false, error: "Address is required." };
+  if (!address && !hasCoords) {
+    return {
+      ok: false,
+      error:
+        "Add an address OR pin the location — one of the two is needed so your manager can find the customer.",
+    };
+  }
 
   // Identify the rep creating this row so the admin can surface
   // who added it. Anonymous (no session) → fail cleanly; the
@@ -179,13 +199,23 @@ export async function createCustomer(
   const initials = initialsFromName(name);
   const color = BRAND_PALETTE[Math.floor(Math.random() * BRAND_PALETTE.length)];
 
+  // Persist coords on both parent + child rows when the rep pinned
+  // a location (either via GPS or address-geocode). Mirrors what
+  // Feature B's geocode-task card does AFTER the fact, just shifted
+  // earlier in the lifecycle — when the rep already knows where the
+  // customer is, why force them through an extra visit to set it.
+  const persistLat = hasCoords ? lat : null;
+  const persistLng = hasCoords ? lng : null;
+
   const { error } = await supabase.from("customers").insert({
     id,
     name,
     initials,
     color,
     code: nextCode,
-    address,
+    address: address || null,
+    latitude: persistLat,
+    longitude: persistLng,
     active: true,
     created_by_rep_id: repId,
   });
@@ -196,14 +226,17 @@ export async function createCustomer(
   }
 
   // Head-office site — every customer has at least one site. The
-  // address from the form becomes that site's address. Lat/lng
-  // stay null until Feature B's geocode-task workflow lands them.
+  // address from the form becomes that site's address. Coords land
+  // here too when the rep pinned at creation time, so the
+  // geofenced check-in works on the very first visit. If the rep
+  // only typed an address with no pin, lat/lng stay null and
+  // Feature B's geocode card surfaces on the next /active.
   await supabase.from("customer_sites").insert({
     customer_id: id,
     name: "Head office",
-    address,
-    latitude: null,
-    longitude: null,
+    address: address || null,
+    latitude: persistLat,
+    longitude: persistLng,
     geofence_radius_m: 100,
     contact_name: input.contactName?.trim() || null,
     contact_phone: input.contactPhone?.trim() || null,
@@ -216,8 +249,35 @@ export async function createCustomer(
     event_type: "customer.created",
     customer_id: id,
     message: `Rep added new customer: ${name}`,
-    meta: { source: "mobile", rep_id: repId, address },
+    meta: {
+      source: "mobile",
+      rep_id: repId,
+      address,
+      // Tag whether coords were pinned at creation so the admin
+      // can tell at a glance if this customer arrived "ready to
+      // visit" vs "needs a geocode task later".
+      pinned: hasCoords ? true : false,
+    },
   });
+
+  // When the rep pinned coords at create-time, also fire the
+  // standard customer.geocoded event so the Live Ops feed shows
+  // both the creation AND the location in the same way as the
+  // Feature B card does. Keeps reporting consistent regardless of
+  // when geocoding happened.
+  if (hasCoords) {
+    await logEvent({
+      event_type: "customer.geocoded",
+      customer_id: id,
+      message: `Rep pinned location for new customer at creation`,
+      meta: {
+        latitude: persistLat,
+        longitude: persistLng,
+        source: "create-form",
+        rep_id: repId,
+      },
+    });
+  }
 
   return { ok: true, id };
 }
