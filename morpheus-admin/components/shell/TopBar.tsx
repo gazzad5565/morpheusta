@@ -40,6 +40,9 @@ const CRUMB_HREF: Record<string, string> = {
   "New task": "/tasks/new",
   Reports: "/reports",
   Library: "/library",
+  Messaging: "/notify",
+  // Legacy breadcrumb label kept so older bookmarks/links don't lose
+  // their crumb href — renamed to "Messaging" in the side nav May 13.
   Notifications: "/notify",
   Settings: "/settings",
   Users: "/settings/managers",

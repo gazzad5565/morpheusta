@@ -19,6 +19,10 @@ export const NAV_ITEMS = [
   { id: "tasks", label: "Tasks", glyph: "tasks", href: "/tasks" },
   { id: "reports", label: "Reports", glyph: "chart", href: "/reports" },
   { id: "library", label: "Library", glyph: "lib", href: "/library" },
-  { id: "notify", label: "Notifications", glyph: "send", href: "/notify", comingSoon: true },
+  // "Messaging" (renamed from "Notifications" May 13). Today it's the
+  // org-wide push-notifications inbox/settings; the next iteration
+  // will let managers compose and send messages to reps individually
+  // or in bulk, with optional scheduling — hence the broader label.
+  { id: "notify", label: "Messaging", glyph: "send", href: "/notify", comingSoon: true },
   { id: "settings", label: "Settings", glyph: "settings", href: "/settings" },
 ] as const;

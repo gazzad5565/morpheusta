@@ -2048,12 +2048,22 @@ function PhotoSlotGrid({
                   </span>
                 </button>
               ) : (
-                // Empty slot — label wraps a hidden file input that
-                // opens the device camera on tap. `capture` hints
-                // the rear camera; the user can still switch to
-                // the photo library from there.
+                // Empty slot — label wraps a full-cover invisible
+                // file input that opens the device camera on tap.
+                // `capture="environment"` hints the rear camera; the
+                // rep can still switch to the photo library from the
+                // native picker.
+                //
+                // iOS Safari note: the input MUST be positioned to
+                // fill the label, with opacity:0 (NOT display:none and
+                // NOT width:0 height:0 — both break the tap-to-open).
+                // The label's position:relative anchors the absolute
+                // overlay. We avoid `disabled` while busy so iOS
+                // doesn't enter a stuck state on the next tap; the
+                // onChange guards re-entry instead.
                 <label
                   style={{
+                    position: "relative",
                     width: "100%",
                     aspectRatio: "1 / 1",
                     borderRadius: 10,
@@ -2066,23 +2076,33 @@ function PhotoSlotGrid({
                     gap: 4,
                     cursor: isBusy ? "wait" : "pointer",
                     color: isBusy ? MC.brandDeep : MC.mute,
+                    overflow: "hidden",
                   }}
                 >
                   <input
                     type="file"
                     accept="image/*"
                     capture="environment"
-                    disabled={isBusy}
                     onChange={(e) => {
+                      if (isBusy) {
+                        e.target.value = "";
+                        return;
+                      }
                       const f = e.target.files?.[0];
                       if (f) void handleFile(i, f);
                       e.target.value = ""; // allow re-pick of same file
                     }}
                     style={{
                       position: "absolute",
+                      inset: 0,
+                      width: "100%",
+                      height: "100%",
                       opacity: 0,
-                      width: 0,
-                      height: 0,
+                      cursor: "pointer",
+                      // Belt-and-braces: tap target lives on top of
+                      // the label content so iOS routes the tap to
+                      // the input itself, not just the label.
+                      zIndex: 1,
                     }}
                   />
                   <Glyph

@@ -15,10 +15,10 @@ import { AC } from "@/lib/tokens";
 
 export default function NotifyPage() {
   return (
-    <AdminShell breadcrumbs={["Home", "Notifications"]}>
+    <AdminShell breadcrumbs={["Home", "Messaging"]}>
       <div style={{ padding: 20, maxWidth: 640 }}>
         <Card padding={28}>
-          <SectionTitle>Broadcasts</SectionTitle>
+          <SectionTitle>Messaging</SectionTitle>
           <div
             style={{
               display: "flex",

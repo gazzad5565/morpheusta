@@ -42,7 +42,8 @@ export default function EditTaskPage({
   const [compulsory, setCompulsory] = useState(false);
   const [order, setOrder] = useState("0");
   const [photoCount, setPhotoCount] = useState("0");
-  const [photosCompulsory, setPhotosCompulsory] = useState(true);
+  // No separate photosCompulsory state — see /tasks/new for the
+  // rationale. photos_compulsory always mirrors task.compulsory.
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +65,8 @@ export default function EditTaskPage({
       setCompulsory(t.compulsory);
       setOrder(String(t.sort_order));
       setPhotoCount(String(t.photo_count ?? 0));
-      setPhotosCompulsory(t.photos_compulsory ?? true);
+      // photos_compulsory is no longer surfaced separately — it
+      // gets re-derived from `compulsory` on save.
       setLoading(false);
     });
     return () => {
@@ -95,7 +97,9 @@ export default function EditTaskPage({
       compulsory,
       sort_order: ord,
       photo_count: photoN,
-      photos_compulsory: photosCompulsory,
+      // photos_compulsory mirrors task.compulsory — single source
+      // of truth so the two flags can't drift.
+      photos_compulsory: compulsory,
     });
     setBusy(false);
     if (!r.ok) {
@@ -237,19 +241,21 @@ export default function EditTaskPage({
             </Field>
           </div>
 
-          {/* Photos requirement — Feature C. Same layout as
-              /tasks/new so editing matches creating. */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 12,
-              marginBottom: 14,
-            }}
-          >
+          {/* Photos requirement — Feature C. Single field for the
+              count; the compulsory flag is unified with the task's
+              existing "Required" toggle so the two stay consistent
+              (was two separate toggles, which led to confusing
+              combinations). Same layout as /tasks/new. */}
+          <div style={{ marginBottom: 14 }}>
             <Field
               label="Photos required"
-              hint="How many photos the rep must capture during this task. 0 = no photos."
+              hint={
+                parseInt(photoCount, 10) > 0
+                  ? compulsory
+                    ? "The rep must capture this many photos before they can complete the task (because the task is marked Required above)."
+                    : "The rep is prompted to capture this many photos. They can still complete the task without them while Required is off."
+                  : "How many photos the rep must capture during this task. 0 = no photos."
+              }
             >
               <input
                 value={photoCount}
@@ -259,34 +265,6 @@ export default function EditTaskPage({
                 inputMode="numeric"
                 style={{ ...inputStyle, fontFamily: AC.fontMono }}
               />
-            </Field>
-            <Field label="Photos compulsory">
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "9px 11px",
-                  border: `1px solid ${AC.line}`,
-                  borderRadius: 10,
-                  background: "#fff",
-                  cursor:
-                    parseInt(photoCount, 10) > 0 ? "pointer" : "not-allowed",
-                  fontFamily: AC.font,
-                  fontSize: 13,
-                  color: parseInt(photoCount, 10) > 0 ? AC.ink : AC.mute,
-                  opacity: parseInt(photoCount, 10) > 0 ? 1 : 0.6,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={photosCompulsory}
-                  disabled={parseInt(photoCount, 10) === 0}
-                  onChange={(e) => setPhotosCompulsory(e.target.checked)}
-                  style={{ width: 16, height: 16, accentColor: AC.brand }}
-                />
-                Required to complete
-              </label>
             </Field>
           </div>
 

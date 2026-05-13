@@ -70,7 +70,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     id: "notifications",
-    label: "Notifications",
+    // Renamed from "Notifications" May 13 — see lib/mock-data.ts NAV_ITEMS.
+    label: "Messaging",
     href: "/settings/notifications",
     glyph: "send",
     description: "Org-wide push notifications on/off. Auto-checkout is independent.",

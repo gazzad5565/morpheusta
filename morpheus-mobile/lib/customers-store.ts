@@ -231,17 +231,40 @@ export async function createCustomer(
   // geofenced check-in works on the very first visit. If the rep
   // only typed an address with no pin, lat/lng stay null and
   // Feature B's geocode card surfaces on the next /active.
-  await supabase.from("customer_sites").insert({
-    customer_id: id,
-    name: "Head office",
-    address: address || null,
-    latitude: persistLat,
-    longitude: persistLng,
-    geofence_radius_m: 100,
-    contact_name: input.contactName?.trim() || null,
-    contact_phone: input.contactPhone?.trim() || null,
-    is_head_office: true,
-  });
+  //
+  // No is_head_office boolean — the schema uses the name 'Head
+  // office' itself as the "primary site" signal (the customer_sites
+  // 2026-05-08 migrations). Sticking literal-name parity with the
+  // admin's createCustomer keeps single-site rendering happy
+  // (the UI hides the site label when name == 'Head office').
+  //
+  // CRITICAL: this insert HAS to succeed or the customer is broken
+  // (no site = no /shifts/new picker entry = admin can't schedule
+  // against them). If it fails we roll back the customer row and
+  // surface the error to the rep so they can retry.
+  const { error: siteErr } = await supabase
+    .from("customer_sites")
+    .insert({
+      customer_id: id,
+      name: "Head office",
+      address: address || null,
+      latitude: persistLat,
+      longitude: persistLng,
+      geofence_radius_m: 100,
+      contact_name: input.contactName?.trim() || null,
+      contact_phone: input.contactPhone?.trim() || null,
+    });
+  if (siteErr) {
+    // Roll back the customer row so the rep can retry cleanly
+    // instead of seeing an orphan customer in admin with "no sites".
+    await supabase.from("customers").delete().eq("id", id);
+    // eslint-disable-next-line no-console
+    console.warn("[customers] site insert failed:", siteErr.message);
+    return {
+      ok: false,
+      error: `Couldn't save site for this customer (${siteErr.message}). Please try again.`,
+    };
+  }
 
   // Audit event — surfaces in the admin Live Ops feed in real time
   // so managers see the new customer appear without refreshing.
