@@ -36,6 +36,7 @@ export type EventType =
   | "customer.deactivated"
   | "customer.reactivated"
   | "customer.deleted"
+  | "customer.geocoded"
   | "library.uploaded"
   | "library.deleted"
   | "task.created"

@@ -14,6 +14,11 @@ import { Glyph, formatTime, type GlyphName } from "@/components/Glyph";
 import { LoadingBar, Spinner } from "@/components/Loading";
 import { CheckingInOverlay } from "@/components/CheckingInOverlay";
 import { startLocationTracking } from "@/lib/location-tracker";
+import { requestGeolocationOnce } from "@/lib/route-planner";
+import {
+  setCustomerSiteCoords,
+  geocodeAddress,
+} from "@/lib/customers-store";
 import {
   getMyActiveShift,
   getTasksForCustomer,
@@ -60,6 +65,19 @@ interface ShiftData {
   /** Rep's own free-text notes on this shift, edited from /active.
    *  Persists to shifts.rep_notes; admin sees it read-only. */
   repNotes: string | null;
+  /** Site identifier — used to write coords back when the rep
+   *  completes the geocode-task card. */
+  siteId: string | null;
+  /** Site address as a string — fed into the "Geocode address"
+   *  button on the geocode-task card. */
+  siteAddress: string | null;
+  /** Site lat/lng. When either is null the geocode-task card
+   *  surfaces at the top of the task list (Feature B — May 13).
+   *  Set non-null by either the admin's manual edit, the create-
+   *  customer geocode-on-save path, or this card's "Use my
+   *  current location" / "Geocode address" actions. */
+  siteLat: number | null;
+  siteLng: number | null;
 }
 
 export default function ActiveShiftPage() {
@@ -99,6 +117,12 @@ export default function ActiveShiftPage() {
         siteContactEmail: s.siteContactEmail,
         siteNotes: s.siteNotes,
         repNotes: s.repNotes,
+        // New (May 13) — surface site identifier + coords to drive
+        // the geocode-task card below.
+        siteId: s.siteId ?? null,
+        siteAddress: s.siteAddress ?? null,
+        siteLat: s.siteLat ?? null,
+        siteLng: s.siteLng ?? null,
       });
       setLoadedShift(true);
       const [rows, alreadyDone] = await Promise.all([
@@ -785,6 +809,26 @@ export default function ActiveShiftPage() {
           </div>
         </div>
       </div>
+
+      {/* Geocode-task card (Feature B — May 13).
+          Renders only when the shift's site is missing lat/lng.
+          Treats geocoding as a synthetic task that sits ABOVE the
+          real task list so the rep knows to do it first. Two
+          paths: GPS-snap (most accurate when actually on-site) or
+          server-side Nominatim geocode of the typed address. */}
+      {shiftData && (shiftData.siteLat === null || shiftData.siteLng === null) && shiftData.siteId && (
+        <div style={{ padding: "12px 16px 0" }}>
+          <GeocodeTaskCard
+            siteId={shiftData.siteId}
+            customerId={shiftData.customerId}
+            customerName={shiftData.name}
+            siteAddress={shiftData.siteAddress}
+            onResolved={(lat, lng) =>
+              setShiftData((d) => (d ? { ...d, siteLat: lat, siteLng: lng } : d))
+            }
+          />
+        </div>
+      )}
 
       <SectionLabel>Complete before check-out</SectionLabel>
       <div style={{ padding: "0 16px" }}>
@@ -1573,6 +1617,226 @@ function ShiftNotesCard({
           <span>Auto-saves when you tap outside the box.</span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Geocode-task card (Feature B — May 13) ────────────────────────
+//
+// Synthetic task that surfaces at the top of /active when the
+// shift's customer_sites row is missing lat/lng. The rep can
+// resolve it two ways:
+//
+//   - "Use my current location" — calls requestGeolocationOnce
+//     and writes those coords directly. Most accurate when the
+//     rep is actually at the site (which they should be, since
+//     they're on /active).
+//   - "Geocode address" — POSTs the typed site address to the
+//     local /api/geocode proxy (Nominatim). Falls back to the GPS
+//     path if Nominatim returns no match.
+//
+// Either path writes the coords to customer_sites + the parent
+// customers row (if it was still null), and logs a
+// customer.geocoded event for the admin Live Ops feed. The
+// onResolved callback bubbles the new coords up so the card
+// disappears immediately without a refetch.
+function GeocodeTaskCard({
+  siteId,
+  customerId,
+  customerName,
+  siteAddress,
+  onResolved,
+}: {
+  siteId: string;
+  customerId: string;
+  customerName: string;
+  siteAddress: string | null;
+  onResolved: (lat: number, lng: number) => void;
+}) {
+  const [busy, setBusy] = useState<"gps" | "address" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const runGps = async () => {
+    setError(null);
+    setBusy("gps");
+    const pos = await requestGeolocationOnce();
+    if (!pos) {
+      setBusy(null);
+      setError("Couldn't read your location. Allow location for Morpheus in browser settings.");
+      return;
+    }
+    const r = await setCustomerSiteCoords({
+      siteId,
+      customerId,
+      latitude: pos.lat,
+      longitude: pos.lng,
+      source: "gps",
+      resolvedDescription: "Rep's device GPS",
+    });
+    setBusy(null);
+    if (!r.ok) {
+      setError(r.error || "Couldn't save — try again.");
+      return;
+    }
+    onResolved(pos.lat, pos.lng);
+  };
+
+  const runAddress = async () => {
+    if (!siteAddress) {
+      setError("No address on file to geocode. Use GPS instead.");
+      return;
+    }
+    setError(null);
+    setBusy("address");
+    const hit = await geocodeAddress(siteAddress);
+    if (!hit) {
+      setBusy(null);
+      setError("Couldn't find that address. Try GPS, or ask your manager to clean up the address.");
+      return;
+    }
+    const r = await setCustomerSiteCoords({
+      siteId,
+      customerId,
+      latitude: hit.latitude,
+      longitude: hit.longitude,
+      source: "address",
+      resolvedDescription: hit.displayName,
+    });
+    setBusy(null);
+    if (!r.ok) {
+      setError(r.error || "Couldn't save — try again.");
+      return;
+    }
+    onResolved(hit.latitude, hit.longitude);
+  };
+
+  return (
+    <div
+      style={{
+        background: MC.warnTint,
+        border: `1px solid ${MC.warn}55`,
+        borderLeft: `3px solid ${MC.warn}`,
+        borderRadius: 12,
+        padding: "12px 14px",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 6,
+        }}
+      >
+        <Glyph name="pin" size={18} color={MC.warn} strokeWidth={2.4} />
+        <div
+          style={{
+            fontFamily: MC.font,
+            fontSize: 14,
+            fontWeight: 700,
+            color: "#7A560A",
+            letterSpacing: -0.1,
+          }}
+        >
+          Set this customer&apos;s location
+        </div>
+      </div>
+      <div
+        style={{
+          fontFamily: MC.font,
+          fontSize: 12.5,
+          color: "#7A560A",
+          lineHeight: 1.5,
+          marginBottom: 10,
+        }}
+      >
+        {customerName} doesn&apos;t have a pin yet. Setting it now means
+        your next check-in here works geofenced + manager can see it
+        on the map.
+      </div>
+      {siteAddress && (
+        <div
+          style={{
+            fontFamily: MC.font,
+            fontSize: 11.5,
+            color: MC.mute,
+            marginBottom: 12,
+            background: "rgba(255,255,255,.6)",
+            padding: "6px 10px",
+            borderRadius: 8,
+            border: `1px solid ${MC.warn}22`,
+          }}
+        >
+          Address on file: {siteAddress}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={runGps}
+          disabled={!!busy}
+          style={{
+            flex: "1 1 auto",
+            minWidth: 0,
+            padding: "10px 12px",
+            borderRadius: 10,
+            background: MC.brandDeep,
+            color: "#fff",
+            border: "none",
+            cursor: busy ? "wait" : "pointer",
+            fontFamily: MC.font,
+            fontSize: 13,
+            fontWeight: 700,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            opacity: busy === "gps" ? 0.7 : 1,
+          }}
+        >
+          <Glyph name="target" size={14} color="#fff" strokeWidth={2.4} />
+          {busy === "gps" ? "Pinning…" : "Use my current location"}
+        </button>
+        <button
+          type="button"
+          onClick={runAddress}
+          disabled={!!busy || !siteAddress}
+          style={{
+            flex: "1 1 auto",
+            minWidth: 0,
+            padding: "10px 12px",
+            borderRadius: 10,
+            background: "#fff",
+            color: MC.brandDeep,
+            border: `1px solid ${MC.brand}55`,
+            cursor: busy || !siteAddress ? "not-allowed" : "pointer",
+            fontFamily: MC.font,
+            fontSize: 13,
+            fontWeight: 700,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            opacity: busy === "address" || !siteAddress ? 0.7 : 1,
+          }}
+        >
+          <Glyph name="pin" size={14} color={MC.brandDeep} strokeWidth={2.4} />
+          {busy === "address" ? "Looking up…" : "Geocode address"}
+        </button>
+      </div>
+      {error && (
+        <div
+          style={{
+            marginTop: 10,
+            fontFamily: MC.font,
+            fontSize: 12,
+            color: "#9c1a3c",
+            lineHeight: 1.4,
+          }}
+        >
+          {error}
+        </div>
+      )}
     </div>
   );
 }

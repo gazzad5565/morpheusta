@@ -221,3 +221,89 @@ export async function createCustomer(
 
   return { ok: true, id };
 }
+
+// ─── Rep-driven geocoding (Feature B — May 13) ──────────────────────
+
+/**
+ * Geocode an address string by hitting the local /api/geocode
+ * proxy (Nominatim under the hood). Returns null on failure so
+ * callers can fall back to "use my current location".
+ */
+export async function geocodeAddress(
+  address: string
+): Promise<{ latitude: number; longitude: number; displayName: string } | null> {
+  const q = address.trim();
+  if (!q) return null;
+  try {
+    const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+    if (!res.ok) return null;
+    const json = (await res.json()) as
+      | { latitude: number; longitude: number; displayName: string }
+      | { error: string };
+    if ("error" in json) return null;
+    return json;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write coords to a customer_sites row + bubble them up to the
+ * parent customers row if that's still missing them. Logs an
+ * audit event so the admin sees how/where the geocode happened
+ * (rep GPS vs typed address).
+ *
+ * Used by /active's geocode-task card when the rep completes
+ * the "set this customer's location" prompt.
+ */
+export async function setCustomerSiteCoords(args: {
+  siteId: string;
+  customerId: string;
+  latitude: number;
+  longitude: number;
+  /** "gps"     — used the rep's current device location (most
+   *              accurate when actually on-site)
+   *  "address" — geocoded the customer's typed address. */
+  source: "gps" | "address";
+  /** Friendly text shown in the audit event. The display name
+   *  from the geocoder, or "Rep's GPS" for the GPS path. */
+  resolvedDescription: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { siteId, customerId, latitude, longitude, source, resolvedDescription } = args;
+
+  // 1. Update the customer_sites row — this is the one mobile uses
+  //    for the geofence on check-in/out.
+  const { error: siteErr } = await supabase
+    .from("customer_sites")
+    .update({ latitude, longitude })
+    .eq("id", siteId);
+  if (siteErr) return { ok: false, error: siteErr.message };
+
+  // 2. ALSO update the parent customers row if it's missing coords.
+  //    Admin's customers page shows lat/lng on the customer overview;
+  //    keeping them in sync avoids the awkward "site has coords,
+  //    parent customer doesn't" state.
+  await supabase
+    .from("customers")
+    .update({ latitude, longitude })
+    .eq("id", customerId)
+    .is("latitude", null);
+
+  await logEvent({
+    event_type: "customer.geocoded",
+    customer_id: customerId,
+    message: `Rep set location for customer (${source === "gps" ? "device GPS" : "address geocode"})`,
+    meta: {
+      site_id: siteId,
+      latitude,
+      longitude,
+      source,
+      resolved: resolvedDescription,
+    },
+  });
+
+  return { ok: true };
+}
