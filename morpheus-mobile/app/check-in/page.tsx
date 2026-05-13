@@ -12,6 +12,9 @@ import {
   checkInToShift,
   getMyActiveShift,
   pauseAndCheckIn,
+  checkOutAndCheckIn,
+  countMyPausedShifts,
+  MAX_PAUSED_SHIFTS,
   type ShiftWithMeta,
 } from "@/lib/shifts-store";
 import { getCustomerById } from "@/lib/customers-store";
@@ -113,7 +116,19 @@ function CheckInPage() {
   const [activeShift, setActiveShift] = useState<ShiftWithMeta | null>(null);
   // Whether the rep has acknowledged the switch warning. Gates the
   // Proceed button so they can't accidentally tap through.
-  const [switchAcknowledged, setSwitchAcknowledged] = useState(false);
+  // null = not yet acknowledged. "checkout" = close A. "pause" =
+  // pause A. The chosen mode drives both the banner copy and which
+  // helper runs at onProceed (checkOutAndCheckIn vs pauseAndCheckIn).
+  // "checkout" is the default — most reps finish at A before moving
+  // on; pause is the exception for the "swing by next door" case.
+  const [switchMode, setSwitchMode] = useState<"checkout" | "pause" | null>(
+    null
+  );
+  // Count of currently paused shifts — used to enforce the
+  // MAX_PAUSED_SHIFTS cap. Loaded alongside the active shift on
+  // mount. When the rep already has the max paused, we hide the
+  // "Pause & switch" option so they can't tangle further.
+  const [pausedCount, setPausedCount] = useState<number>(0);
   const [graceMinutes, setGraceMinutes] = useState<number>(10);
   // Early-check-in uses the same setting as early check-out — they're
   // symmetric concepts: don't clock in too soon, don't clock out too soon.
@@ -148,7 +163,11 @@ function CheckInPage() {
       // two shifts at once" data-corruption path that the
       // auto-checkout cron previously only caught overnight.
       getMyActiveShift(),
-    ]).then(async ([s, grace, earlyGrace, locOn, timeOn, active]) => {
+      // Paused-shift count for the MAX_PAUSED_SHIFTS cap on the
+      // pause-and-switch path. Tiny query (one COUNT), still loaded
+      // here so the cap-check is ready by the time the banner needs it.
+      countMyPausedShifts(),
+    ]).then(async ([s, grace, earlyGrace, locOn, timeOn, active, paused]) => {
       if (cancelled) return;
       if (!s) {
         setShiftError("Shift not found.");
@@ -165,6 +184,7 @@ function CheckInPage() {
       // Different shift? Stash it so the warning banner renders.
       // Same-shift case was handled above and short-circuited.
       if (active) setActiveShift(active);
+      setPausedCount(paused);
       setGraceMinutes(grace);
       setEarlyGraceMinutes(earlyGrace);
       setOrgLocationOn(locOn);
@@ -430,13 +450,18 @@ function CheckInPage() {
   const earlyResolved = !earlyTriggered || !!earlyReason;
   const allResolved = offsiteResolved && lateResolved && earlyResolved;
   // When switching from another shift, also require the rep to
-  // explicitly acknowledge the warning before they can proceed.
-  // Acts as a soft confirmation — they tap once on the banner to
-  // arm the Proceed button, then again on Proceed to actually
-  // switch. Two-tap protection against accidental shift abandonment.
-  const switchOK = !activeShift || switchAcknowledged;
+  // explicitly pick a mode (checkout or pause) before they can
+  // proceed. Two-tap protection against accidental shift
+  // abandonment + makes the decision conscious.
+  const switchOK = !activeShift || switchMode !== null;
   const canProceed =
     !!shift && allResolved && switchOK && !submitting && !positionLoading;
+  // The "Pause" path is forbidden when the rep already has the max
+  // number of paused shifts open — they'd be creating a third one
+  // and we cap at MAX_PAUSED_SHIFTS to prevent ops-tangle. The
+  // checkout path remains available regardless (closing the current
+  // shift doesn't increase the paused-count).
+  const pauseCapHit = pausedCount >= MAX_PAUSED_SHIFTS;
 
   const handleSetLocationReason = (newValue: string | null) => {
     setLocationReasonRaw(newValue);
@@ -462,17 +487,25 @@ function CheckInPage() {
     if (!canProceed || !shift) return;
     setSubmitting(true);
     setCheckInPhase("submitting");
-    // 1. Open the new shift. If the rep was already checked into a
-    //    different shift, use pauseAndCheckIn which atomically pauses
-    //    the old one (state='on-break', shift.paused_for_other_shift
-    //    audit event with meta.next_shift_id) before opening the new
-    //    one. The previous shift can be resumed later. Otherwise,
-    //    regular checkInToShift.
+    // 1. Open the new shift. If the rep was already checked into
+    //    a different shift, the picked switchMode drives the close
+    //    semantics:
+    //      - "checkout": close A entirely (state='complete'). Used
+    //        when the rep is DONE at A — the common case.
+    //      - "pause": pause A (state='on-break'). Used when the rep
+    //        intends to come back to A — the "swing by next door"
+    //        case. Subject to the MAX_PAUSED_SHIFTS cap.
+    //    Otherwise (no active shift), regular checkInToShift.
     const result = activeShift
-      ? await pauseAndCheckIn({
-          fromShiftId: activeShift.realId,
-          toShiftId: shift.realId,
-        })
+      ? switchMode === "pause"
+        ? await pauseAndCheckIn({
+            fromShiftId: activeShift.realId,
+            toShiftId: shift.realId,
+          })
+        : await checkOutAndCheckIn({
+            fromShiftId: activeShift.realId,
+            toShiftId: shift.realId,
+          })
       : await checkInToShift(shift.realId);
     if (!result.ok) {
       setSubmitting(false);
@@ -621,8 +654,8 @@ function CheckInPage() {
           <div
             style={{
               marginTop: 10,
-              background: switchAcknowledged ? MC.brandTint : MC.warnTint,
-              border: `1px solid ${switchAcknowledged ? MC.brand : MC.warn}55`,
+              background: switchMode ? MC.brandTint : MC.warnTint,
+              border: `1px solid ${switchMode ? MC.brand : MC.warn}55`,
               borderRadius: MC.radiusCard,
               padding: 14,
             }}
@@ -639,7 +672,7 @@ function CheckInPage() {
                   width: 28,
                   height: 28,
                   borderRadius: 999,
-                  background: switchAcknowledged
+                  background: switchMode
                     ? `${MC.brand}33`
                     : `${MC.warn}33`,
                   display: "flex",
@@ -649,9 +682,9 @@ function CheckInPage() {
                 }}
               >
                 <Glyph
-                  name={switchAcknowledged ? "check-circle" : "warn"}
+                  name={switchMode ? "check-circle" : "warn"}
                   size={15}
-                  color={switchAcknowledged ? MC.brandDeep : MC.warn}
+                  color={switchMode ? MC.brandDeep : MC.warn}
                   strokeWidth={2.4}
                 />
               </div>
@@ -661,11 +694,13 @@ function CheckInPage() {
                     fontFamily: MC.font,
                     fontSize: 13.5,
                     fontWeight: 700,
-                    color: switchAcknowledged ? MC.brandInk : "#7A560A",
+                    color: switchMode ? MC.brandInk : "#7A560A",
                     letterSpacing: -0.1,
                   }}
                 >
-                  {switchAcknowledged
+                  {switchMode === "checkout"
+                    ? `Checking out of ${activeShift.name} → switching to ${shift?.name ?? "new shift"}`
+                    : switchMode === "pause"
                     ? `Pausing ${activeShift.name} → switching to ${shift?.name ?? "new shift"}`
                     : `You're still checked into ${activeShift.name}`}
                 </div>
@@ -673,62 +708,130 @@ function CheckInPage() {
                   style={{
                     fontFamily: MC.font,
                     fontSize: 12,
-                    color: switchAcknowledged ? MC.ink2 : "#7A560A",
+                    color: switchMode ? MC.ink2 : "#7A560A",
                     marginTop: 4,
                     lineHeight: 1.45,
                   }}
                 >
-                  {switchAcknowledged
-                    ? `${activeShift.name} will be paused — not closed — so you can come back and finish it from your shifts list. Any tasks or photos already done stay saved.`
-                    : `Checking in here will PAUSE that shift (not close it). You can return to ${activeShift.name} after you're done here. Tasks and photos already saved at ${activeShift.name} stay safe either way.`}
+                  {switchMode === "checkout"
+                    ? `${activeShift.name} will be closed for the day. Tap "Tap Proceed" below to finish the switch.`
+                    : switchMode === "pause"
+                    ? `${activeShift.name} will be paused — you can come back and finish it from your shifts list. Any tasks or photos already done stay saved.`
+                    : `Are you done at ${activeShift.name}, or just popping in here briefly? Pick one — the default is to check out, since that's the usual case.`}
                 </div>
               </div>
             </div>
-            {!switchAcknowledged && (
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 12,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setSwitchAcknowledged(true)}
+            {!switchMode && (
+              <>
+                <div
                   style={{
-                    flex: 1,
-                    minHeight: 40,
-                    borderRadius: 10,
-                    background: MC.brandDeep,
-                    color: "#fff",
-                    border: "none",
-                    fontFamily: MC.font,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    marginTop: 12,
                   }}
                 >
-                  Pause &amp; switch
-                </button>
-                <button
-                  type="button"
-                  onClick={() => router.replace("/active")}
-                  style={{
-                    flex: 1,
-                    minHeight: 40,
-                    borderRadius: 10,
-                    background: "#fff",
-                    color: "#7A560A",
-                    border: `1px solid ${MC.warn}55`,
-                    fontFamily: MC.font,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                  }}
-                >
-                  Back to previous
-                </button>
-              </div>
+                  {/* Default — close A. The usual case: rep finished
+                      at A and is moving on. Tinted brand so it reads
+                      as the recommended action. */}
+                  <button
+                    type="button"
+                    onClick={() => setSwitchMode("checkout")}
+                    style={{
+                      minHeight: 42,
+                      borderRadius: 10,
+                      background: MC.brandDeep,
+                      color: "#fff",
+                      border: "none",
+                      fontFamily: MC.font,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      boxShadow: `0 4px 10px ${MC.brand}44`,
+                    }}
+                  >
+                    <Glyph
+                      name="check"
+                      size={14}
+                      color="#fff"
+                      strokeWidth={2.4}
+                    />
+                    Check out of {activeShift.name} &amp; switch
+                  </button>
+
+                  {/* Alternate — pause A. Subject to the
+                      MAX_PAUSED_SHIFTS cap; disabled with explainer
+                      copy when the cap is hit. */}
+                  <button
+                    type="button"
+                    onClick={() => !pauseCapHit && setSwitchMode("pause")}
+                    disabled={pauseCapHit}
+                    style={{
+                      minHeight: 42,
+                      borderRadius: 10,
+                      background: "#fff",
+                      color: pauseCapHit ? MC.mute : "#7A560A",
+                      border: `1px solid ${pauseCapHit ? MC.line : `${MC.warn}55`}`,
+                      fontFamily: MC.font,
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: pauseCapHit ? "not-allowed" : "pointer",
+                      opacity: pauseCapHit ? 0.5 : 1,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <Glyph
+                      name="clock"
+                      size={14}
+                      color={pauseCapHit ? MC.mute : "#7A560A"}
+                      strokeWidth={2.4}
+                    />
+                    Pause &amp; come back later
+                  </button>
+
+                  {pauseCapHit && (
+                    <div
+                      style={{
+                        fontFamily: MC.font,
+                        fontSize: 11.5,
+                        color: "#7A560A",
+                        lineHeight: 1.4,
+                        textAlign: "center",
+                      }}
+                    >
+                      You already have {pausedCount} paused shift
+                      {pausedCount === 1 ? "" : "s"} — finish one
+                      first before pausing another. (Max{" "}
+                      {MAX_PAUSED_SHIFTS}.)
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => router.replace("/active")}
+                    style={{
+                      minHeight: 38,
+                      borderRadius: 10,
+                      background: "transparent",
+                      color: MC.mute,
+                      border: "none",
+                      fontFamily: MC.font,
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Back to {activeShift.name}
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}

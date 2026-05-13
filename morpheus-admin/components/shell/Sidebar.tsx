@@ -464,11 +464,11 @@ export function Sidebar() {
         </button>
       </div>
 
-      {/* "Powered by Morpheus TA" — small CTA at the very bottom of the
-          sidebar so even white-labelled customers see the platform mark
-          subtly. The 'TA' is the Time & Attendance module — distinct
-          from the broader Morpheus platform — and gets a brand-tinted
-          pill so it pops without shouting. */}
+      {/* "Powered by Morpheus Ops" — small CTA at the very bottom of
+          the sidebar so even white-labelled customers see the platform
+          mark subtly. Renamed from "Morpheus TA" (Time & Attendance)
+          to "Morpheus Ops" on May 13 — the product scope outgrew the
+          original TA framing, so the brand pill follows. */}
       <a
         href="https://morpheus.app"
         target="_blank"
@@ -491,7 +491,7 @@ export function Sidebar() {
           textTransform: "uppercase",
           fontWeight: 600,
         }}
-        title="Morpheus — Field Operations Suite"
+        title="Morpheus Ops — Field Operations Suite"
       >
         Powered by{" "}
         <span
@@ -514,7 +514,7 @@ export function Sidebar() {
             fontSize: 9.5,
           }}
         >
-          TA
+          Ops
         </span>
       </a>
     </div>

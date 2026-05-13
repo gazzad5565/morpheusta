@@ -85,8 +85,10 @@ export function MorpheusMark({ inverted = false, size = 14 }: { inverted?: boole
           boxShadow: `0 0 0 2px ${inverted ? "#0B0D10" : "#fff"}, 0 0 0 3px ${accent}`,
         }}
       />
+      {/* Rebrand May 13: "Morpheus t&a²" → "Morpheus Ops". The
+          accent on "Ops" keeps the same two-tone wordmark rhythm. */}
       <span>Morpheus</span>
-      <span style={{ color: accent, fontWeight: 700 }}>t&a²</span>
+      <span style={{ color: accent, fontWeight: 700 }}>Ops</span>
     </div>
   );
 }

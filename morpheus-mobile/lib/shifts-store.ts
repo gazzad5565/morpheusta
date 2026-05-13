@@ -699,6 +699,119 @@ export async function getTasksForCustomer(customerId: string): Promise<TaskRow[]
 }
 
 /**
+ * How many of MY shifts are currently paused (state='on-break').
+ *
+ * Used by /check-in to enforce the "max 2 paused shifts" cap (May 13):
+ * if a rep tries to switch into a third shift while two are already
+ * paused, we refuse and ask them to finish one of the paused ones
+ * first. Without a cap, reps could accumulate a tangle of paused
+ * shifts and lose track of which is which.
+ */
+export async function countMyPausedShifts(): Promise<number> {
+  if (!isSupabaseConfigured() || !supabase) return 0;
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
+  if (!userId) return 0;
+  const { count, error } = await supabase
+    .from("shifts")
+    .select("id", { count: "exact", head: true })
+    .eq("rep_id", userId)
+    .eq("state", "on-break");
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] countPaused:", error.message);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+/** Cap on how many shifts a rep can have paused at once. Hard
+ *  enforced in /check-in's pause-and-switch flow. */
+export const MAX_PAUSED_SHIFTS = 2;
+
+/**
+ * Atomically check out of one shift and check into another (May 13).
+ *
+ * Same shape as pauseAndCheckIn, but A is CLOSED (state='complete',
+ * check_out_at stamped) instead of paused. This is the path the rep
+ * picks when they're DONE at A and moving to B for good — the more
+ * common case in the field. pauseAndCheckIn stays available as the
+ * alternate path for the "swing by next door and come back" case.
+ *
+ * Audit trail: A gets a regular `shift.checked_out` event tagged
+ * meta.reason='switched_to_other_shift' + meta.next_shift_id so the
+ * admin Live Feed can show the move in context.
+ */
+export async function checkOutAndCheckIn(args: {
+  /** The shift the rep is currently checked into (will be CLOSED). */
+  fromShiftId: string;
+  /** The shift the rep is moving to (will be opened). */
+  toShiftId: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  const { fromShiftId, toShiftId } = args;
+
+  const { data: fromRow } = await supabase
+    .from("shifts")
+    .select("customer_id, check_in_at, customers(name)")
+    .eq("id", fromShiftId)
+    .maybeSingle();
+  const fromCustomerId =
+    (fromRow as { customer_id?: string } | null)?.customer_id || null;
+  const fromCustomerName =
+    (fromRow as { customers?: { name?: string } } | null)?.customers?.name ||
+    "previous customer";
+  const fromCheckInIso =
+    (fromRow as { check_in_at?: string } | null)?.check_in_at || null;
+
+  // 1. CLOSE the FROM shift — state='complete' + check_out_at.
+  const closeAt = new Date();
+  const { error: closeErr } = await supabase
+    .from("shifts")
+    .update({
+      state: "complete",
+      check_out_at: closeAt.toISOString(),
+    })
+    .eq("id", fromShiftId);
+  if (closeErr) {
+    return { ok: false, error: `Couldn't close previous shift: ${closeErr.message}` };
+  }
+
+  const durationMin =
+    fromCheckInIso != null
+      ? Math.max(
+          0,
+          Math.round(
+            (closeAt.getTime() - new Date(fromCheckInIso).getTime()) / 60_000
+          )
+        )
+      : null;
+  await logEvent({
+    event_type: "shift.checked_out",
+    shift_id: fromShiftId,
+    customer_id: fromCustomerId,
+    message: `Checked out of ${fromCustomerName} (switching to another shift)`,
+    meta: {
+      reason: "switched_to_other_shift",
+      next_shift_id: toShiftId,
+      duration_min: durationMin,
+    },
+  });
+
+  // 2. Check in to the NEW shift.
+  const inResult = await checkInToShift(toShiftId);
+  if (!inResult.ok) {
+    return {
+      ok: false,
+      error: `Closed your previous shift but couldn't open the new one: ${inResult.error}`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Pause one in-progress shift and check into another (May 13).
  *
  * Used when the rep is already checked into shift A and taps Check

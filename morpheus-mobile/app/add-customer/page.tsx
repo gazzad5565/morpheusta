@@ -41,6 +41,7 @@ import { Glyph } from "@/components/Glyph";
 import { createCustomer, geocodeAddress } from "@/lib/customers-store";
 import { requestGeolocationOnce } from "@/lib/route-planner";
 import { AddressAutocomplete } from "@/components/AddressAutocomplete";
+import { MapPreview } from "@/components/MapPreview";
 
 interface Pin {
   /** "gps"        — captured from device GPS at the moment the rep
@@ -390,10 +391,25 @@ export default function AddCustomerPage() {
               </>
             )}
 
+            {/* Live map preview (May 13) — renders only when pinned
+                so the rep can sanity-check the pin before saving.
+                Read-only; full pan/zoom would let them wander away
+                and feel lost. */}
+            {pin && (
+              <div style={{ marginTop: 12 }}>
+                <MapPreview
+                  latitude={pin.latitude}
+                  longitude={pin.longitude}
+                  label={address.trim() || name.trim() || null}
+                  height={170}
+                />
+              </div>
+            )}
+
             {pin && (
             <div
               style={{
-                marginTop: 12,
+                marginTop: 10,
                 display: "flex",
                 alignItems: "center",
                 gap: 8,
