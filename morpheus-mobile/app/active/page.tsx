@@ -88,6 +88,12 @@ interface ShiftData {
    *  current location" / "Geocode address" actions. */
   siteLat: number | null;
   siteLng: number | null;
+  /** Shift state — "in-progress", "on-break", "travelling", etc.
+   *  Drives the pause/resume banner at the top of the active page.
+   *  Pulled from the DB on mount + every refetch so the page
+   *  reflects realtime flips (manager reassign, auto-checkout,
+   *  rep pause from another device). */
+  state: string;
 }
 
 export default function ActiveShiftPage() {
@@ -133,6 +139,7 @@ export default function ActiveShiftPage() {
         siteAddress: s.siteAddress ?? null,
         siteLat: s.siteLat ?? null,
         siteLng: s.siteLng ?? null,
+        state: s.state,
       });
       setLoadedShift(true);
       const [rows, alreadyDone] = await Promise.all([
@@ -872,6 +879,96 @@ export default function ActiveShiftPage() {
     <div style={{ background: MC.bg, minHeight: "100%", position: "relative" }}>
       <AppHeader title="Shift Dashboard" />
 
+      {/* Paused banner. Renders when shifts.state === 'on-break'.
+          Calm warn-tint card with a Resume CTA — the rep can pause
+          a shift from the Pause button in the hero below without
+          having to switch to another shift first. Pause was
+          previously only reachable via /add-shift → pause-and-
+          switch into another shift; now it's a first-class action
+          on /active. (May 14, Gary.) */}
+      {shiftData?.state === "on-break" && (
+        <div style={{ padding: "12px 16px 0" }}>
+          <div
+            style={{
+              background: MC.warnTint,
+              border: `1px solid ${MC.warn}55`,
+              borderLeft: `3px solid ${MC.warn}`,
+              borderRadius: 12,
+              padding: "12px 14px",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <Glyph name="pause" size={20} color={MC.warn} strokeWidth={2.4} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#7A560A",
+                  letterSpacing: -0.1,
+                }}
+              >
+                Shift paused
+              </div>
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  color: "#7A560A",
+                  marginTop: 2,
+                  lineHeight: 1.4,
+                }}
+              >
+                Tap Resume to keep going. Check-out is locked until
+                you resume.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!shiftData) return;
+                const r = await setShiftBreakState(shiftData.shiftId, false);
+                if (!r.ok) return;
+                void logEvent({
+                  event_type: "shift.break_ended",
+                  shift_id: shiftData.shiftId,
+                  customer_id: shiftData.customerId,
+                  message: "Resumed shift",
+                  meta: { kind: "open-ended" },
+                });
+                setShiftData((d) => (d ? { ...d, state: "in-progress" } : d));
+              }}
+              style={{
+                background: MC.brand,
+                color: "#fff",
+                border: "none",
+                padding: "9px 14px",
+                borderRadius: 10,
+                cursor: "pointer",
+                fontFamily: MC.font,
+                fontSize: 13,
+                fontWeight: 700,
+                letterSpacing: -0.05,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                boxShadow: `0 4px 12px ${MC.brand}55`,
+                appearance: "none",
+                WebkitAppearance: "none",
+                margin: 0,
+                flexShrink: 0,
+              }}
+            >
+              <Glyph name="play" size={13} color="#fff" strokeWidth={2.4} />
+              Resume
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ padding: "20px 16px 0" }}>
         <div
           style={{
@@ -1223,38 +1320,104 @@ export default function ActiveShiftPage() {
                 Started {formatTime(shiftStartTs)}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                const qs = completedTaskIds.length
-                  ? `?completed=${completedTaskIds.join(",")}`
-                  : "";
-                // Show the overlay BEFORE pushing — without this the
-                // rep sees a half-second dead frame between tapping
-                // and the check-out page mounting its own overlay.
-                setOpening({ customerName: shiftData?.name || "your shift" });
-                router.push(`/check-out${qs}`);
-              }}
-              style={{
-                background: MC.brand,
-                color: "#fff",
-                border: "none",
-                padding: "12px 16px",
-                borderRadius: 12,
-                cursor: "pointer",
-                fontFamily: MC.font,
-                fontSize: 14,
-                fontWeight: 600,
-                letterSpacing: -0.1,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                boxShadow: `0 6px 18px ${MC.brand}55`,
-              }}
-            >
-              Check out
-              <Glyph name="leave" size={16} color="#fff" />
-            </button>
+            {/* Pause + Check-out actions side-by-side. Pause is a
+                secondary affordance — the rep stays on /active, the
+                shift flips to state='on-break', and a banner near
+                the top of the page surfaces the Resume CTA. Check
+                out is disabled while paused so the rep resumes
+                before closing the shift (prevents "checked out
+                while on break" weirdness in the audit trail). */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!shiftData) return;
+                  const r = await setShiftBreakState(shiftData.shiftId, true);
+                  if (!r.ok) return;
+                  void logEvent({
+                    event_type: "shift.break_started",
+                    shift_id: shiftData.shiftId,
+                    customer_id: shiftData.customerId,
+                    message: "Paused shift",
+                    meta: { kind: "open-ended" },
+                  });
+                  // Optimistic flip + the realtime subscribe on the
+                  // useEffect will re-confirm with the DB shortly.
+                  setShiftData((d) => (d ? { ...d, state: "on-break" } : d));
+                }}
+                disabled={shiftData?.state === "on-break"}
+                style={{
+                  background: "transparent",
+                  color: "rgba(255,255,255,.85)",
+                  border: "1px solid rgba(255,255,255,.25)",
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  cursor:
+                    shiftData?.state === "on-break" ? "not-allowed" : "pointer",
+                  fontFamily: MC.font,
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  letterSpacing: -0.1,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                  margin: 0,
+                  opacity: shiftData?.state === "on-break" ? 0.45 : 1,
+                }}
+              >
+                <Glyph name="pause" size={14} color="rgba(255,255,255,.85)" />
+                Pause
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (shiftData?.state === "on-break") return;
+                  const qs = completedTaskIds.length
+                    ? `?completed=${completedTaskIds.join(",")}`
+                    : "";
+                  // Show the overlay BEFORE pushing — without this the
+                  // rep sees a half-second dead frame between tapping
+                  // and the check-out page mounting its own overlay.
+                  setOpening({ customerName: shiftData?.name || "your shift" });
+                  router.push(`/check-out${qs}`);
+                }}
+                disabled={shiftData?.state === "on-break"}
+                title={
+                  shiftData?.state === "on-break"
+                    ? "Resume your shift first, then check out"
+                    : undefined
+                }
+                style={{
+                  background:
+                    shiftData?.state === "on-break"
+                      ? "rgba(255,255,255,.15)"
+                      : MC.brand,
+                  color: "#fff",
+                  border: "none",
+                  padding: "12px 16px",
+                  borderRadius: 12,
+                  cursor:
+                    shiftData?.state === "on-break" ? "not-allowed" : "pointer",
+                  fontFamily: MC.font,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  letterSpacing: -0.1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  boxShadow:
+                    shiftData?.state === "on-break"
+                      ? "none"
+                      : `0 6px 18px ${MC.brand}55`,
+                  opacity: shiftData?.state === "on-break" ? 0.6 : 1,
+                }}
+              >
+                Check out
+                <Glyph name="leave" size={16} color="#fff" />
+              </button>
+            </div>
           </div>
           <div
             style={{

@@ -598,25 +598,33 @@ export default function SchedulePage() {
       return;
     }
 
-    // Conflict check (only when the new shift has a rep — unassigned
-    // shifts can stack freely; the manager picks one to claim later).
+    // Conflict check — warn but allow (May 14, Gary). Some teams
+    // schedule a rep into multiple stores during the same window
+    // ("8 shifts 8am–5pm, pick your order") and the previous block
+    // made that pattern impossible. We still surface the overlap so
+    // the manager sees it, but the move goes through. Unassigned
+    // shifts (newRep = null) skip the check entirely — they can
+    // stack freely.
+    let conflictBanner: { kind: "warn"; text: string } | null = null;
     if (newRep) {
       const newStartMin = timeToMin(newStart);
       const newEndMin = timeToMin(newEnd);
-      const conflict = shifts.find(
+      const conflicts = shifts.filter(
         (s) =>
           s.id !== id &&
           s.rep_id === newRep &&
           s.shift_date === newDate &&
           shiftOverlapsRange(s, newStartMin, newEndMin)
       );
-      if (conflict) {
-        const cn = conflict.customers?.name || "another shift";
-        setMoveBanner({
+      if (conflicts.length > 0) {
+        const first = conflicts[0];
+        const cn = first.customers?.name || "another shift";
+        const extra =
+          conflicts.length > 1 ? ` (+${conflicts.length - 1} more)` : "";
+        conflictBanner = {
           kind: "warn",
-          text: `Overlaps with ${cn} (${conflict.start_time}–${conflict.end_time}). Pick another slot.`,
-        });
-        return;
+          text: `Overlaps ${cn} ${first.start_time}–${first.end_time}${extra} — moved anyway.`,
+        };
       }
     }
 
@@ -652,10 +660,16 @@ export default function SchedulePage() {
       });
       return;
     }
-    setMoveBanner({
-      kind: "ok",
-      text: `Moved to ${newDate} ${newStart}–${newEnd}.`,
-    });
+    // On success, prefer the conflict-warning banner if there was
+    // one — the manager needs to see "your move worked, AND it
+    // overlaps another shift", not just "your move worked". Falls
+    // back to a plain confirmation when there's no overlap.
+    setMoveBanner(
+      conflictBanner ?? {
+        kind: "ok",
+        text: `Moved to ${newDate} ${newStart}–${newEnd}.`,
+      }
+    );
   };
 
   // Prev/Next/Today handlers — step by week in week view, by month
