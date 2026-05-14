@@ -142,8 +142,15 @@ export function AppFooter() {
         marginTop: "auto",
         background: MC.header,
         color: "rgba(255,255,255,.7)",
+        // Slimmer than before per Gary's "too big" feedback (May 14).
+        // Top + visible-bottom both dropped from 14/18 → 8/8 so the
+        // visible black band is ~16px thinner. The safe-area-inset-
+        // bottom term stays — that's the 34px iPhone home-indicator
+        // zone, and dropping it would put "POWERED BY MORPHEUS OPS"
+        // back behind the indicator (the exact bug we fixed when
+        // viewport-fit=cover landed).
         padding:
-          "14px 16px calc(env(safe-area-inset-bottom, 0px) + 18px)",
+          "8px 16px calc(env(safe-area-inset-bottom, 0px) + 8px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
