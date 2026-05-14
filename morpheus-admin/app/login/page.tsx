@@ -130,12 +130,12 @@ export default function LoginPage() {
           </div>
           <div>
             <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 0.6 }}>
-              MORPHEUS
+              MORPHEUS OPS
             </div>
             <div
               style={{ fontSize: 10.5, color: "#7FB6C5", letterSpacing: 0.4, marginTop: 1 }}
             >
-              Field Operations Suite
+              Workforce operations. In real time.
             </div>
           </div>
         </div>
@@ -151,7 +151,7 @@ export default function LoginPage() {
               marginBottom: 12,
             }}
           >
-            Time &amp; Attendance
+            Field Operations Platform
           </div>
           <div
             style={{
@@ -165,19 +165,27 @@ export default function LoginPage() {
             Know who&apos;s where — every shift, every site.
           </div>
           <div style={{ fontSize: 14, color: "#9FBFCB", marginTop: 16, lineHeight: 1.55 }}>
-            Live geofenced check-ins, exception flagging and a clean audit trail. One module of
-            the Morpheus platform.
+            Geofenced check-ins, route optimisation, tasks with photos and signatures, real-time
+            messaging, and a clean audit trail — all in one workspace.
           </div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 28 }}>
-            <ModulePill label="Time & Attendance" active />
-            <ModulePill label="Sales Orders" hint="Q3" />
-            <ModulePill label="Auditing" hint="Q4" />
+          {/* Capability chips — replaces the legacy three-module
+              switcher (Time & Attendance / Sales Orders / Auditing).
+              Morpheus is one unified platform now; these chips just
+              hint at the scope of what's inside. All "active" tone
+              because none of them are gated. */}
+          <div style={{ display: "flex", gap: 8, marginTop: 28, flexWrap: "wrap" }}>
+            <ModulePill label="Live Ops" active />
+            <ModulePill label="Workforce" active />
+            <ModulePill label="Tasks" active />
+            <ModulePill label="Schedule" active />
+            <ModulePill label="Messaging" active />
+            <ModulePill label="Reports" active />
           </div>
         </div>
 
         <div style={{ position: "relative", fontSize: 11, color: "#5C7E89", letterSpacing: 0.3 }}>
-          © Morpheus 2025 · v4.2.1
+          © Morpheus Ops 2026
         </div>
       </div>
 

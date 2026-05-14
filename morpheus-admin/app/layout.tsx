@@ -16,8 +16,8 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Morpheus Admin · Time & Attendance",
-  description: "Field Operations Suite admin console",
+  title: "Morpheus Ops · Admin",
+  description: "Morpheus Ops — workforce operations, in real time.",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
