@@ -1,7 +1,12 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`6e4f534`** (May 13, 2026 — late evening). Two huge days back-to-back. **May 13** shipped five new features end-to-end (rep-creates-customer, rep-geocodes-site, photos on tasks, customer signatures, Messaging), plus **Web Push v1 + phase 2** (rep notifications for shift assigned/reassigned/cancelled, attention-raised pushes to managers, Vercel-Cron-driven late + EOD reminders, org-wide kill switch), plus the **Morpheus Ops** rebrand (brand-tinted "Ops" pill everywhere). **May 13 (earlier)** also delivered a small UX pass: "Plan my day" → "Route" everywhere user-facing, icon-only status pill on `/shifts`, atomic `saveShiftOrder`, home pill "Day complete" calm state. Read the **"Today's session — what shipped (May 13, 2026)"** section first — it's the canonical record of the day, with the full A–E feature breakdown and migration list.
+> Latest commit: **`4a23742`** (May 14, 2026 — late afternoon). Long polish + bug-fix day on top of the May 13 feature drop. ~30 commits in three groups:
+> 1. **Live bug fixes** — auto-checkout sweep was failing silently (Mariska's check-in > check-out timesheet bug; fixed with a marker-first dedup + the Vercel crons restored now we're on Pro). Push notifications were shipping to the wrong Vercel hostname (relative URL fix). /active threw React error #310 on cold load (conditional hooks past an early return). Late-reminder push fired every 5 min instead of once per shift (marker now writes before push). /active dumped reps to "no active shift" when they tapped Pause (getMyActiveShift now matches on-break too).
+> 2. **UX polish on the mobile + admin chrome** — sidebar tagline + Tasks expandable sub-nav with locked Pro tiles, profile promoted to header avatar tap target, logout demoted to a power-glyph button above the footer, viewport-fit=cover so the footer logo stops hiding behind the iPhone home indicator. Home page swapped hamburger left + org logo right. /active hero slimmed (smaller address tile, inline MapPreview, Pause button toggles to Resume in-place — no duplicate up top). "Plan my day" → "Route" everywhere user-facing.
+> 3. **Feature polish** — `/route` pill icon-only with two states (calm check-circle / brand-deep target + pulse), hourly route-improvement watcher fires the action state only when the auto-check finds ≥5 min savings, celebratory RouteOptimizedSheet on calm-state taps with hourly-check reassurance copy. Admin /customers gains a "New" filter + recently-added pinned to top. Calendar drag-drop conflicts now warn-but-allow ("8 stops same day, pick your order" pattern). Schedule/manage column widths tuned. Login + sidebar tagline capitalised ("Workforce Operations"). Geocode card removes every "flag your manager" dead-end — reps can always self-pin, setCustomerSiteCoords looks up or creates a customer_sites row when shifts.site_id is null.
+>
+> Read the **"Today's session — what shipped (May 14, 2026)"** section first — it's the canonical commit-by-commit log of the day.
 >
 > Detail below is the **May 11** day — kept verbatim because it's the largest single push in the project's history and the systems it introduced (attention overlay, multi-site customers, identity photos, exception toggles, traffic-aware routing, per-customer logos) are the load-bearing pieces of the app today. **40+ commits** total across three feature passes (cancellation, polish + identity + exception toggles, engineering review), a late push for the big deferred items (**traffic-aware Plan-my-day routing** + **per-customer logo uploads**), and a tail of UX fixes from manager testing (success-page skip, "Wrapping up…" wording on check-out tap, dynamic Up Next picker, dead Directions button removal, customer edit page reorganised into Identity / Location / Check-in exceptions sections, and the Plan-my-day card collapsed into slim right-aligned pills under Up Next + on /shifts).
 > 1. **Cancellation / "Can't make this shift" feature** (8 commits) — rep can flag an assigned shift they can't make from anywhere, manager sees it in Live Ops "Needs action", four resolutions (Reassign / Reopen as unassigned / Keep · rep stays on / Cancel · do not refill), banners + pills + audit trail end-to-end.
@@ -112,7 +117,7 @@ If you switch computers (or hand this project to a developer), this section is t
 
 ### Where things stand right now (handover for the next chat)
 
-**Last commit:** `6e4f534` — "README: document the late-evening messaging fixes + Send-Now diagnosis" (May 13, 2026 — late evening). Long, two-pass day: morning UX cleanup + Web Push v1 + the "Plan my day → Route" rename, then a marathon evening session that shipped five end-to-end features (Features A–E: rep-adds-customer, rep-geocodes-site, photos on tasks, customer signatures on tasks, full Messaging) + Web Push phase 2 (Vercel-Cron late/EOD reminders, attention-raised manager broadcast, org-wide kill switch) + the Morpheus Ops rebrand. ~40 commits across the two passes. See "Today's session — what shipped (May 13, 2026)" for the canonical record.
+**Last commit:** `4a23742` — "/active Pause: one button toggles to Resume (no duplicate up top)" (May 14, 2026). Polish + bug-fix day on top of the huge May 13 feature drop. ~30 commits across three groups: live bug fixes (auto-checkout, push hostnames, late-reminder spam, React #310 on /active, pause-disappear), mobile + admin chrome polish (sidebar Tasks sub-nav, profile up / logout down, viewport-fit=cover, home logo+menu swap, /active hero slim + Pause↔Resume toggle), and feature polish (route pill two-state icon + hourly improvement watcher + celebratory sheet, /customers New filter, calendar warn-but-allow overlaps, geocode card removes "flag manager" dead-ends — reps can always self-pin). Vercel upgraded to Pro mid-day so the three cron schedules in `morpheus-admin/vercel.json` are now live (5 min / 15 min / 1 min). See "Today's session — what shipped (May 14, 2026)" for the canonical commit log.
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
@@ -212,6 +217,80 @@ If you switch computers (or hand this project to a developer), this section is t
 - **Indexes** on hot paths (added during the stabilisation pass): `shifts (shift_date)`, `shifts (rep_id, shift_date)`, partial `shifts (state)` on active states only, `shifts (customer_id)`, `requested_shifts (status, requested_at)`, `requested_shifts (rep_id)`. Plus everything in `db/migrations/*` already indexed.
 - **`shifts.check_out_at`** is now a real column (was inferred from events) — backfilled from event log via migration; mobile checkout + admin sweep both stamp it.
 - **`shift_task_completions`** logs which tasks the rep ticked off on a given shift (cascades on shift / task delete; unique on (shift, task)).
+
+### Today's session — what shipped (May 14, 2026)
+
+A polish + bug-fix day on top of the huge May 13 feature drop. ~30 commits, grouped by intent below. **No new migrations** — every commit ships through Vercel auto-deploy.
+
+Vercel was upgraded to Pro mid-day, so the three cron schedules in `morpheus-admin/vercel.json` are now actually firing (`/api/cron/shift-reminders` every 5 min, `/api/cron/auto-checkout` every 15 min, `/api/cron/messages` every minute).
+
+#### Live bug fixes
+
+- **Mariska's timesheet showed check_in_at > check_out_at + her shift didn't auto-close overnight** (`2778e3f`). Two root causes: (a) the Vercel cron for `/api/cron/auto-checkout` was parked in vercel.json because Hobby plan rejects sub-daily schedules — restored now that we're on Pro; (b) `checkInToShift` in `morpheus-mobile/lib/shifts-store.ts` overwrote `check_in_at` unconditionally with no error check, so a stale-cache "Resume" tap could write a fresh check_in_at AFTER the sweep had already stamped check_out_at. Fixed by refusing to re-open complete/cancelled shifts AND nulling check_out_at on every check-in.
+- **Push notifications shipping to the wrong Vercel hostname** (`4a649f7`). `/api/messages/send` was building `${MOBILE_BASE_URL}/messages?id=...` where MOBILE_BASE_URL fell back to `https://morpheusta.vercel.app` (no deployment, 404 DEPLOYMENT_NOT_FOUND on tap). Real prod host is `morpheusta-khaki-omega.vercel.app`. Fixed by making push URLs RELATIVE — the service worker resolves against its registered origin — and bumping the absolute-URL fallback to the right host.
+- **/active threw React error #310** ("Rendered more hooks than during the previous render") on cold load (`57e419b`). The `if (!shift) return ...` early-return sat ABOVE 8 hooks (4 useCallback + 2 useEffect + helpers), so the hook count differed between renders. Fixed by moving the guard below every hook. Diagnosed via a temporary verbose `error.tsx` (`35f38e2`) which Gary screenshotted; that error.tsx was then trimmed back to a clean rep-facing card with a hidden 5-tap-to-reveal debug pane (`0ed3096`) — `localStorage.morpheus.debug=1` enables full stack details persistently.
+- **"Running late" push fired every 5 min** instead of once per shift (`ff1fcf6`). Cron's dedup marker was written AFTER the push with no error check; transient marker-insert failures left no marker → next tick re-fired. Flipped to marker-first; if the marker fails we log loudly and skip the push for that tick. Same fix applied to the EOD-checkout sweep.
+- **/active emptied out when rep tapped Pause** (`1fdedae`). `getMyActiveShift` filtered strictly on `state='in-progress'`, so the moment Pause flipped DB state to `on-break` the realtime subscriber refetched, got null back, and dumped the rep onto the "No active shift" empty state. Fixed by including `on-break` in the active-states filter.
+- **Sidebar org logo flickered on first paint** (`a9f31ff`). The fallback "brand cube" rendered for the half-second the org logo fetch was in flight. Fixed with a localStorage cache (`morpheus.org.cache.v1`) so the brand block paints the last-known logo instantly on every page load after the first. Subscribe-on-change wired so a save on `/settings/organisation` propagates without a reload.
+
+#### Mobile + admin chrome polish
+
+- **Module switcher dropped from the admin sidebar** (`bfb041a`). The legacy "Time & Attendance / Sales Orders / Auditing" three-module switcher (with Q3/Q4 hints) doesn't match the unified Morpheus Ops direction. Replaced with a simple "MORPHEUS OPS · Workforce Operations. In real time." brand strip. Sidebar tagline later refined (`9283ec6`) to a 12.5px line with a subtle hourly CSS-gradient shimmer to signal "platform is alive"; then trimmed to tagline-only (`9896db4`) since "Morpheus Ops" already lives in the footer pill below.
+- **Tasks gets a Pro-upgrade sub-nav** (`9896db4`). Clicking Tasks expands three sub-items in the sidebar: Tasks (active) + Advanced Auditing 🔒 PRO + Sales Orders 🔒 PRO. The two locked items are placeholders for future Pro tiers; tapping pops an alert until real billing exists.
+- **"Plan my day" → "Route" everywhere user-facing** (`9896db4`, `bfb041a`). Page title, pill labels, admin settings toggle. Code comments referencing the old name left intact as design-history context.
+- **Sidebar nav reordered** (`bfb041a`). NAV_ITEMS now: Live Ops → Workforce/Reps → Customers → Schedule/Calendar → Tasks → Library → Messaging → Reports → Settings. Operations tools group before analytics.
+- **Layout title + login hero rebrand** (`6b22fe3`). Browser tab title was "Morpheus Admin · Time & Attendance" → "Morpheus Ops · Admin". Login hero replaced three competing module pills with six capability chips (Live Ops / Workforce / Tasks / Schedule / Messaging / Reports).
+- **Mobile side menu reshaped** (`f03dd10`). Profile row removed from the nav list — the header avatar/name/email block at the top is now the tappable Link to /profile with a chev-r affordance + a "View profile" caption. Logout demoted to a destructive button above the brand footer, new `power` glyph added to the mobile icon set.
+- **Mobile footer slimmed** (`723f829`). Visible padding 14/18 → 8/8 around the safe-area inset. The `env(safe-area-inset-bottom)` term is preserved so the iPhone home-indicator zone still clears.
+- **Mobile viewport-fit=cover** (`ed4c588`). Without this iOS clamped every `env(safe-area-inset-*)` to 0, leaving "POWERED BY MORPHEUS OPS" hidden behind the home indicator. The CSS was already correct — flipping viewport-fit unlocked it.
+- **Home top bar logo + menu swap** (`51296be`). Hamburger now at the leading edge, org logo at the trailing edge. Same 38×38 tile chrome; purely positional.
+- **/active hero slim + Pause button overhaul** (`51296be`, `bac96bb`, `4a23742`). The address tile was too big (eyebrow label, 26px icon, 13px text); slimmed to 20×20 icon + 11.5px nowrap-ellipsis text, no label. Pause button got a first-class spot next to Check-out (was previously only reachable via pause-and-switch into another shift). After Gary's feedback the Pause button was restyled to match Check-out's shape but with a translucent white bg (secondary tone), then folded into a single toggle — same button reads "Pause" off-break, "Resume" on-break, with the glyph + tone flipping accordingly. The top "Shift paused" banner kept the info copy but lost its duplicate Resume button.
+
+#### Feature polish
+
+- **Route pill — two-state icon + hourly auto-recheck** (`5693bf7`, `1cfeea3`, `1aa0205`, `6076a7b`). Both home and `/shifts` route pills are icon-only with just two states: calm okTint + green check-circle (default), or brand-deep + target glyph + pulse (when an improvement is available). The new `lib/route-improvement-watcher.ts` runs from `MenuShell` every 60 min while the app is open + on `visibilitychange→visible` if last check was >15 min ago. It calls `planMyDay({optimize: false})` and `planMyDay({optimize: true})` in parallel, compares total drive-time. If the optimized order saves ≥5 min vs the rep's current saved order (or chronological), the action state fires. Calm-state taps open the new `RouteOptimizedSheet` (animated rings + drawn check) with an "Open route anyway" escape hatch and a reassurance line: "Auto-checked every hour. If a better route opens up, we'll let you know right here." Action-state taps go to `/route` as before. Hash anchor + button-reset polish iterations rolled through to land the final pixel-perfect calm-state pill.
+- **Geocode card removes "flag your manager" dead-end** (`33910b1`). When a shift's site has no coords, the geocode-task card now renders even if `shifts.site_id` is null. `setCustomerSiteCoords` (mobile) accepts a null `siteId` and resolves it at submit time: looks up the customer's primary site or creates a "Head office" row on the fly, then back-fills every unlinked shift the rep has for that customer. Combined with the earlier "one button + required site name" rework (`392a1de`), reps can ALWAYS self-pin a location — there is no flow that asks them to "flag your manager".
+- **/active address tile shows an inline MapPreview** (`33910b1`). The customer hero card's address row got a 110px MapPreview (existing component from `/add-customer`) showing the site pin at street-level zoom. Tile is tappable to open Google Maps. When coords exist but no street address, the row reads "Pinned location" instead of any flag-manager copy.
+- **Live Ops ShiftsList: needs-action rows redirect per-row** (`2e55737`). Shifts whose attention flag is open now route clicks to `#live-feed-needs-action` regardless of which tab is showing, so managers action them inline without leaving the dashboard. Pending request rows always route there too. Normal shifts continue to navigate to `/shifts/[id]`.
+- **Admin /customers gains a "New" filter + recently-added pinned to top** (`9d6b923`). New StatusFilter value + a "New · N" chip beside Inactive. Recently-added (last 7 days, source-agnostic) customers always lead the list regardless of sort, so a manager who just added one finds it at the top. `Customer.createdAt` field added to the type + store mapper.
+- **Calendar drag-drop overlaps now warn-but-allow** (`bac96bb`). Reps can be scheduled into multiple stores during the same window ("8 stops 8am-5pm, pick your order"). The previous strict block made this impossible. Banner now reads e.g. *"Overlaps Aria Cosmetics 09:00–12:00 (+2 more) — moved anyway."* on success.
+- **/schedule/manage column widths tuned** (`380ee77`). The SHIFTS column at 78px was wrapping "6 upcoming · 1 past" into three ugly lines. Bumped to 150px + subtitle is now nowrap with ellipsis fallback. Time column also bumped 80→105px. "Workforce Operations" capitalized in sidebar tagline + login.
+- **KpiStrip clickable revert** (`aadc5c1`). KPI cards on Live Ops were briefly Links that scrolled+filtered the ShiftsList. Gary preferred them static — reverted.
+- **Composer cleanup + admin customer overview fix** (`392a1de`). `/notify` composer: Subject the only required field (Message body now optional), two explicit `[Send now]` + `[Schedule for later]` buttons. Admin `/customers/[id]` overview head-office card now has a three-way fallback: real address → site name + "no street address" → "Pinned location" → "No address yet" — so a rep-geocoded site stops showing "No address yet" when it actually has coords + a name.
+
+#### Commits in order
+
+```
+ed4c588 mobile viewport: add viewport-fit=cover
+09e5515 README: refresh stale headers to current state
+bfb041a admin nav: drop module switcher, add Pro tiles on Tasks
+6b22fe3 Morpheus Ops rebrand: layout title + login hero
+9896db4 sidebar: tagline-only top, expandable Tasks sub-nav
+9283ec6 sidebar tagline: bump size + add subtle "alive" shimmer
+a9f31ff sidebar logo: kill first-paint flicker via localStorage cache
+35f38e2 mobile: surface real error details instead of generic Next.js page
+57e419b /active: fix React error #310 (conditional hooks past early return)
+0ed3096 mobile error boundary: hidden 5-tap debug reveal
+723f829 mobile footer: slim the black band ~16px without hiding the logo
+9d6b923 admin /customers: surface recently-added at top + "New" filter chip
+5693bf7 route pill: hourly auto-recheck + two-state icon (calm / action)
+1cfeea3 route pill: calm-state tap opens celebratory sheet, not /route
+1aa0205 route pill: full <button> reset so calm-state icon fits perfectly
+392a1de geocode card rework + composer cleanup + admin overview fix
+2778e3f fix Mariska bug: data-integrity guard + restore Vercel crons
+2e55737 Live Ops ShiftsList: needs-action rows redirect to Live Feed per-row
+f03dd10 mobile side menu: profile up, log out down, native-app shape
+4a649f7 push: stop shipping links to the wrong Vercel hostname
+ff1fcf6 cron/shift-reminders: stop spamming reps every 5 min
+bac96bb schedule: warn-but-allow overlapping shifts + /active pause button
+380ee77 admin polish: clickable KPIs + Manage spacing + tagline cap
+6076a7b RouteOptimizedSheet: mention the hourly auto-check
+1fdedae fix: /active dumps to empty state when rep taps Pause
+51296be home swap + /active polish
+aadc5c1 revert: KPI cards back to static (Gary preferred the look)
+33910b1 /active: inline map + never "flag manager" on geocode-task card
+4a23742 /active Pause: one button toggles to Resume (no duplicate up top)
+```
 
 ### Today's session — what shipped (May 7, 2026)
 
@@ -1577,57 +1656,46 @@ May 6 (already in cloud):
 
 Top of the queue (in priority order):
 
-1. **Run the two pending May 13 migrations in Supabase** (both
-   now fully idempotent — `2026_05_13_messages.sql` was patched
-   in commit `e2a250a` to guard the ADD PUBLICATION TABLE step):
-   - `db/migrations/2026_05_13_task_signatures.sql` — Feature D
-   - `db/migrations/2026_05_13_messages.sql` — Feature E
-
-   Without these the signature pad upload + the messaging compose
-   will hard-fail at the DB layer.
-
-   **Note for Gary's prod Supabase project:** at end of May 13
-   session both these tables existed and `status='sent'` rows
-   were observed, so the migrations have ALREADY been applied to
-   prod. The re-run guard only matters for a fresh / replica
-   environment. The "Recent message stuck at status='pending'"
-   issue Gary hit is a separate problem — see the
-   "Pending-status messaging — diagnosis" subsection in the
-   May 13 session log above for the env-var fix.
-2. **Verify `SUPABASE_SERVICE_ROLE_KEY` is set on Vercel
-   `morpheus-admin` AND redeploy.** This is the single most
-   likely cause of Send Now messages getting stuck at
-   `status='pending'`. The `/api/messages/send` route bails with
-   500 if the env var is missing. Two-minute fix:
-   - Vercel dashboard → morpheus-admin → Settings → Environment
-     Variables → confirm key exists on **Production** (mark
-     Sensitive).
-   - Deployments → latest → **Redeploy** (forces rebuild that
-     picks up env changes; Vercel binds env at build time).
-3. **Vercel Pro upgrade** — multiple crons are parked in
-   `morpheus-admin/vercel.json` because Hobby plan rejects sub-daily
-   schedules. Once Pro is active, restore:
-   ```json
-   {
-     "crons": [
-       { "path": "/api/cron/shift-reminders", "schedule": "*/5 * * * *" },
-       { "path": "/api/cron/auto-checkout",   "schedule": "*/15 * * * *" },
-       { "path": "/api/cron/messages",        "schedule": "* * * * *" }
-     ]
-   }
+1. **Set `NEXT_PUBLIC_MOBILE_URL` on the morpheus-admin Vercel project** (belt-and-braces). Today's fix made push URLs relative so they can't ship to the wrong host even if the env var is missing, but the var is still used by the CORS check in `/api/push/notify`. Set it to `https://morpheusta-khaki-omega.vercel.app` on **Production + Preview + Development** so the fallback never fires.
+2. **One-time SQL cleanup for any check_in_at > check_out_at rows** (Mariska-style bad data from before today's fix). The data-integrity guard in `checkInToShift` prevents NEW bad rows but doesn't retroactively repair existing ones:
+   ```sql
+   -- Run this in the Supabase SQL Editor to inspect first:
+   SELECT id, customer_id, rep_id, shift_date, check_in_at, check_out_at, state
+   FROM shifts
+   WHERE check_in_at IS NOT NULL
+     AND check_out_at IS NOT NULL
+     AND check_in_at > check_out_at;
+   -- Then a scoped repair (sets check_out_at = check_in_at so hours = 0):
+   UPDATE shifts
+   SET check_out_at = check_in_at, state = 'complete'
+   WHERE check_in_at IS NOT NULL
+     AND check_out_at IS NOT NULL
+     AND check_in_at > check_out_at;
    ```
-   Send-now messaging works without cron — only scheduled-future
-   messages need it. Shift reminders + auto-checkout work without
-   the cron via the client-side `StaleShiftSweeper` fallback but
-   only fire when an admin has Live Ops open.
-4. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
-5. **Confirm `CRON_SECRET` + `NEXT_PUBLIC_ADMIN_URL`** are set on Vercel (added during May 13 — the README's earlier check). Required by the cron routes and by mobile's cross-origin manager-push.
-6. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-7. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
-8. **Custom report builder** if reporting is the priority. The
-   foundations are now in place (photos + signatures are stored
-   per-(shift, task) and a future generator can embed them in a
-   customer-facing PDF).
+3. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
+4. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. Every table is currently `TO authenticated USING (true)`. The path: write a single coordinated migration that uses an `is_manager()` SECURITY DEFINER helper and rewrites every table's policies. `customer_contacts` already follows the role-based pattern as a template. Test in a staging Supabase first.
+5. **iOS location permission prompt re-asks every session** (Gary's report May 14 EOD — screenshot showed the iOS native "would like to use your location" prompt firing on a return visit). Likely because `navigator.geolocation.getCurrentPosition` is called without first checking `navigator.permissions.query({name:"geolocation"})` for an already-granted state. Look at `lib/route-planner.ts requestGeolocationOnce` — there's a GPS cache there but it may not be short-circuiting the permission check on iOS PWAs. Also worth surfacing a small "Location settings" toggle in `/profile` that explains how to change the choice in iOS Settings → Morpheus → Location (the OS doesn't let us flip it programmatically).
+6. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
+7. **Custom report builder** if reporting is the priority. The foundations are in place (photos + signatures stored per-(shift, task); a future generator can embed them in a customer-facing PDF).
+
+Recently cleared (May 14 — polish + bug-fix day):
+
+- ✅ **Mariska's timesheet bug** (check_in_at > check_out_at) — both root causes fixed: Vercel crons restored on Pro plan, `checkInToShift` data-integrity guard added. See May 14 session entry above for the full trace. (`2778e3f`)
+- ✅ **Push URLs shipping to wrong Vercel hostname** — push payloads now use relative URLs so the service worker resolves against its own origin. (`4a649f7`)
+- ✅ **Late-reminder push fired every 5 min** — cron now writes the idempotency marker BEFORE the push so a failed marker insert can't leave us re-firing every tick. (`ff1fcf6`)
+- ✅ **/active crashed with React error #310** on cold load — early-return guard moved below every hook so the hook count never differs between renders. (`57e419b`)
+- ✅ **/active emptied when rep tapped Pause** — `getMyActiveShift` now matches `on-break` in addition to `in-progress`. (`1fdedae`)
+- ✅ **Pause as a first-class action on /active** — single button toggles Pause ↔ Resume with state-aware styling; Check-out locked while paused. (`bac96bb`, `4a23742`)
+- ✅ **Route pill icon-only with two states** (calm check-circle / brand-deep target + pulse) — hourly auto-recheck via the new `route-improvement-watcher`; calm taps open a celebratory sheet, action taps go to `/route`. (`5693bf7`, `1cfeea3`, `1aa0205`, `6076a7b`)
+- ✅ **Geocode card removes every "flag your manager" dead-end** — rep can always self-pin; `setCustomerSiteCoords` looks up or creates a site row when shifts.site_id is null. Address tile gets an inline MapPreview. (`33910b1`, `392a1de`)
+- ✅ **Live Ops Today's Shifts: needs-action rows redirect per-row** to the Live Feed Needs Action tab regardless of which tab is open. (`2e55737`)
+- ✅ **Admin /customers New filter + recently-added pinned to top**. (`9d6b923`)
+- ✅ **Calendar drag-drop overlaps now warn-but-allow** — "8 stops same day, pick your order" pattern works again. (`bac96bb`)
+- ✅ **Composer cleanup** — Subject the only required text field, two explicit `[Send now]` + `[Schedule for later]` buttons. (`392a1de`)
+- ✅ **Mobile chrome polish** — Tasks expandable sub-nav with locked Pro tiles, profile up + logout down + power glyph, viewport-fit=cover, footer slimmed, sidebar tagline+shimmer, home logo↔menu swap, /active hero slim. (`bfb041a`, `9896db4`, `f03dd10`, `ed4c588`, `723f829`, `9283ec6`, `51296be`)
+- ✅ **Sidebar org-logo first-paint flicker** killed via localStorage cache. (`a9f31ff`)
+- ✅ **Morpheus Ops rebrand on admin** — layout title, login hero, sidebar capitalisation. (`6b22fe3`, `380ee77`)
+- ✅ **Hidden 5-tap debug reveal** on `error.tsx` (localStorage `morpheus.debug=1` for persistent on). (`0ed3096`)
 
 Recently cleared (May 13 — afternoon + evening session):
 
