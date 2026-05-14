@@ -81,6 +81,7 @@ import {
   readImprovementState,
   subscribeImprovement,
 } from "@/lib/route-improvement-watcher";
+import { RouteOptimizedSheet } from "@/components/RouteOptimizedSheet";
 
 // A shift row from the DB carries internal id + state alongside the display fields.
 type DbShift = Shift & {
@@ -338,6 +339,10 @@ export default function ShiftsListPage() {
     setImprovement(readImprovementState());
     return subscribeImprovement(() => setImprovement(readImprovementState()));
   }, []);
+  // Tap on the calm-state Route pill opens this celebratory sheet
+  // instead of navigating to /route. Action-state taps still route
+  // through to /route. Same component used on the home page.
+  const [routeSheetOpen, setRouteSheetOpen] = useState(false);
 
   const reload = () => {
     Promise.all([
@@ -764,33 +769,54 @@ export default function ShiftsListPage() {
                   border: `${MC.ok}55`,
                   shadow: "none",
                 };
+            const sharedStyle: React.CSSProperties = {
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 32,
+              height: 32,
+              borderRadius: 999,
+              background: tone.bg,
+              border: `1px solid ${tone.border}`,
+              boxShadow: tone.shadow,
+              textDecoration: "none",
+              flexShrink: 0,
+            };
+            const iconNode = (
+              <Glyph
+                name={action ? "target" : "check-circle"}
+                size={16}
+                color={tone.fg}
+                strokeWidth={2.4}
+              />
+            );
+            if (action) {
+              // Action state — link straight to /route.
+              return (
+                <Link
+                  href="/route"
+                  aria-label={ariaLabel}
+                  title={titleAttr}
+                  className="mc-route-pulse"
+                  style={sharedStyle}
+                >
+                  {iconNode}
+                </Link>
+              );
+            }
+            // Calm state — open the celebratory sheet instead of
+            // navigating. Sheet has an "Open route anyway" link for
+            // reps who want to view /route despite the calm state.
             return (
-              <Link
-                href="/route"
+              <button
+                type="button"
+                onClick={() => setRouteSheetOpen(true)}
                 aria-label={ariaLabel}
                 title={titleAttr}
-                className={action ? "mc-route-pulse" : undefined}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 32,
-                  height: 32,
-                  borderRadius: 999,
-                  background: tone.bg,
-                  border: `1px solid ${tone.border}`,
-                  boxShadow: tone.shadow,
-                  textDecoration: "none",
-                  flexShrink: 0,
-                }}
+                style={{ ...sharedStyle, cursor: "pointer" }}
               >
-                <Glyph
-                  name={action ? "target" : "check-circle"}
-                  size={16}
-                  color={tone.fg}
-                  strokeWidth={2.4}
-                />
-              </Link>
+                {iconNode}
+              </button>
             );
           })()}
           <button
@@ -1062,6 +1088,14 @@ export default function ShiftsListPage() {
       <div style={{ height: 12 }} />
 
       <AppFooter />
+
+      {/* Celebratory "Route optimized — nothing to do" sheet. Opens
+          when the rep taps the calm-state Route pill above. Same
+          component as the home page. */}
+      <RouteOptimizedSheet
+        open={routeSheetOpen}
+        onClose={() => setRouteSheetOpen(false)}
+      />
 
       {/* Confirm-and-pick-reason sheet. Mounted at the root so it
           slides up over the whole page; the row triggers it by

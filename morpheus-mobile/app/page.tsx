@@ -47,6 +47,7 @@ import {
   readImprovementState,
   subscribeImprovement,
 } from "@/lib/route-improvement-watcher";
+import { RouteOptimizedSheet } from "@/components/RouteOptimizedSheet";
 
 // MapLibre needs `window`; defer to client-only.
 const DashboardMap = dynamic(
@@ -337,6 +338,11 @@ export default function DashboardPage() {
     setImprovement(readImprovementState());
     return subscribeImprovement(() => setImprovement(readImprovementState()));
   }, []);
+  // Celebratory "route already optimized" sheet — opens on tapping
+  // the calm-state pill instead of navigating to /route (which has
+  // nothing actionable to show in that state). Action-state pill
+  // still routes through to /route as before.
+  const [routeSheetOpen, setRouteSheetOpen] = useState(false);
 
   // "I can't make this shift" sheet state — applies to the up-next
   // shift only on the dashboard. Mirrors the /shifts page pattern so
@@ -598,27 +604,55 @@ export default function DashboardPage() {
               >
                 {showPlanSlot && (
                   <>
-                    <Link
-                      href="/route"
-                      aria-label={ariaLabel}
-                      title={titleAttr}
-                      className={action ? "mc-route-pulse-home" : undefined}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: "0 11px",
-                        textDecoration: "none",
-                        background: action ? MC.brandDeep : MC.okTint,
-                      }}
-                    >
-                      <Glyph
-                        name={action ? "target" : "check-circle"}
-                        size={15}
-                        color={action ? "#fff" : MC.ok}
-                        strokeWidth={2.4}
-                      />
-                    </Link>
+                    {action ? (
+                      // Action state: navigate straight to /route so
+                      // the rep can review + adopt the better order.
+                      <Link
+                        href="/route"
+                        aria-label={ariaLabel}
+                        title={titleAttr}
+                        className="mc-route-pulse-home"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "0 11px",
+                          textDecoration: "none",
+                          background: MC.brandDeep,
+                        }}
+                      >
+                        <Glyph name="target" size={15} color="#fff" strokeWidth={2.4} />
+                      </Link>
+                    ) : (
+                      // Calm state: tap opens the celebratory
+                      // "Route optimized" sheet instead of routing
+                      // anywhere. Reps still get a subordinate
+                      // "Open route anyway" link inside the sheet
+                      // if they really want to see /route.
+                      <button
+                        type="button"
+                        onClick={() => setRouteSheetOpen(true)}
+                        aria-label={ariaLabel}
+                        title={titleAttr}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "0 11px",
+                          background: MC.okTint,
+                          border: "none",
+                          cursor: "pointer",
+                          height: "100%",
+                        }}
+                      >
+                        <Glyph
+                          name="check-circle"
+                          size={15}
+                          color={MC.ok}
+                          strokeWidth={2.4}
+                        />
+                      </button>
+                    )}
                     {/* Thin separator so the two halves read as
                         distinct tap targets. */}
                     <div
@@ -835,6 +869,15 @@ export default function DashboardPage() {
       </Link>
 
       <AppFooter />
+
+      {/* Celebratory "Route optimized — nothing to do" sheet. Opens
+          when the rep taps the calm-state Route pill on this page
+          (or when the same pill on /shifts is tapped, but each page
+          owns its own state for clarity). */}
+      <RouteOptimizedSheet
+        open={routeSheetOpen}
+        onClose={() => setRouteSheetOpen(false)}
+      />
 
       {/* Confirm-and-pick-reason sheet for the up-next card's "I can't
           make this shift" link. Mounted at the dashboard root so it
