@@ -620,31 +620,44 @@ export default function ActiveShiftPage() {
   );
 
   const startPhotoFlow = useCallback(
-    async (task: Task) => {
+    // SYNCHRONOUS — no async, no await, no rAF, no setTimeout.
+    // iOS standalone PWA only treats the file picker as user-initiated
+    // when input.click() runs in the SAME call stack as the tap
+    // handler. ANY async hop (await, rAF, setTimeout) drops the
+    // "transient activation" flag and the OS silently blocks the
+    // popup. That was the long-standing "nothing happens when I tap"
+    // bug: the previous version awaited refreshPhotoCount before
+    // calling click(), which works fine on Android Chrome / desktop
+    // but is the textbook iOS PWA gotcha.
+    (task: Task) => {
       const totalSlots = task.photoCount ?? 0;
       if (totalSlots === 0 || !shiftData?.shiftId) return;
-      // Refresh photos first so we don't ask the rep to retake a slot
-      // they already filled (race condition: another tab/device).
-      const existingCount = await refreshPhotoCount(task.id);
+      // Read the cached photo count from state (hydrated by the
+      // page-level useEffect that runs listShiftTaskPhotos on mount
+      // + after each upload). It can be stale by ~milliseconds if
+      // another tab uploaded in parallel — we tolerate that. The
+      // worst case: the rep takes a photo we then discard because
+      // the slot was already filled. Better than the rep tapping a
+      // dead button.
+      const existingCount = taskPhotoCounts.get(task.id) ?? 0;
       if (existingCount >= totalSlots) {
-        // Already done — auto-complete and bail.
         autoCompletePhotoTask(task.id);
         return;
       }
       setPhotoFlow({
         taskId: task.id,
-        nextSlot: existingCount, // first empty index
+        nextSlot: existingCount,
         totalSlots,
         uploading: false,
         error: null,
       });
-      // Tick to the next frame so React mounts the input first.
-      // Then synchronously click — iOS needs the click to happen
-      // inside the user-gesture call stack, but a microtask delay
-      // is still within the same activation window.
-      requestAnimationFrame(() => photoInputRef.current?.click());
+      // The hidden <input ref={photoInputRef}> is ALWAYS mounted at
+      // page level (see render below), so the ref is non-null from
+      // the first render onward. No need to wait for React to mount
+      // anything — click() lands on a live DOM node immediately.
+      photoInputRef.current?.click();
     },
-    [shiftData?.shiftId, refreshPhotoCount, autoCompletePhotoTask]
+    [shiftData?.shiftId, taskPhotoCounts, autoCompletePhotoTask]
   );
 
   const onPhotoCaptureFile = useCallback(
@@ -695,9 +708,18 @@ export default function ActiveShiftPage() {
         }
         return;
       }
-      // More slots to go — advance + re-trigger the camera. iOS will
-      // re-prompt for the camera since this is still inside the user-
-      // gesture chain (the upload promise resolves quickly).
+      // More slots to go — leave photoFlow set with the new nextSlot
+      // and uploading=false. The overlay renders a "Take photo N of
+      // M" button in this state — a tap on it is a fresh user gesture
+      // that iOS standalone PWA respects, so the camera opens cleanly.
+      //
+      // Earlier we tried auto-chaining via requestAnimationFrame, but
+      // by the time rAF fires the user activation from the file-pick
+      // has expired on iOS and the OS blocks the popup. One extra tap
+      // per photo is a small UX cost for "this actually works on every
+      // device" — and Android Chrome / desktop browsers still feel
+      // snappy because the button is visible the moment the upload
+      // resolves.
       setPhotoFlow((prev) =>
         prev
           ? {
@@ -708,7 +730,6 @@ export default function ActiveShiftPage() {
             }
           : prev
       );
-      requestAnimationFrame(() => photoInputRef.current?.click());
     },
     [
       photoFlow,
@@ -1786,11 +1807,16 @@ export default function ActiveShiftPage() {
         />
       )}
 
-      {/* Upload overlay for the photo-flow. Shown while a capture is
-          being compressed + uploaded between camera shots so the rep
-          gets clear feedback rather than a moment of "did anything
-          happen?". Also surfaces errors with a Retry CTA. */}
-      {photoFlow && (photoFlow.uploading || photoFlow.error) && (
+      {/* Photo-flow overlay — three states share the same fixed-bottom
+          card:
+            1. uploading: spinner + "Uploading photo N of M…"
+            2. error:    red border + retry button
+            3. idle:     "Take photo N of M" button to fire the camera.
+                         A button-tap is a fresh user gesture, which
+                         iOS standalone PWA respects — without this,
+                         after the first photo the auto-chain breaks
+                         on iOS and the rep was stuck. */}
+      {photoFlow && (
         <div
           role="status"
           aria-live="polite"
@@ -1800,14 +1826,17 @@ export default function ActiveShiftPage() {
             left: 14,
             right: 14,
             zIndex: 55,
-            background: photoFlow.error ? "#fff" : MC.ink,
-            color: photoFlow.error ? MC.ink : "#fff",
-            border: photoFlow.error
-              ? `1px solid ${MC.danger}55`
-              : "none",
-            borderLeft: photoFlow.error
-              ? `3px solid ${MC.danger}`
-              : "none",
+            // Background varies by state: dark while uploading
+            // (clearly busy), white with brand accent when idle (ready
+            // for next photo), white with danger accent on error.
+            background: photoFlow.uploading ? MC.ink : "#fff",
+            color: photoFlow.uploading ? "#fff" : MC.ink,
+            border: photoFlow.uploading
+              ? "none"
+              : `1px solid ${photoFlow.error ? `${MC.danger}55` : `${MC.brand}55`}`,
+            borderLeft: photoFlow.uploading
+              ? "none"
+              : `3px solid ${photoFlow.error ? MC.danger : MC.brand}`,
             borderRadius: 14,
             padding: "12px 14px",
             display: "flex",
@@ -1818,6 +1847,7 @@ export default function ActiveShiftPage() {
           }}
         >
           {photoFlow.uploading ? (
+            // ─── Uploading state ───────────────────────────────────
             <>
               <Spinner size={16} color="#fff" />
               <span style={{ fontSize: 13, fontWeight: 600 }}>
@@ -1825,7 +1855,8 @@ export default function ActiveShiftPage() {
                 {photoFlow.totalSlots}…
               </span>
             </>
-          ) : (
+          ) : photoFlow.error ? (
+            // ─── Error state ───────────────────────────────────────
             <>
               <Glyph
                 name="warn"
@@ -1870,6 +1901,83 @@ export default function ActiveShiftPage() {
                 }}
               >
                 Cancel
+              </button>
+            </>
+          ) : (
+            // ─── Idle / ready-for-next-photo state ─────────────────
+            //
+            // Drives the per-photo "Take photo N of M" CTA. Critical
+            // for iOS standalone PWA: after the first photo, the
+            // auto-chained input.click() inside the upload-resolve
+            // promise is treated as non-user-initiated by iOS and the
+            // camera popup gets silently blocked. The button below is
+            // a real DOM event handler → tapping it counts as a fresh
+            // user gesture → camera opens cleanly. Same path works
+            // identically on Android Chrome + desktop browsers.
+            //
+            // For photo 1 of N this branch normally isn't seen at all
+            // because startPhotoFlow fires input.click() synchronously
+            // inside the task-tap handler. It only renders if that
+            // first auto-click failed (e.g. weird device) OR for
+            // photos 2+ where we no longer auto-chain.
+            <>
+              <Glyph
+                name="camera"
+                size={16}
+                color={MC.brandDeep}
+                strokeWidth={2.4}
+              />
+              <span
+                style={{
+                  fontSize: 12.5,
+                  flex: 1,
+                  minWidth: 0,
+                  lineHeight: 1.35,
+                  fontWeight: 600,
+                }}
+              >
+                {photoFlow.nextSlot === 0
+                  ? "Ready to take your first photo"
+                  : `${photoFlow.nextSlot} of ${photoFlow.totalSlots} done — ${photoFlow.totalSlots - photoFlow.nextSlot} to go`}
+              </span>
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                style={{
+                  background: MC.brandDeep,
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                  fontFamily: MC.font,
+                  fontSize: 12.5,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  boxShadow: `0 4px 10px ${MC.brand}44`,
+                }}
+              >
+                <Glyph name="camera" size={13} color="#fff" strokeWidth={2.4} />
+                Take photo {photoFlow.nextSlot + 1}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPhotoFlow(null)}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: MC.mute,
+                  fontFamily: MC.font,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  padding: "6px 4px",
+                }}
+                aria-label="Close photo flow"
+              >
+                <Glyph name="close" size={14} color={MC.mute} />
               </button>
             </>
           )}
