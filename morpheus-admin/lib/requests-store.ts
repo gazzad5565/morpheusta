@@ -176,17 +176,41 @@ export async function approveRequest(
     return { ok: false, error: "Database not configured" };
   }
 
-  // Look up the request to get rep_id + customer_id + customer_name.
-  const { data: row, error: rowErr } = await supabase
+  // Atomic claim. Flips the row from status='pending' → 'approving'
+  // AND reads the rep/customer fields in one round-trip. If the
+  // filter clause misses (the row isn't pending anymore — another
+  // concurrent approve already grabbed it, the manager declined it,
+  // etc.) the UPDATE affects 0 rows and we bail. Without this,
+  // double-tapping Approve fast (or two managers tapping at the
+  // same moment) raced two parallel createShift calls and produced
+  // duplicate shifts — Mariska's "one request → two shifts" bug.
+  // (May 14, Gary.)
+  const { data: claimed, error: claimErr } = await supabase
     .from("requested_shifts")
-    .select("rep_id, customer_id, customer_name")
+    .update({ status: "approving" })
     .eq("id", id)
+    .eq("status", "pending")
+    .select("rep_id, customer_id, customer_name")
     .maybeSingle();
-  if (rowErr) return { ok: false, error: rowErr.message };
-  if (!row) return { ok: false, error: "Request not found" };
+  if (claimErr) return { ok: false, error: claimErr.message };
+  if (!claimed) {
+    return {
+      ok: false,
+      error: "Already being processed (or no longer pending).",
+    };
+  }
 
-  const r = row as { rep_id: string | null; customer_id: string; customer_name: string };
+  const r = claimed as {
+    rep_id: string | null;
+    customer_id: string;
+    customer_name: string;
+  };
   if (!r.rep_id) {
+    // Revert the claim so the manager can fix the request manually.
+    await supabase
+      .from("requested_shifts")
+      .update({ status: "pending" })
+      .eq("id", id);
     return {
       ok: false,
       error: "This request has no rep attached — open Schedule to assign one manually.",
@@ -203,7 +227,15 @@ export async function approveRequest(
     tasks_total: opts?.tasks_total ?? 4,
     distance_label: opts?.distance_label || "",
   });
-  if (!created.ok) return { ok: false, error: created.error };
+  if (!created.ok) {
+    // createShift failed AFTER we claimed the request. Release the
+    // claim so the row is re-approvable on retry.
+    await supabase
+      .from("requested_shifts")
+      .update({ status: "pending" })
+      .eq("id", id);
+    return { ok: false, error: created.error };
+  }
 
   // Delete the request now that the shift exists. logEvent inside
   // deleteRequest will emit a request.scheduled event.

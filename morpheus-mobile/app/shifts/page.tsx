@@ -575,10 +575,13 @@ export default function ShiftsListPage() {
           and gets torn down with the page. Respect for reduced
           motion is wrapped in the media query. */}
       <style>{`
+        /* Amber-tinted pulse ring (May 14) — was brand-cyan to
+           match the previous blue action pill; recoloured to match
+           the new amber action tone so the pulse + fill agree. */
         @keyframes mc-route-pulse-kf {
-          0%   { box-shadow: 0 0 0 0   rgba(36, 173, 217, 0.55); }
-          70%  { box-shadow: 0 0 0 8px rgba(36, 173, 217, 0);    }
-          100% { box-shadow: 0 0 0 0   rgba(36, 173, 217, 0);    }
+          0%   { box-shadow: 0 0 0 0   rgba(232, 165, 47, 0.55); }
+          70%  { box-shadow: 0 0 0 8px rgba(232, 165, 47, 0);    }
+          100% { box-shadow: 0 0 0 0   rgba(232, 165, 47, 0);    }
         }
         @media (prefers-reduced-motion: no-preference) {
           .mc-route-pulse { animation: mc-route-pulse-kf 1.6s ease-out infinite; }
@@ -764,12 +767,20 @@ export default function ShiftsListPage() {
             const titleAttr = action
               ? `Better route available — ~${minutesSaved} min faster. Tap to see.`
               : "Route up to date";
+            // Tone palette (May 14, Gary):
+            //   - Action: amber fill, NOT brand blue. "If you can
+            //     act on it, it mustn't be blue." The new
+            //     route-alert glyph reads as a route shape so the
+            //     icon also literally says "route".
+            //   - Calm: green ringed-check route glyph on okTint.
+            //     "When it's done it's got the tick, but they need
+            //     to know the route is ticked."
             const tone = action
               ? {
-                  bg: MC.brandDeep,
+                  bg: MC.warn,
                   fg: "#fff",
-                  border: MC.brandDeep,
-                  shadow: `0 2px 6px ${MC.brand}55`,
+                  border: MC.warn,
+                  shadow: `0 2px 6px ${MC.warn}55`,
                 }
               : {
                   bg: MC.okTint,
@@ -792,10 +803,10 @@ export default function ShiftsListPage() {
             };
             const iconNode = (
               <Glyph
-                name={action ? "target" : "check-circle"}
+                name={action ? "route-alert" : "route-done"}
                 size={16}
                 color={tone.fg}
-                strokeWidth={2.4}
+                strokeWidth={action ? 2.4 : 2.2}
               />
             );
             if (action) {

@@ -8,7 +8,8 @@ export type GlyphName =
   | "log" | "leave" | "book" | "target"
   | "close" | "mic" | "camera" | "note"
   | "sparkle" | "house" | "face"
-  | "send" | "edit" | "power" | "pause" | "play";
+  | "send" | "edit" | "power" | "pause" | "play"
+  | "route-alert" | "route-done";
 
 interface Props {
   name: GlyphName | string;
@@ -59,6 +60,14 @@ export function Glyph({ name, size = 22, color = "currentColor", strokeWidth = 1
     case "power":    return <svg {...common}><path d="M12 3v8"/><path d="M5.6 8a8 8 0 1 0 12.8 0"/></svg>;
     case "pause":    return <svg {...common}><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>;
     case "play":     return <svg {...common}><path d="M7 5l12 7-12 7V5z"/></svg>;
+    // route-alert — start dot, S-curve, end dot. Reads as
+    // "your route". Used in the action state of the home + /shifts
+    // pill so the icon literally says "route" (May 14, Gary).
+    case "route-alert": return <svg {...common}><circle cx="6" cy="6" r="2.2" fill={c} stroke="none"/><path d="M6 8c0 4 3 5 6 5s6 1 6 5"/><circle cx="18" cy="19" r="2.2" fill={c} stroke="none"/></svg>;
+    // route-done — same route shape but the end dot becomes a
+    // ringed check, so the calm state reads "your route is ticked"
+    // not just "a green circle".
+    case "route-done":  return <svg {...common}><circle cx="6" cy="6" r="2.2" fill={c} stroke="none"/><path d="M6 8c0 4 3 5 6 5s5 0.5 5.5 3.5"/><circle cx="18" cy="18" r="3.6"/><path d="M16.3 18l1.3 1.3 2.4-2.6"/></svg>;
     default:         return null;
   }
 }

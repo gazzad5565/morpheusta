@@ -607,6 +607,10 @@ export default function DashboardPage() {
                     {action ? (
                       // Action state: navigate straight to /route so
                       // the rep can review + adopt the better order.
+                      // Amber tone — NOT the brand blue (May 14,
+                      // Gary: "if you can act upon it, it mustn't
+                      // be blue"). The new route-alert glyph reads
+                      // as "a route" not a generic target.
                       <Link
                         href="/route"
                         aria-label={ariaLabel}
@@ -618,21 +622,22 @@ export default function DashboardPage() {
                           justifyContent: "center",
                           padding: "0 11px",
                           textDecoration: "none",
-                          background: MC.brandDeep,
+                          background: MC.warn,
                         }}
                       >
-                        <Glyph name="target" size={15} color="#fff" strokeWidth={2.4} />
+                        <Glyph name="route-alert" size={16} color="#fff" strokeWidth={2.4} />
                       </Link>
                     ) : (
                       // Calm state: tap opens the celebratory
-                      // "Route optimized" sheet instead of routing
-                      // anywhere. The native <button> needs a
-                      // full reset so it renders identically to
-                      // the <Link> in the action branch above —
-                      // otherwise UA defaults (appearance, font,
-                      // line-height, margin, focus outline) make
-                      // the icon segment a touch wider / off-
-                      // center vs. the View-all half.
+                      // "Route optimized" sheet. route-done glyph
+                      // is a route shape with a small ringed check
+                      // overlaying the end point — Gary's "when
+                      // it's done it's got the tick, but they need
+                      // to know the route is ticked". The native
+                      // <button> needs a full reset so it renders
+                      // identically to the <Link> in the action
+                      // branch above (UA defaults otherwise add
+                      // line-height / margin / font drift).
                       <button
                         type="button"
                         onClick={() => setRouteSheetOpen(true)}
@@ -655,10 +660,10 @@ export default function DashboardPage() {
                         }}
                       >
                         <Glyph
-                          name="check-circle"
-                          size={15}
+                          name="route-done"
+                          size={16}
                           color={MC.ok}
-                          strokeWidth={2.4}
+                          strokeWidth={2.2}
                         />
                       </button>
                     )}
