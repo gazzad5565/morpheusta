@@ -596,7 +596,39 @@ function OverviewTab({
                     lineHeight: 1.45,
                   }}
                 >
-                  {headOffice.address || (
+                  {/* Three-way fallback so a rep-geocoded site (which
+                      has coords + a site name + a synthesised
+                      address line, but no proper street address)
+                      shows something meaningful here instead of the
+                      "no address yet" string. Order of preference:
+                        1. Real street address if set.
+                        2. The site's own `name` if it's been
+                           customised (i.e. not still "Main").
+                        3. Coords-only fallback so reps + managers
+                           can see a pin exists.
+                        4. Final "no address" empty state. */}
+                  {headOffice.address ? (
+                    headOffice.address
+                  ) : headOffice.name && headOffice.name !== "Main" ? (
+                    <span>
+                      {headOffice.name}
+                      <span
+                        style={{
+                          fontWeight: 500,
+                          color: AC.mute,
+                          fontStyle: "italic",
+                          marginLeft: 6,
+                        }}
+                      >
+                        · no street address on file
+                      </span>
+                    </span>
+                  ) : headOffice.latitude != null &&
+                    headOffice.longitude != null ? (
+                    <span style={{ fontWeight: 500, color: AC.mute, fontStyle: "italic" }}>
+                      Pinned location · no street address on file
+                    </span>
+                  ) : (
                     <span style={{ fontWeight: 500, color: AC.mute, fontStyle: "italic" }}>
                       No address yet — open Sites to add one.
                     </span>

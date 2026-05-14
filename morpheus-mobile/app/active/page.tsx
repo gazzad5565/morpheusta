@@ -15,10 +15,7 @@ import { LoadingBar, Spinner } from "@/components/Loading";
 import { CheckingInOverlay } from "@/components/CheckingInOverlay";
 import { startLocationTracking } from "@/lib/location-tracker";
 import { requestGeolocationOnce } from "@/lib/route-planner";
-import {
-  setCustomerSiteCoords,
-  geocodeAddress,
-} from "@/lib/customers-store";
+import { setCustomerSiteCoords } from "@/lib/customers-store";
 import {
   uploadShiftTaskPhoto,
   listShiftTaskPhotos,
@@ -1300,10 +1297,27 @@ export default function ActiveShiftPage() {
             siteId={shiftData.siteId}
             customerId={shiftData.customerId}
             customerName={shiftData.name}
-            siteAddress={shiftData.siteAddress}
-            onResolved={(lat, lng) =>
-              setShiftData((d) => (d ? { ...d, siteLat: lat, siteLng: lng } : d))
-            }
+            // After a successful save the rep's site row has new
+            // {latitude, longitude, name, address}. Refetch the
+            // active shift from the DB so the dashboard's address
+            // tile + map pin both update in one go — no manual
+            // state stitching, no chance of fields drifting out
+            // of sync.
+            onResolved={async () => {
+              const fresh = await getMyActiveShift();
+              if (!fresh) return;
+              setShiftData((d) =>
+                d
+                  ? {
+                      ...d,
+                      siteName: fresh.siteName,
+                      siteAddress: fresh.siteAddress,
+                      siteLat: fresh.siteLat,
+                      siteLng: fresh.siteLng,
+                    }
+                  : d
+              );
+            }}
           />
         </div>
       )}
@@ -2441,48 +2455,61 @@ function ShiftNotesCard({
   );
 }
 
-// ─── Geocode-task card (Feature B — May 13) ────────────────────────
+// ─── Geocode-task card (Feature B — May 13; reworked May 14) ──────
 //
 // Synthetic task that surfaces at the top of /active when the
-// shift's customer_sites row is missing lat/lng. The rep can
-// resolve it two ways:
+// shift's customer_sites row is missing lat/lng. The rep enters a
+// one-line site name (REQUIRED — "First aisle", "Loading bay",
+// "Main entrance" etc) then taps "Pin this location" to drop a
+// GPS pin. We force the name because otherwise the rep-created
+// site stays labelled "Main" / "Head office" with no human-
+// readable identifier anywhere downstream.
 //
-//   - "Use my current location" — calls requestGeolocationOnce
-//     and writes those coords directly. Most accurate when the
-//     rep is actually at the site (which they should be, since
-//     they're on /active).
-//   - "Geocode address" — POSTs the typed site address to the
-//     local /api/geocode proxy (Nominatim). Falls back to the GPS
-//     path if Nominatim returns no match.
+// May 14 reworked from two buttons (GPS + typed-address geocode)
+// to one button (GPS only). The typed-address path was confusing
+// to reps in the field; if the manager wants typed-address
+// geocoding they have the full admin form. Mobile is GPS-only.
 //
-// Either path writes the coords to customer_sites + the parent
-// customers row (if it was still null), and logs a
-// customer.geocoded event for the admin Live Ops feed. The
-// onResolved callback bubbles the new coords up so the card
-// disappears immediately without a refetch.
+// On success: site row gets {latitude, longitude, name, address}
+// updated (address is synthesised from the name so the dashboard
+// stops saying "no address"), parent customer row gets the same
+// (if it was missing coords), and the audit log gets a
+// customer.geocoded event. Then the parent component refetches
+// the active shift so the dashboard rerenders with the new
+// location label.
 function GeocodeTaskCard({
   siteId,
   customerId,
   customerName,
-  siteAddress,
   onResolved,
 }: {
   siteId: string;
   customerId: string;
   customerName: string;
-  siteAddress: string | null;
-  onResolved: (lat: number, lng: number) => void;
+  /** Called after a successful save. Parent (/active) refetches
+   *  the shift from the DB so siteName + siteAddress refresh
+   *  on the dashboard — no manual state stitching here. */
+  onResolved: () => void;
 }) {
-  const [busy, setBusy] = useState<"gps" | "address" | null>(null);
+  const [name, setName] = useState<string>("");
+  const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const trimmed = name.trim();
+  const canSubmit = !busy && trimmed.length > 0;
 
   const runGps = async () => {
+    if (!trimmed) {
+      setError("Add a name for this location first.");
+      return;
+    }
     setError(null);
-    setBusy("gps");
+    setBusy(true);
     const pos = await requestGeolocationOnce();
     if (!pos) {
-      setBusy(null);
-      setError("Couldn't read your location. Allow location for Morpheus in browser settings.");
+      setBusy(false);
+      setError(
+        "Couldn't read your location. Allow location for Morpheus in browser settings, then try again."
+      );
       return;
     }
     const r = await setCustomerSiteCoords({
@@ -2492,42 +2519,14 @@ function GeocodeTaskCard({
       longitude: pos.lng,
       source: "gps",
       resolvedDescription: "Rep's device GPS",
+      name: trimmed,
     });
-    setBusy(null);
+    setBusy(false);
     if (!r.ok) {
       setError(r.error || "Couldn't save — try again.");
       return;
     }
-    onResolved(pos.lat, pos.lng);
-  };
-
-  const runAddress = async () => {
-    if (!siteAddress) {
-      setError("No address on file to geocode. Use GPS instead.");
-      return;
-    }
-    setError(null);
-    setBusy("address");
-    const hit = await geocodeAddress(siteAddress);
-    if (!hit) {
-      setBusy(null);
-      setError("Couldn't find that address. Try GPS, or ask your manager to clean up the address.");
-      return;
-    }
-    const r = await setCustomerSiteCoords({
-      siteId,
-      customerId,
-      latitude: hit.latitude,
-      longitude: hit.longitude,
-      source: "address",
-      resolvedDescription: hit.displayName,
-    });
-    setBusy(null);
-    if (!r.ok) {
-      setError(r.error || "Couldn't save — try again.");
-      return;
-    }
-    onResolved(hit.latitude, hit.longitude);
+    onResolved();
   };
 
   return (
@@ -2558,7 +2557,7 @@ function GeocodeTaskCard({
             letterSpacing: -0.1,
           }}
         >
-          Set this customer&apos;s location
+          Pin this location
         </div>
       </div>
       <div
@@ -2567,83 +2566,82 @@ function GeocodeTaskCard({
           fontSize: 12.5,
           color: "#7A560A",
           lineHeight: 1.5,
-          marginBottom: 10,
+          marginBottom: 12,
         }}
       >
-        {customerName} doesn&apos;t have a pin yet. Setting it now means
-        your next check-in here works geofenced + manager can see it
-        on the map.
+        {customerName} doesn&apos;t have a pin yet. Give this location a
+        name + tap below — your next check-in here will be geofenced
+        + the manager will see it on the map.
       </div>
-      {siteAddress && (
-        <div
-          style={{
-            fontFamily: MC.font,
-            fontSize: 11.5,
-            color: MC.mute,
-            marginBottom: 12,
-            background: "rgba(255,255,255,.6)",
-            padding: "6px 10px",
-            borderRadius: 8,
-            border: `1px solid ${MC.warn}22`,
-          }}
-        >
-          Address on file: {siteAddress}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button
-          type="button"
-          onClick={runGps}
-          disabled={!!busy}
-          style={{
-            flex: "1 1 auto",
-            minWidth: 0,
-            padding: "10px 12px",
-            borderRadius: 10,
-            background: MC.brandDeep,
-            color: "#fff",
-            border: "none",
-            cursor: busy ? "wait" : "pointer",
-            fontFamily: MC.font,
-            fontSize: 13,
-            fontWeight: 700,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 6,
-            opacity: busy === "gps" ? 0.7 : 1,
-          }}
-        >
-          <Glyph name="target" size={14} color="#fff" strokeWidth={2.4} />
-          {busy === "gps" ? "Pinning…" : "Use my current location"}
-        </button>
-        <button
-          type="button"
-          onClick={runAddress}
-          disabled={!!busy || !siteAddress}
-          style={{
-            flex: "1 1 auto",
-            minWidth: 0,
-            padding: "10px 12px",
-            borderRadius: 10,
-            background: "#fff",
-            color: MC.brandDeep,
-            border: `1px solid ${MC.brand}55`,
-            cursor: busy || !siteAddress ? "not-allowed" : "pointer",
-            fontFamily: MC.font,
-            fontSize: 13,
-            fontWeight: 700,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 6,
-            opacity: busy === "address" || !siteAddress ? 0.7 : 1,
-          }}
-        >
-          <Glyph name="pin" size={14} color={MC.brandDeep} strokeWidth={2.4} />
-          {busy === "address" ? "Looking up…" : "Geocode address"}
-        </button>
-      </div>
+      {/* Required site name — disables the button until non-empty.
+          Examples nudge the rep toward useful labels rather than
+          generic "Main"/"Site 1" strings. */}
+      <label
+        htmlFor="geocode-site-name"
+        style={{
+          display: "block",
+          fontFamily: MC.font,
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+          color: "#7A560A",
+          marginBottom: 6,
+        }}
+      >
+        Site name <span style={{ color: "#9c1a3c" }}>*</span>
+      </label>
+      <input
+        id="geocode-site-name"
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        disabled={busy}
+        maxLength={60}
+        placeholder="e.g. Main entrance, Cosmetics aisle, Loading bay"
+        autoCapitalize="words"
+        autoCorrect="off"
+        style={{
+          width: "100%",
+          padding: "10px 12px",
+          borderRadius: 10,
+          border: `1px solid ${MC.warn}55`,
+          background: "#fff",
+          fontFamily: MC.font,
+          fontSize: 13.5,
+          color: MC.ink,
+          outline: "none",
+          boxSizing: "border-box",
+          marginBottom: 12,
+        }}
+      />
+      <button
+        type="button"
+        onClick={runGps}
+        disabled={!canSubmit}
+        style={{
+          width: "100%",
+          padding: "12px 14px",
+          borderRadius: 10,
+          background: canSubmit ? MC.brandDeep : `${MC.brandDeep}99`,
+          color: "#fff",
+          border: "none",
+          cursor: busy ? "wait" : canSubmit ? "pointer" : "not-allowed",
+          fontFamily: MC.font,
+          fontSize: 13.5,
+          fontWeight: 700,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          letterSpacing: -0.1,
+          boxShadow: canSubmit ? `0 6px 18px ${MC.brand}55` : "none",
+          opacity: busy ? 0.85 : 1,
+        }}
+      >
+        <Glyph name="target" size={15} color="#fff" strokeWidth={2.4} />
+        {busy ? "Pinning…" : "Geocode where I am"}
+      </button>
       {error && (
         <div
           style={{

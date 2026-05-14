@@ -43,6 +43,10 @@ export default function NotifyPage() {
   // Scheduling — empty string in the datetime-local input means "send
   // now". Stored as a string until submit, parsed to ISO there.
   const [scheduledAtLocal, setScheduledAtLocal] = useState("");
+  // Whether the manager has tapped "Schedule for later" to reveal the
+  // time picker. The picker stays hidden by default so the "Send now"
+  // path is one tap, no decision fatigue.
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -104,9 +108,13 @@ export default function NotifyPage() {
     return `${pickedIds.size} picked`;
   }, [audienceKind, allProfiles, pickedIds]);
 
+  // Subject is the only required text field — message body is
+  // optional now (May 14, Gary's feedback). Managers often want to
+  // send a one-line "Pay slips are out" with no further detail and
+  // the previous required-body rule was forcing them to repeat the
+  // subject in the body just to clear validation.
   const canSend =
     subject.trim().length > 0 &&
-    body.trim().length > 0 &&
     (deliverPush || deliverInApp) &&
     (audienceKind !== "specific" || pickedIds.size > 0) &&
     !busy;
@@ -160,6 +168,7 @@ export default function NotifyPage() {
     setSubject("");
     setBody("");
     setScheduledAtLocal("");
+    setScheduleOpen(false);
     setPickedIds(new Set());
   };
 
@@ -391,13 +400,15 @@ export default function NotifyPage() {
             />
           </Field>
 
-          {/* Body */}
-          <Field label="Message" required>
+          {/* Body — optional. Many messages are one-line ("Pay slips
+              are out"). When the manager wants more detail this is
+              where it goes. */}
+          <Field label="Message" hint="Optional. Leave blank to send just the subject.">
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={5}
-              placeholder="What do you want to say?"
+              placeholder="Add detail here (optional)"
               style={{
                 ...inputStyle,
                 resize: "vertical",
@@ -430,37 +441,27 @@ export default function NotifyPage() {
             </div>
           </Field>
 
-          {/* Scheduling */}
-          <Field
-            label="When"
-            hint="Leave blank to send immediately. Otherwise pick a future time and a cron sweep will dispatch it."
-          >
-            <input
-              type="datetime-local"
-              value={scheduledAtLocal}
-              onChange={(e) => setScheduledAtLocal(e.target.value)}
-              style={inputStyle}
-            />
-            {scheduledAtLocal && (
-              <button
-                type="button"
-                onClick={() => setScheduledAtLocal("")}
-                style={{
-                  marginTop: 6,
-                  background: "transparent",
-                  border: "none",
-                  color: AC.brandDeep,
-                  fontFamily: AC.font,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  padding: 0,
-                }}
-              >
-                Clear (send now)
-              </button>
-            )}
-          </Field>
+          {/* Scheduling — only rendered when the manager taps the
+              Schedule button below. Default flow is "Send now"; the
+              picker is a deliberate detour, not always visible.
+              Gary's feedback (May 14) was that reps were getting
+              confused by the always-visible "When" field — was the
+              field optional? required? what did blank mean? Hiding
+              it by default until they explicitly choose to schedule
+              removes that ambiguity. */}
+          {scheduleOpen && (
+            <Field
+              label="Scheduled time"
+              hint="Pick a future time. A cron sweep dispatches the message at that moment — keep the app, your laptop, nothing needs to be open."
+            >
+              <input
+                type="datetime-local"
+                value={scheduledAtLocal}
+                onChange={(e) => setScheduledAtLocal(e.target.value)}
+                style={inputStyle}
+              />
+            </Field>
+          )}
 
           {error && (
             <div
@@ -499,19 +500,72 @@ export default function NotifyPage() {
             </div>
           )}
 
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Btn
-              kind="primary"
-              icon="send"
-              onClick={onSend}
-              disabled={!canSend}
-            >
-              {busy
-                ? "Sending…"
-                : scheduledAtLocal
-                ? "Schedule"
-                : "Send now"}
-            </Btn>
+          {/* Send / schedule action row. Two explicit buttons by
+              default ("Send now" + "Schedule for later"); tapping
+              Schedule opens the time picker above and morphs this
+              row into [Confirm schedule] + a Cancel link. Gary's
+              feedback was that one flippy button + an always-
+              visible time field made the schedule path unclear. */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            {scheduleOpen ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScheduleOpen(false);
+                    setScheduledAtLocal("");
+                  }}
+                  disabled={busy}
+                  style={{
+                    background: "transparent",
+                    border: `1px solid ${AC.line}`,
+                    color: AC.ink,
+                    fontFamily: AC.font,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    padding: "8px 14px",
+                    borderRadius: 8,
+                    cursor: busy ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Cancel schedule
+                </button>
+                <Btn
+                  kind="primary"
+                  icon="clock"
+                  onClick={onSend}
+                  disabled={!canSend || !scheduledAtLocal.trim()}
+                >
+                  {busy ? "Scheduling…" : "Confirm schedule"}
+                </Btn>
+              </>
+            ) : (
+              <>
+                <Btn
+                  kind="secondary"
+                  icon="clock"
+                  onClick={() => setScheduleOpen(true)}
+                  disabled={busy}
+                >
+                  Schedule for later
+                </Btn>
+                <Btn
+                  kind="primary"
+                  icon="send"
+                  onClick={() => {
+                    // Make sure no stale scheduled time leaks
+                    // through when the manager skipped the
+                    // schedule path — Send now should always
+                    // ignore whatever was in the picker.
+                    if (scheduledAtLocal) setScheduledAtLocal("");
+                    onSend();
+                  }}
+                  disabled={!canSend}
+                >
+                  {busy ? "Sending…" : "Send now"}
+                </Btn>
+              </>
+            )}
           </div>
         </Card>
 

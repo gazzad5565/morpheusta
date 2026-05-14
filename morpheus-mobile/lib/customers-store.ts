@@ -351,27 +351,59 @@ export async function setCustomerSiteCoords(args: {
   /** Friendly text shown in the audit event. The display name
    *  from the geocoder, or "Rep's GPS" for the GPS path. */
   resolvedDescription: string;
+  /** Optional site name supplied by the rep in the /active geocode
+   *  card. When present we update `customer_sites.name` AND, if
+   *  the site currently has no `address`, synthesise one so the
+   *  admin /customers overview + mobile /active dashboard both
+   *  show a meaningful location label instead of "no address yet".
+   *  May 14 — Gary asked us to force a site name on rep-geocoded
+   *  sites because otherwise they end up as "Main" with a pin and
+   *  no human-readable label anywhere. */
+  name?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
   const { siteId, customerId, latitude, longitude, source, resolvedDescription } = args;
+  const cleanName = (args.name || "").trim();
 
   // 1. Update the customer_sites row — this is the one mobile uses
-  //    for the geofence on check-in/out.
+  //    for the geofence on check-in/out. When a name is supplied
+  //    we update the name too. We ALSO populate `address` (if null)
+  //    with a synthesised label so downstream UIs that gate on
+  //    "is there an address?" stop saying "no address yet" once
+  //    the rep has dropped a pin.
+  const syntheticAddress = cleanName
+    ? `${cleanName} · Pinned ${source === "gps" ? "via rep GPS" : "via address geocode"}`
+    : `Pinned location · ${source === "gps" ? "rep GPS" : "address geocode"}`;
+  const siteUpdate: Record<string, unknown> = { latitude, longitude };
+  if (cleanName) siteUpdate.name = cleanName;
+  // Pull the existing site row first so we only overwrite address /
+  // name when they're empty — never stomp a manager's curated value.
+  const { data: existing } = await supabase
+    .from("customer_sites")
+    .select("address")
+    .eq("id", siteId)
+    .maybeSingle();
+  const hasExistingAddress =
+    !!(existing as { address?: string | null } | null)?.address;
+  if (!hasExistingAddress) siteUpdate.address = syntheticAddress;
   const { error: siteErr } = await supabase
     .from("customer_sites")
-    .update({ latitude, longitude })
+    .update(siteUpdate)
     .eq("id", siteId);
   if (siteErr) return { ok: false, error: siteErr.message };
 
   // 2. ALSO update the parent customers row if it's missing coords.
   //    Admin's customers page shows lat/lng on the customer overview;
   //    keeping them in sync avoids the awkward "site has coords,
-  //    parent customer doesn't" state.
+  //    parent customer doesn't" state. Same address-fallback rule
+  //    so the customer-level "no address" tile fills in too.
+  const customerUpdate: Record<string, unknown> = { latitude, longitude };
+  if (!hasExistingAddress) customerUpdate.address = syntheticAddress;
   await supabase
     .from("customers")
-    .update({ latitude, longitude })
+    .update(customerUpdate)
     .eq("id", customerId)
     .is("latitude", null);
 
@@ -385,6 +417,7 @@ export async function setCustomerSiteCoords(args: {
       longitude,
       source,
       resolved: resolvedDescription,
+      site_name: cleanName || null,
     },
   });
 
