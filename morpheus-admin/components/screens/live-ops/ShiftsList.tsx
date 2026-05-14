@@ -70,13 +70,19 @@ interface RepLite {
   initials: string;
 }
 
+// "Unassigned" used to live between "On break" and "Requested" — Gary
+// dropped it on May 14 because manager workflow always pairs reps with
+// shifts at creation time; an unassigned shift is a misconfiguration,
+// not a normal state worth a top-level filter. The STATE_MAP entry +
+// the rep_id=null → "unassigned" rendering stay so any legacy null-rep
+// row still renders sensibly inside the "All" tab; we just don't
+// surface a dedicated filter for it.
 const TABS = [
   "All",
   "Needs action",
   "In progress",
   "Travelling",
   "On break",
-  "Unassigned",
   "Requested",
 ] as const;
 
@@ -199,8 +205,6 @@ export function ShiftsList() {
 
     if (active === "All") return [...reqRows, ...shiftRows];
     if (active === "Requested") return reqRows;
-    if (active === "Unassigned")
-      return shiftRows.filter((r) => r.kind === "shift" && !r.shift.rep_id);
     if (active === "Needs action") {
       // Needs action items pulled from the shared NeedsActionContext
       // — all pending requests AND all open attention shifts,
@@ -247,7 +251,6 @@ export function ShiftsList() {
       (s) => effectiveState(s) === "travelling"
     ).length;
     const onBreak = rows.filter((s) => effectiveState(s) === "on-break").length;
-    const unassigned = rows.filter((s) => !s.rep_id).length;
     // Needs Action count = pending requests + open attention shifts
     // from the SHARED NeedsActionContext — same source the Sidebar
     // badge and the LiveFeedPanel "Needs action" tab pill read from.
@@ -264,7 +267,6 @@ export function ShiftsList() {
       "In progress": inProgress,
       Travelling: travelling,
       "On break": onBreak,
-      Unassigned: unassigned,
       Requested: dedupedRequests.length,
     };
   }, [rows, requests, contextAttentionShifts]);
