@@ -16,7 +16,7 @@ export const NAV_ITEMS = [
   // Workforce/Reps — kept the route as /reps (matches the codebase
   // throughout) but the label is the broader "Workforce" since the
   // section now covers reps + managers + role/auth admin too.
-  { id: "reps", label: "Workforce", glyph: "reps", href: "/reps" },
+  { id: "reps", label: "Workforce/Reps", glyph: "reps", href: "/reps" },
   { id: "customers", label: "Customers", glyph: "customer", href: "/customers" },
   { id: "schedule", label: "Schedule / Calendar", glyph: "cal", href: "/schedule" },
   { id: "tasks", label: "Tasks", glyph: "tasks", href: "/tasks" },

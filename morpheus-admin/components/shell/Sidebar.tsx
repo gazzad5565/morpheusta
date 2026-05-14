@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -258,45 +259,18 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Morpheus Ops branding strip.
-          May 14 — replaced the legacy module switcher (Time &
-          Attendance / Sales Orders / Auditing) now that Morpheus is
-          a single unified platform. Sales Orders + Advanced Auditing
-          live inside /tasks as locked Pro upgrades; no separate
-          top-level modules. The brand line below is small + muted on
-          purpose — the org name above carries customer identity,
-          this row reminds the user which product they're inside. */}
+      {/* Tagline strip. May 14 — replaced the legacy module switcher
+          (Time & Attendance / Sales Orders / Auditing). "Morpheus
+          Ops" branding is already in the footer pill at the bottom
+          of the sidebar, so we don't repeat it here — just the
+          tagline, which reminds the user what the platform does
+          without competing with the org name above. */}
       <div style={{ padding: "0 14px 12px", borderBottom: `1px solid #1B2027` }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 7,
-            fontFamily: AC.font,
-            fontSize: 10.5,
-            fontWeight: 700,
-            color: "#8A93A1",
-            letterSpacing: 0.6,
-            textTransform: "uppercase",
-          }}
-        >
-          <span
-            style={{
-              display: "inline-block",
-              width: 5,
-              height: 5,
-              borderRadius: 999,
-              background: AC.brand,
-            }}
-          />
-          Morpheus Ops
-        </div>
         <div
           style={{
             fontFamily: AC.font,
             fontSize: 11,
-            color: "#5C6571",
-            marginTop: 4,
+            color: "#7A8492",
             letterSpacing: -0.05,
             lineHeight: 1.35,
           }}
@@ -323,20 +297,68 @@ export function Sidebar() {
             item.id === "ops" && needsActionCount > 0
               ? "/#live-feed-needs-action"
               : item.href;
+          const parentActive = isActive(item.href);
           return (
-            <NavItem
-              key={item.id}
-              href={href}
-              label={item.label}
-              glyph={item.glyph as GlyphName}
-              active={isActive(item.href)}
-              comingSoon={
-                "comingSoon" in item
-                  ? (item as { comingSoon?: boolean }).comingSoon ?? false
-                  : false
-              }
-              badgeCount={item.id === "ops" ? needsActionCount : 0}
-            />
+            <React.Fragment key={item.id}>
+              <NavItem
+                href={href}
+                label={item.label}
+                glyph={item.glyph as GlyphName}
+                active={parentActive}
+                comingSoon={
+                  "comingSoon" in item
+                    ? (item as { comingSoon?: boolean }).comingSoon ?? false
+                    : false
+                }
+                badgeCount={item.id === "ops" ? needsActionCount : 0}
+              />
+              {/* Tasks sub-nav. Expands inline when the user is on
+                  any /tasks* route. Three options:
+                    - Tasks (Core, active when on /tasks)
+                    - Advanced Auditing (Pro — locked)
+                    - Sales Orders (Pro — locked)
+                  Locked items aren't separate top-level nav per
+                  product direction — they live as upgradeable
+                  capabilities inside Tasks. */}
+              {item.id === "tasks" && parentActive && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 1,
+                    marginLeft: 16,
+                    paddingLeft: 12,
+                    borderLeft: `1px solid #232932`,
+                    marginTop: 2,
+                    marginBottom: 4,
+                  }}
+                >
+                  <SubNavItem
+                    label="Tasks"
+                    href="/tasks"
+                    active={pathname === "/tasks"}
+                  />
+                  <SubNavItem
+                    label="Advanced Auditing"
+                    locked
+                    onLockedClick={() =>
+                      alert(
+                        "Advanced Auditing is part of Morpheus Ops Pro — coming soon.\n\nTalk to us if you'd like early access."
+                      )
+                    }
+                  />
+                  <SubNavItem
+                    label="Sales Orders"
+                    locked
+                    onLockedClick={() =>
+                      alert(
+                        "Sales Orders is part of Morpheus Ops Pro — coming soon.\n\nTalk to us if you'd like early access."
+                      )
+                    }
+                  />
+                </div>
+              )}
+            </React.Fragment>
           );
         })}
       </div>
@@ -618,6 +640,93 @@ function NavItem({
           {badgeCount}
         </span>
       )}
+    </Link>
+  );
+}
+
+/**
+ * Sub-row under a parent nav item. Two visual modes:
+ *   - Linkable (`href` set) → renders as a small <Link>. Goes muted
+ *     unless `active`, where it brightens.
+ *   - Locked (`locked` true) → renders as a button with a lock glyph
+ *     and a muted tone. onClick opens a placeholder modal until real
+ *     Pro billing exists.
+ *
+ * Indentation comes from the parent wrapper (marginLeft + borderLeft);
+ * the row itself sits flush so the active highlight reads cleanly.
+ */
+function SubNavItem({
+  label,
+  href,
+  active = false,
+  locked = false,
+  onLockedClick,
+}: {
+  label: string;
+  href?: string;
+  active?: boolean;
+  locked?: boolean;
+  onLockedClick?: () => void;
+}) {
+  const baseStyle: React.CSSProperties = {
+    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    gap: 9,
+    padding: "6px 10px",
+    borderRadius: 6,
+    textDecoration: "none",
+    fontFamily: AC.font,
+    fontSize: 12.5,
+    letterSpacing: -0.05,
+    textAlign: "left",
+    border: "none",
+    background: active ? "#1B2027" : "transparent",
+    color: active ? "#fff" : locked ? "#5C6571" : AC.sideMute,
+    fontWeight: active ? 600 : 500,
+    cursor: locked ? "pointer" : "pointer",
+  };
+  const body = (
+    <>
+      <span style={{ flex: 1 }}>{label}</span>
+      {locked && (
+        <>
+          <span
+            style={{
+              fontFamily: AC.font,
+              fontSize: 9,
+              fontWeight: 700,
+              color: AC.brand,
+              letterSpacing: 0.6,
+              textTransform: "uppercase",
+              padding: "1px 5px",
+              background: `${AC.brand}22`,
+              borderRadius: 3,
+            }}
+          >
+            Pro
+          </span>
+          <AGlyph name="lock" size={12} color="#5C6571" />
+        </>
+      )}
+    </>
+  );
+
+  if (locked) {
+    return (
+      <button
+        type="button"
+        onClick={onLockedClick}
+        title={`${label} — Morpheus Ops Pro (coming soon)`}
+        style={baseStyle}
+      >
+        {body}
+      </button>
+    );
+  }
+  return (
+    <Link href={href ?? "#"} style={baseStyle}>
+      {body}
     </Link>
   );
 }
