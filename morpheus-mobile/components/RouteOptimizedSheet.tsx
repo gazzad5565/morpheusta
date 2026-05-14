@@ -220,6 +220,24 @@ export function RouteOptimizedSheet({
           >
             You&apos;re already on the best path. Nothing to do.
           </div>
+          {/* Reassurance line so the rep knows the calm state is
+              not "the app stopped checking" — it's "the watcher
+              checked and found nothing to act on". Tied to the
+              hourly route-improvement-watcher tick. */}
+          <div
+            style={{
+              fontFamily: MC.font,
+              fontSize: 12,
+              color: MC.hint,
+              marginTop: 8,
+              lineHeight: 1.45,
+              animation:
+                "mc-rop-text-rise 300ms ease-out 320ms both",
+            }}
+          >
+            Auto-checked every hour. If a better route opens up,
+            we&apos;ll let you know right here.
+          </div>
 
           <button
             type="button"
