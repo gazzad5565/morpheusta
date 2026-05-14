@@ -744,11 +744,25 @@ export default function RoutePage() {
           const chronoSame =
             comparison.chronologicalOrder.join("|") === currentOrder.join("|");
           const savedExists = !!savedOrder && savedOrder.length > 0;
-          // Once an order is saved, no button. Ever.
-          if (savedExists) return null;
-          // No saved order yet AND current view == chronological →
-          // nothing to save.
-          if (chronoSame) return null;
+          const savedMatchesCurrent =
+            savedExists &&
+            (savedOrder?.length ?? 0) === currentOrder.length &&
+            (savedOrder ?? []).join("|") === currentOrder.join("|");
+          // Three button states (May 14, Gary — "the page is very
+          // confusing once an order's already been saved"):
+          //   1. savedExists + matches current view → no button
+          //      (saved IS the displayed order; nothing to do)
+          //   2. savedExists + a better route is shown      →
+          //      "Apply this new route" — same handler, clearer
+          //      label so the rep knows exactly what to tap to
+          //      adopt the watcher's improvement.
+          //   3. !savedExists + chronoSame → no button (nothing
+          //      to save, list is already chronological)
+          //   4. !savedExists + non-chrono optimized → "Save
+          //      this order" (the first-save flow).
+          if (savedMatchesCurrent) return null;
+          if (!savedExists && chronoSame) return null;
+          const isApplyNew = savedExists; // i.e. case 2
           return (
             <div
               style={{
@@ -786,26 +800,26 @@ export default function RoutePage() {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 6,
-                  padding: "7px 12px",
+                  padding: "9px 16px",
                   borderRadius: 999,
                   background: MC.brand,
                   color: "#fff",
                   border: "none",
                   fontFamily: MC.font,
-                  fontSize: 12.5,
+                  fontSize: 13.5,
                   fontWeight: 700,
                   letterSpacing: -0.1,
                   cursor: "pointer",
-                  boxShadow: `0 2px 8px ${MC.brand}44`,
+                  boxShadow: `0 4px 14px ${MC.brand}55`,
                 }}
               >
                 <Glyph
                   name="check"
-                  size={13}
+                  size={14}
                   color="#fff"
                   strokeWidth={2.4}
                 />
-                Save this order
+                {isApplyNew ? "Apply this new route" : "Save this order"}
               </button>
               <span
                 style={{
@@ -815,8 +829,9 @@ export default function RoutePage() {
                   lineHeight: 1.35,
                 }}
               >
-                Reorders your shifts list to match — doesn&apos;t
-                change customer scheduled times.
+                {isApplyNew
+                  ? "Replaces your saved order with this faster one. Your shifts list reorders to match."
+                  : "Reorders your shifts list to match — doesn't change customer scheduled times."}
               </span>
             </div>
           );
@@ -943,7 +958,7 @@ export default function RoutePage() {
               ? savedMatchesCurrentBanner
                 ? "This is the order on your shifts list. Re-check anytime to see if traffic has shifted things."
                 : savedOrder
-                ? "Your saved order is still active. Re-check anytime — traffic may have shifted the picture."
+                ? "Tap 'Apply this new route' below to switch — your shifts list reorders to match."
                 : "Tap 'Save this order' below to lock it in."
               : "Flip 'Optimize stop order' above to use the shorter route.";
             // Icon: ✓ when applied, sparkle when there's something
