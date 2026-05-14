@@ -202,6 +202,62 @@ export default function ActiveShiftPage() {
     return Date.now() - 5 * 60 * 1000;
   }, [shiftData?.checkInAt]);
 
+  // Pause-aware timer state (May 14). When the shift is on-break the
+  // displayed elapsed time should FREEZE at the moment of pause and
+  // resume from where it stopped — the ticking clock kept counting
+  // through the pause before this change. Two localStorage-backed
+  // numbers per shift:
+  //   - pause_since: epoch ms when the CURRENT pause started, or null
+  //   - pause_offset: total ms accumulated from completed prior pauses
+  // Display elapsed = effectiveNow - shiftStartTs - pause_offset
+  //   where effectiveNow = pause_since (frozen)  while paused
+  //                      = Date.now()            otherwise
+  const pauseSinceKey = shiftData?.shiftId
+    ? `morpheus.shift_pause_since.${shiftData.shiftId}`
+    : null;
+  const pauseOffsetKey = shiftData?.shiftId
+    ? `morpheus.shift_pause_offset.${shiftData.shiftId}`
+    : null;
+  const [pauseSince, setPauseSince] = useState<number | null>(() => {
+    if (typeof window === "undefined" || !shiftData?.shiftId) return null;
+    const raw = window.localStorage.getItem(
+      `morpheus.shift_pause_since.${shiftData.shiftId}`
+    );
+    return raw ? Number(raw) || null : null;
+  });
+  const [pauseOffsetMs, setPauseOffsetMs] = useState<number>(() => {
+    if (typeof window === "undefined" || !shiftData?.shiftId) return 0;
+    const raw = window.localStorage.getItem(
+      `morpheus.shift_pause_offset.${shiftData.shiftId}`
+    );
+    return raw ? Number(raw) || 0 : 0;
+  });
+  // Sync state ↔ localStorage whenever either value changes. Two
+  // tiny writes per pause/resume, no measurable overhead.
+  useEffect(() => {
+    if (typeof window === "undefined" || !pauseSinceKey) return;
+    if (pauseSince == null) window.localStorage.removeItem(pauseSinceKey);
+    else window.localStorage.setItem(pauseSinceKey, String(pauseSince));
+  }, [pauseSince, pauseSinceKey]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !pauseOffsetKey) return;
+    window.localStorage.setItem(pauseOffsetKey, String(pauseOffsetMs));
+  }, [pauseOffsetMs, pauseOffsetKey]);
+  // When the DB state flips, fold the current pause into pauseOffsetMs
+  // (on resume) or start a new pause window (on pause). Watches the
+  // shift's state field — fires on optimistic flips AND on realtime
+  // refetch echoes.
+  useEffect(() => {
+    if (!shiftData) return;
+    const isPaused = shiftData.state === "on-break";
+    if (isPaused && pauseSince == null) {
+      setPauseSince(Date.now());
+    } else if (!isPaused && pauseSince != null) {
+      setPauseOffsetMs((prev) => prev + (Date.now() - pauseSince));
+      setPauseSince(null);
+    }
+  }, [shiftData?.state, shiftData, pauseSince]);
+
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [activeTaskStartedAt, setActiveTaskStartedAt] = useState<number | null>(null);
   const [completedTaskIds, setCompletedTaskIds] = useState<string[]>([]);
@@ -358,7 +414,14 @@ export default function ActiveShiftPage() {
     return () => tracker.stop();
   }, []);
 
-  const elapsed = Math.max(0, Math.floor((now - shiftStartTs) / 1000));
+  // Pause-aware elapsed (May 14). While the shift is paused we freeze
+  // at the pause moment; once resumed we keep counting from where we
+  // left off by subtracting the accumulated pause duration.
+  const effectiveNow = pauseSince != null ? pauseSince : now;
+  const elapsed = Math.max(
+    0,
+    Math.floor((effectiveNow - shiftStartTs - pauseOffsetMs) / 1000)
+  );
   const hh = String(Math.floor(elapsed / 3600)).padStart(2, "0");
   const mm = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");

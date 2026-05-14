@@ -360,8 +360,16 @@ export default function ShiftsListPage() {
       // savedOrder-applied pre-sort survives the state bucket sort.
       const saved = readShiftOrder();
       const preSorted = applySavedOrder(m, saved);
+      // Sort buckets: live work first (in-progress + on-break +
+      // travelling all sort to the top so a paused shift is just as
+      // visible as an active one — Gary's report May 14), then
+      // pre-check-in states (scheduled, late), then done at the
+      // bottom. Stable sort preserves the saved-order tiebreaker
+      // within each bucket.
       const order: Record<string, number> = {
         "in-progress": 0,
+        "on-break": 0,
+        travelling: 0,
         scheduled: 1,
         late: 2,
         complete: 3,
@@ -1358,8 +1366,21 @@ function ShiftRow({
   // countdown pill already conveys "this is live" (tone + copy), and
   // stacking "IN PROGRESS" next to "ENDS 1H 25M" made the row look
   // crowded for no extra information.
+  // State badge variants the row surfaces near the customer name.
+  //   - Paused (on-break) → warn-tint chip so the rep can spot the
+  //     row at a glance from a long day's list. Same tone as the
+  //     "Shift paused" banner on /active so the two screens agree
+  //     visually. (May 14, Gary.)
+  //   - Complete → calm okTint chip; the only "completed" signal
+  //     since there's no countdown for finished shifts.
+  // Other live states (in-progress / travelling / late) don't get
+  // a badge — their countdown pill already conveys "this is live"
+  // via colour + copy.
   const stateBadge = (() => {
     if (unscheduled) return null;
+    if (state === "on-break") {
+      return { label: "Paused", bg: MC.warnTint, fg: "#7A560A" };
+    }
     if (isComplete) {
       return { label: "Complete", bg: MC.okTint, fg: "#0d6a45" };
     }
