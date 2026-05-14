@@ -32,8 +32,17 @@ export const runtime = "nodejs";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+// Fallback updated May 14 — the previous default
+// "https://morpheusta.vercel.app" pointed to a Vercel hostname
+// that has no deployment, so any environment missing the env var
+// (incl. preview deploys) shipped push links that 404'd with
+// DEPLOYMENT_NOT_FOUND when reps tapped them. Real prod URL is
+// `*-khaki-omega.vercel.app`. Keep this in sync if the host
+// changes. Better still: set NEXT_PUBLIC_MOBILE_URL on Vercel for
+// prod + every preview so the fallback never fires.
 const MOBILE_BASE_URL =
-  process.env.NEXT_PUBLIC_MOBILE_URL || "https://morpheusta.vercel.app";
+  process.env.NEXT_PUBLIC_MOBILE_URL ||
+  "https://morpheusta-khaki-omega.vercel.app";
 
 interface MessageRow {
   id: string;
@@ -124,7 +133,18 @@ export async function POST(req: NextRequest) {
     // Push URL points at the mobile inbox so a tap lands on the
     // actual message rather than a generic /. The inbox screen
     // can deep-link to a specific message via ?id=...
-    const pushUrl = `${MOBILE_BASE_URL}/messages?id=${messageId}`;
+    //
+    // Relative URL (May 14) — was `${MOBILE_BASE_URL}/messages?...`
+    // but that meant taps shipped to whichever host the env var
+    // resolved to. If NEXT_PUBLIC_MOBILE_URL wasn't set (or was set
+    // to the wrong host on a preview), reps tapped through to
+    // Vercel's DEPLOYMENT_NOT_FOUND 404. The mobile service worker
+    // resolves relative URLs against its registered origin via
+    // clients.openWindow, so a relative path is both shorter and
+    // can't ever ship to the wrong host. MOBILE_BASE_URL is kept
+    // for paths that genuinely need an absolute URL (e.g., emails)
+    // but those don't exist yet.
+    const pushUrl = `/messages?id=${messageId}`;
     await Promise.all(
       recipients.map(async (r) => {
         pushAttempted++;

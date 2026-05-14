@@ -41,8 +41,15 @@ import {
   type ShiftLike,
 } from "@/lib/push-send";
 
+// Fallback updated May 14 — the previous "https://morpheusta.vercel.app"
+// fallback was both a non-existent deployment (taps to it 404'd
+// with DEPLOYMENT_NOT_FOUND) AND meant CORS pre-flights from the
+// real mobile origin would fail when the env var wasn't set. Real
+// prod URL is `*-khaki-omega.vercel.app`. Keep in sync if host
+// changes; better still, set NEXT_PUBLIC_MOBILE_URL on Vercel.
 const MOBILE_ORIGIN =
-  process.env.NEXT_PUBLIC_MOBILE_URL || "https://morpheusta.vercel.app";
+  process.env.NEXT_PUBLIC_MOBILE_URL ||
+  "https://morpheusta-khaki-omega.vercel.app";
 
 function corsHeaders(origin: string | null): Record<string, string> {
   // Echo the mobile origin only — anything else gets no CORS
