@@ -324,7 +324,7 @@ export function Sidebar() {
             fontWeight: 500,
           }}
         >
-          Workforce operations. In real time.
+          Workforce Operations. In real time.
         </div>
       </div>
       {/* Tagline shimmer keyframes. Kept inline with the sidebar so

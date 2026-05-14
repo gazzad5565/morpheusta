@@ -513,7 +513,13 @@ export default function ManageShiftsPage() {
 // which series is "Weekdays" / "Mon · Wed · Fri" / "One-off" — the
 // most-requested missing context on this page. Action column trimmed
 // to keep [View] [Edit future] [⋮] on one line.
-const SERIES_GRID = "1.4fr 1fr 1.1fr 1.1fr 80px 78px 200px";
+// Column widths tuned May 14 — the Shifts column at 78px broke
+// "6 upcoming · 1 past" into three ugly lines on a typical row.
+// Bumped to 150px so the count + subtitle fit on one line each.
+// Time bumped from 80→105 so "14:00–17:00" doesn't squeeze the
+// font down. Actions stays at 200 (fits [View] [Edit future] [⋯]
+// without wrapping on standard density).
+const SERIES_GRID = "1.4fr 1fr 1.1fr 1.1fr 105px 150px 200px";
 
 function SeriesHeader() {
   return (
@@ -658,9 +664,29 @@ function SeriesRow({
       <div style={{ color: AC.ink2, fontFamily: AC.fontMono, fontSize: 11.5 }}>
         {series.startTime}–{series.endTime}
       </div>
-      <div>
-        <div style={{ fontWeight: 700 }}>{series.shiftCount}</div>
-        <div style={{ fontSize: 11, color: AC.mute, marginTop: 1 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 700, lineHeight: 1.1 }}>
+          {series.shiftCount}
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: AC.mute,
+            marginTop: 2,
+            // Single line — was wrapping mid-phrase ("6 upcoming · 1"
+            // / "past") at the previous narrow column width. We
+            // widened the column AND made the subtitle nowrap so
+            // even unusually long counts ("12 upcoming · 4 past")
+            // stay on one row.
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            lineHeight: 1.25,
+          }}
+          title={`${series.upcomingCount} upcoming${
+            series.pastCount > 0 ? ` · ${series.pastCount} past` : ""
+          }`}
+        >
           {series.upcomingCount} upcoming
           {series.pastCount > 0 ? ` · ${series.pastCount} past` : ""}
         </div>

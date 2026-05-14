@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { AC } from "@/lib/tokens";
 import {
   listShiftsInRange,
@@ -35,6 +36,13 @@ interface KpiItem {
   sub: string;
   tone: Tone;
   spark: number[];
+  /** Hash anchor (no leading #) on the same page. When set, the
+   *  card renders as a Link that scrolls to ShiftsList + flips it
+   *  to a specific tab — keeps the manager on the dashboard. See
+   *  HASH_TO_TAB in components/screens/live-ops/ShiftsList.tsx. */
+  hash?: string;
+  /** Tooltip describing what the card jumps to. */
+  hint?: string;
 }
 
 interface KpiData {
@@ -244,6 +252,8 @@ export function KpiStrip() {
       sub: `of ${k.repsTotal} on roster`,
       tone: "ok",
       spark: sparks.repsActive,
+      hash: "shifts-list-active",
+      hint: "Show only in-progress shifts in Today's Shifts",
     },
     {
       label: "Shifts today",
@@ -251,6 +261,8 @@ export function KpiStrip() {
       sub: `${k.shiftsCompleted} completed`,
       tone: "info",
       spark: sparks.shiftsCount,
+      hash: "shifts-list-all",
+      hint: "Jump to all of today's shifts",
     },
     {
       label: "On-time check-ins",
@@ -258,6 +270,8 @@ export function KpiStrip() {
       sub: "of all checked-in shifts",
       tone: k.onTimePct >= 80 ? "ok" : k.onTimePct >= 60 ? "warn" : "danger",
       spark: sparks.onTimePct,
+      hash: "shifts-list-active",
+      hint: "Show checked-in shifts in Today's Shifts",
     },
     {
       label: "Open exceptions",
@@ -265,6 +279,8 @@ export function KpiStrip() {
       sub: k.exceptionsOpen === 0 ? "all clear" : `${k.exceptionsLate} late`,
       tone: k.exceptionsOpen === 0 ? "ok" : "warn",
       spark: sparks.exceptions,
+      hash: "shifts-list-needs-action",
+      hint: "Show shifts that need action",
     },
     {
       label: "Avg shift completion",
@@ -272,6 +288,8 @@ export function KpiStrip() {
       sub: "tasks done today",
       tone: k.avgCompletion >= 80 ? "ok" : "warn",
       spark: sparks.avgCompletion,
+      hash: "shifts-list-all",
+      hint: "Jump to all of today's shifts",
     },
   ];
 
@@ -284,7 +302,7 @@ export function KpiStrip() {
   );
 }
 
-function KpiCard({ label, value, sub, tone, spark }: KpiItem) {
+function KpiCard({ label, value, sub, tone, spark, hash, hint }: KpiItem) {
   const toneColor: Record<Tone, string> = {
     ok: AC.ok,
     warn: AC.warn,
@@ -296,19 +314,46 @@ function KpiCard({ label, value, sub, tone, spark }: KpiItem) {
   // doesn't NaN and the line still draws as a flat baseline.
   const max = Math.max(1, ...spark);
 
+  // Card chrome. Same shape whether it's a static div or a Link —
+  // the only differences are the cursor, the focus ring, and a
+  // subtle hover lift when interactive.
+  const Wrapper: React.ElementType = hash ? Link : "div";
+  const interactiveProps = hash
+    ? {
+        href: `#${hash}`,
+        title: hint,
+        // Match the same anchor-style behaviour the other Live Ops
+        // KPI-style cards (none yet) would inherit if we add more.
+        style: {
+          background: AC.card,
+          border: `1px solid ${AC.line}`,
+          borderRadius: AC.radiusCard,
+          padding: 14,
+          display: "flex",
+          flexDirection: "column" as const,
+          gap: 8,
+          minHeight: 102,
+          textDecoration: "none",
+          color: "inherit",
+          cursor: "pointer",
+          transition: "transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease",
+        },
+      }
+    : {
+        style: {
+          background: AC.card,
+          border: `1px solid ${AC.line}`,
+          borderRadius: AC.radiusCard,
+          padding: 14,
+          display: "flex",
+          flexDirection: "column" as const,
+          gap: 8,
+          minHeight: 102,
+        },
+      };
+
   return (
-    <div
-      style={{
-        background: AC.card,
-        border: `1px solid ${AC.line}`,
-        borderRadius: AC.radiusCard,
-        padding: 14,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        minHeight: 102,
-      }}
-    >
+    <Wrapper {...interactiveProps}>
       <div
         style={{
           fontFamily: AC.font,
@@ -383,6 +428,6 @@ function KpiCard({ label, value, sub, tone, spark }: KpiItem) {
           />
         </svg>
       </div>
-    </div>
+    </Wrapper>
   );
 }

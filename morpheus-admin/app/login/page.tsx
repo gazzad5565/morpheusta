@@ -135,7 +135,7 @@ export default function LoginPage() {
             <div
               style={{ fontSize: 10.5, color: "#7FB6C5", letterSpacing: 0.4, marginTop: 1 }}
             >
-              Workforce operations. In real time.
+              Workforce Operations. In real time.
             </div>
           </div>
         </div>
