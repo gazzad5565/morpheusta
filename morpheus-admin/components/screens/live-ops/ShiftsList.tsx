@@ -335,13 +335,17 @@ export function ShiftsList() {
             }
           />
         ) : (
-          // Needs Action override: when this filter is active, BOTH
-          // row kinds redirect to the Live Feed's Needs Action tab
-          // (#live-feed-needs-action) instead of their usual detail
-          // page. Reason: the manager already has inline approve /
-          // decline / reassign affordances in that panel; the shift
-          // detail page just sends them on a detour for the same
-          // result. Per product, May 13.
+          // Needs Action override: PER-ROW now (May 14, Gary).
+          // Any shift row whose attention flag is open — OR any
+          // pending request row, which is inherently "needs action"
+          // — redirects clicks to the Live Feed's Needs Action tab
+          // (#live-feed-needs-action) instead of the shift detail
+          // page. Applies regardless of which tab the manager is
+          // looking at, because the row carries the "needs action"
+          // signal itself; the manager shouldn't have to switch to
+          // the Needs Action tab first just to action it. Reps
+          // without an open attention flag continue to link to the
+          // normal shift detail page.
           filtered.map((r) =>
             r.kind === "shift" ? (
               <ShiftRowView
@@ -350,20 +354,21 @@ export function ShiftsList() {
                 rep={r.shift.rep_id ? reps[r.shift.rep_id] : undefined}
                 liveTaskTotal={taskCountByCustomer.get(r.shift.customer_id)}
                 linkOverride={
-                  active === "Needs action"
+                  isNeedsAction(r.shift)
                     ? `#${LIVE_FEED_NEEDS_ACTION_HASH}`
                     : undefined
                 }
               />
             ) : (
+              // Request rows always go to the Live Feed Needs
+              // Action tab — they're a single-purpose action
+              // affordance (approve / decline). /requests page
+              // existed historically and the panel has the same
+              // controls inline, so keeping all flows in one place.
               <RequestRowView
                 key={`r-${r.request.id}`}
                 request={r.request}
-                linkOverride={
-                  active === "Needs action"
-                    ? `#${LIVE_FEED_NEEDS_ACTION_HASH}`
-                    : undefined
-                }
+                linkOverride={`#${LIVE_FEED_NEEDS_ACTION_HASH}`}
               />
             )
           )
