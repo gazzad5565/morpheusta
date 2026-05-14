@@ -1,7 +1,9 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`e529b6f`** (May 11, 2026 — late evening). Long, multi-phase day — **40+ commits** total. Three feature passes (cancellation, polish + identity + exception toggles, engineering review), then a fourth late push for the big deferred items (**traffic-aware Plan-my-day routing** + **per-customer logo uploads**), then a fifth tail of UX fixes from manager testing (success-page skip, "Wrapping up…" wording on check-out tap, dynamic Up Next picker, dead Directions button removal, customer edit page reorganised into Identity / Location / Check-in exceptions sections, and the Plan-my-day card collapsed into slim right-aligned pills under Up Next + on /shifts).
+> Latest commit: **`6e4f534`** (May 13, 2026 — late evening). Two huge days back-to-back. **May 13** shipped five new features end-to-end (rep-creates-customer, rep-geocodes-site, photos on tasks, customer signatures, Messaging), plus **Web Push v1 + phase 2** (rep notifications for shift assigned/reassigned/cancelled, attention-raised pushes to managers, Vercel-Cron-driven late + EOD reminders, org-wide kill switch), plus the **Morpheus Ops** rebrand (brand-tinted "Ops" pill everywhere). **May 13 (earlier)** also delivered a small UX pass: "Plan my day" → "Route" everywhere user-facing, icon-only status pill on `/shifts`, atomic `saveShiftOrder`, home pill "Day complete" calm state. Read the **"Today's session — what shipped (May 13, 2026)"** section first — it's the canonical record of the day, with the full A–E feature breakdown and migration list.
+>
+> Detail below is the **May 11** day — kept verbatim because it's the largest single push in the project's history and the systems it introduced (attention overlay, multi-site customers, identity photos, exception toggles, traffic-aware routing, per-customer logos) are the load-bearing pieces of the app today. **40+ commits** total across three feature passes (cancellation, polish + identity + exception toggles, engineering review), a late push for the big deferred items (**traffic-aware Plan-my-day routing** + **per-customer logo uploads**), and a tail of UX fixes from manager testing (success-page skip, "Wrapping up…" wording on check-out tap, dynamic Up Next picker, dead Directions button removal, customer edit page reorganised into Identity / Location / Check-in exceptions sections, and the Plan-my-day card collapsed into slim right-aligned pills under Up Next + on /shifts).
 > 1. **Cancellation / "Can't make this shift" feature** (8 commits) — rep can flag an assigned shift they can't make from anywhere, manager sees it in Live Ops "Needs action", four resolutions (Reassign / Reopen as unassigned / Keep · rep stays on / Cancel · do not refill), banners + pills + audit trail end-to-end.
 > 2. **Polish, identity, and exception-toggle pass** (10 commits) — rep notes per shift, banner watcher for shift assignments, "awesome" check-in overlay + shimmering skeletons, /schedule/manage row actions cleanup, mobile chrome cleanup, house glyph for customer markers + face/photo for rep markers everywhere, rep profile photo upload, and org-wide + per-customer exception toggles.
 > 3. **Plan my day · /route (mobile)** — server-side `/api/route/plan` with Google Routes (TRAFFIC_AWARE) when `GOOGLE_ROUTES_API_KEY` is set, mock fallback otherwise; client wrapper with 5-min cache + GPS fallback; `/route` page with provider chip, Optimize toggle, ETA + Leave-by pills, per-leg Open in Maps + whole-day Open in Maps. Entry pills on home (under Up Next) and /shifts header, only when 2+ stops.
@@ -110,7 +112,7 @@ If you switch computers (or hand this project to a developer), this section is t
 
 ### Where things stand right now (handover for the next chat)
 
-**Last commit:** `b2a9e30` — "Engineering pass — DB indexes, realtime gaps, duplicate utilities" (May 11, 2026 — evening; 37 commits through the day across three phases: morning feature work + afternoon friction fixes + evening engineering review / stabilisation)
+**Last commit:** `6e4f534` — "README: document the late-evening messaging fixes + Send-Now diagnosis" (May 13, 2026 — late evening). Long, two-pass day: morning UX cleanup + Web Push v1 + the "Plan my day → Route" rename, then a marathon evening session that shipped five end-to-end features (Features A–E: rep-adds-customer, rep-geocodes-site, photos on tasks, customer signatures on tasks, full Messaging) + Web Push phase 2 (Vercel-Cron late/EOD reminders, attention-raised manager broadcast, org-wide kill switch) + the Morpheus Ops rebrand. ~40 commits across the two passes. See "Today's session — what shipped (May 13, 2026)" for the canonical record.
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
@@ -1602,7 +1604,7 @@ Top of the queue (in priority order):
      Sensitive).
    - Deployments → latest → **Redeploy** (forces rebuild that
      picks up env changes; Vercel binds env at build time).
-4. **Vercel Pro upgrade** — multiple crons are parked in
+3. **Vercel Pro upgrade** — multiple crons are parked in
    `morpheus-admin/vercel.json` because Hobby plan rejects sub-daily
    schedules. Once Pro is active, restore:
    ```json
@@ -1618,11 +1620,11 @@ Top of the queue (in priority order):
    messages need it. Shift reminders + auto-checkout work without
    the cron via the client-side `StaleShiftSweeper` fallback but
    only fire when an admin has Live Ops open.
-5. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
-6. **Confirm `CRON_SECRET` + `NEXT_PUBLIC_ADMIN_URL`** are set on Vercel (added during May 13 — the README's earlier check). Required by the cron routes and by mobile's cross-origin manager-push.
-7. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
-8. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
-9. **Custom report builder** if reporting is the priority. The
+4. **Add `GOOGLE_ROUTES_API_KEY` to Vercel `morpheusta`** if Plan-my-day is going to real reps. Without it the `/route` page works but shows mock-data ETAs. See "Optional env vars" for the setup walkthrough.
+5. **Confirm `CRON_SECRET` + `NEXT_PUBLIC_ADMIN_URL`** are set on Vercel (added during May 13 — the README's earlier check). Required by the cron routes and by mobile's cross-origin manager-push.
+6. **Phase 4 RLS** — still the highest production blocker. Locks down the database against malicious-rep API access. See the deferred list below for the threat model.
+7. **Capacitor wrap** only if background GPS becomes a priority. Push alone doesn't need it.
+8. **Custom report builder** if reporting is the priority. The
    foundations are now in place (photos + signatures are stored
    per-(shift, task) and a future generator can embed them in a
    customer-facing PDF).
