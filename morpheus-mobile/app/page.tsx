@@ -43,6 +43,10 @@ import {
   applySavedOrder,
   subscribeShiftOrder,
 } from "@/lib/shift-order-store";
+import {
+  readImprovementState,
+  subscribeImprovement,
+} from "@/lib/route-improvement-watcher";
 
 // MapLibre needs `window`; defer to client-only.
 const DashboardMap = dynamic(
@@ -321,6 +325,19 @@ export default function DashboardPage() {
     shifts.length > 0 &&
     shifts.every((s) => s.state === "complete" || s.state === "cancelled");
 
+  // Route improvement watcher state — drives the action-vs-calm
+  // icon on the left segment of the View-all pill. Reads on mount,
+  // re-renders whenever the hourly watcher fires its event.
+  const [improvement, setImprovement] = useState(() =>
+    typeof window === "undefined"
+      ? { available: false, savingsSeconds: 0, checkedAt: 0 }
+      : readImprovementState()
+  );
+  useEffect(() => {
+    setImprovement(readImprovementState());
+    return subscribeImprovement(() => setImprovement(readImprovementState()));
+  }, []);
+
   // "I can't make this shift" sheet state — applies to the up-next
   // shift only on the dashboard. Mirrors the /shifts page pattern so
   // the rep learns it once. `unableSheetFor` holds the row currently
@@ -463,6 +480,20 @@ export default function DashboardPage() {
         flex: 1,
       }}
     >
+      {/* Route-pill pulse keyframe — fires only when the hourly
+          watcher found a better route. Scoped to .mc-route-pulse-home
+          so the home page's left-segment pill is the only consumer;
+          /shifts has its own copy under .mc-route-pulse. */}
+      <style>{`
+        @keyframes mc-route-pulse-home-kf {
+          0%   { box-shadow: inset 0 0 0 0 rgba(255,255,255,0.55); }
+          70%  { box-shadow: inset 0 0 0 6px rgba(255,255,255,0);  }
+          100% { box-shadow: inset 0 0 0 0 rgba(255,255,255,0);    }
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          .mc-route-pulse-home { animation: mc-route-pulse-home-kf 1.6s ease-out infinite; }
+        }
+      `}</style>
       {!shiftsLoaded && <LoadingBar />}
 
       {/* Welcome strip — thin, glassy, branded. Owns the menu button
@@ -529,22 +560,30 @@ export default function DashboardPage() {
               planning to do for a single shift) and the pill
               collapses to just "View all". */}
           {(() => {
-            // The plan-icon slot used to hide when remainingStops <
-            // 2. That logic stranded the rep on a day where one
-            // shift was already done — they had 1 remaining stop,
-            // no plan-slot icon, AND we'd removed Plan-my-day from
-            // the side menu. Net: zero entry points to /route.
-            // Now the slot renders as long as the rep has any
-            // shifts today; the icon flips to a green check once
-            // an order is saved.
+            // Left segment = Route icon. May 14 — Gary aligned this
+            // with the /shifts page pill: only TWO states now, both
+            // icon-only, driven by the hourly improvement watcher.
+            //   - ACTION: watcher found a route at least 5 min
+            //     faster than the rep's current order. Brand-deep
+            //     fill + target glyph + subtle pulse. "Tap here."
+            //   - CALM (default): no improvement found, day done,
+            //     fewer than 2 stops. okTint fill + green check.
+            //     "Route is current — nothing to act on."
+            // The dayPlanned signal is unused — having a saved
+            // order doesn't itself say "go look". Only an
+            // improvement against that saved order does.
             const showPlanSlot = shiftsLoaded && shifts.length > 0;
-            const planned = dayPlanned;
-            // Calm = nothing left to push the rep toward. Either the
-            // day is already optimized OR every shift is done. Both
-            // collapse to the same green-check confirmation surface
-            // so the pill doesn't shout "Plan route" while the
-            // celebration card below says "All shifts done".
-            const isCalm = planned || dayComplete;
+            const action = improvement.available;
+            const minutesSaved = Math.max(
+              1,
+              Math.round(improvement.savingsSeconds / 60)
+            );
+            const ariaLabel = action
+              ? `Better route found — save about ${minutesSaved} minute${minutesSaved === 1 ? "" : "s"}. Tap to view.`
+              : "Today's route is up to date — tap to view";
+            const titleAttr = action
+              ? `Better route available — ~${minutesSaved} min faster`
+              : "Route up to date";
             return (
               <div
                 style={{
@@ -561,44 +600,22 @@ export default function DashboardPage() {
                   <>
                     <Link
                       href="/route"
-                      aria-label={
-                        dayComplete
-                          ? "All shifts done — open Route to review"
-                          : planned
-                          ? "Route optimized — tap to view or re-optimize"
-                          : "Optimize today's route"
-                      }
-                      title={
-                        dayComplete
-                          ? "All shifts done"
-                          : planned
-                          ? "Route optimized — tap to view or re-optimize"
-                          : "Optimize today's route"
-                      }
+                      aria-label={ariaLabel}
+                      title={titleAttr}
+                      className={action ? "mc-route-pulse-home" : undefined}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
                         padding: "0 11px",
                         textDecoration: "none",
-                        // Visual weight reflects whether there's
-                        // work to do:
-                        //  - calm (planned or done) → okTint surface
-                        //    (confirmation)
-                        //  - unplanned  → solid brand-deep fill so
-                        //    the icon pops as a real CTA. Earlier
-                        //    iteration sat on transparent and Gary
-                        //    flagged it "not clear or strong enough
-                        //    when there's a day to optimize" — solid
-                        //    fill + white glyph fixes that without
-                        //    inflating the pill width.
-                        background: isCalm ? MC.okTint : MC.brandDeep,
+                        background: action ? MC.brandDeep : MC.okTint,
                       }}
                     >
                       <Glyph
-                        name={isCalm ? "check-circle" : "target"}
+                        name={action ? "target" : "check-circle"}
                         size={15}
-                        color={isCalm ? MC.ok : "#fff"}
+                        color={action ? "#fff" : MC.ok}
                         strokeWidth={2.4}
                       />
                     </Link>

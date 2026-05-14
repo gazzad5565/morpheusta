@@ -55,6 +55,7 @@ import {
   readShiftOrderMeta,
   subscribeShiftOrder,
 } from "@/lib/shift-order-store";
+import { clearImprovementState } from "@/lib/route-improvement-watcher";
 import { getRouteOptimizationAllowed } from "@/lib/settings-store";
 
 /** "5 km" / "950 m" — friendly distance. */
@@ -762,6 +763,14 @@ export default function RoutePage() {
                 type="button"
                 onClick={() => {
                   saveShiftOrder(currentOrder);
+                  // Clear the route-improvement watcher flag —
+                  // the rep just adopted (close to) the optimised
+                  // order, so the action-state icon shouldn't keep
+                  // pulsing while they wait for the next hourly
+                  // tick. The watcher will recompute on its own
+                  // schedule + can re-raise the flag if a future
+                  // shift change opens up a new improvement.
+                  clearImprovementState();
                   // Don't loiter on /route after a save — the rep
                   // wanted to plan their day, they planned it,
                   // bounce them somewhere useful. /shifts is the
