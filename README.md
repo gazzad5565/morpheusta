@@ -1625,10 +1625,10 @@ Big day. Roughly in order:
 
 Each file is idempotent — safe to re-run.
 
-May 14 (pending — run in Supabase SQL editor):
+May 14 (applied):
 
 - `2026_05_14_requested_shifts_role_scoped.sql` — RLS leak fix, applied mid-day.
-- `2026_05_14_phase4_rls_hardening.sql` — comprehensive Phase 4 RLS pass via `is_manager()` SECURITY DEFINER helper. 19 tables + 3 storage buckets. **PENDING** — run before opening to real users. Smoke-test checklist at the bottom of the file.
+- `2026_05_14_phase4_rls_hardening.sql` — comprehensive Phase 4 RLS pass via `is_manager()` SECURITY DEFINER helper. 19 tables + 3 storage buckets. **APPLIED** evening May 14 after two small fixes (shift_events `actor_id` not `rep_id`; dropped the bogus `public.organisation` block — org settings live in `app_settings` rows). Smoke-test checklist at the bottom of the file.
 
 May 13 (applied or pending — see status above):
 
