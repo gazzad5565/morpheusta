@@ -342,11 +342,27 @@ export async function getMyActiveShift(): Promise<
   const userId = userData.user?.id;
   if (!userId) return null;
 
+  // States we consider "the rep is currently inside this shift":
+  // - in-progress: working
+  // - on-break:    paused mid-shift (rep tapped Pause from /active,
+  //                or from the home Take-a-break sheet, or a timed
+  //                break is running)
+  // Both should keep the rep on /active. Pre-May-14 this filtered
+  // strictly on in-progress, which meant the moment the rep tapped
+  // Pause the state flipped to on-break, the realtime subscriber
+  // refetched, getMyActiveShift returned null, and /active dumped
+  // the rep onto its "No active shift" empty state — wiping the
+  // Paused banner out from under them. (Gary's report 2026-05-14.)
+  //
+  // NOTE: 'travelling' is intentionally NOT in this set. Travelling
+  // is pre-check-in — the rep hasn't arrived yet, so they have no
+  // "active" shift to be on /active for.
+  const ACTIVE_STATES = ["in-progress", "on-break"] as const;
   const { data, error } = await supabase
     .from("shifts")
     .select("*, customers(id,name,initials,color,code,logo_url), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
     .eq("rep_id", userId)
-    .eq("state", "in-progress")
+    .in("state", ACTIVE_STATES as unknown as string[])
     .order("check_in_at", { ascending: false })
     .limit(1)
     .maybeSingle();
