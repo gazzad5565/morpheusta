@@ -83,25 +83,6 @@ const TABS = [
   "Requested",
 ] as const;
 
-/** Anchor id used by the KpiStrip cards above to scroll the
- *  manager to this list when they tap a KPI. Each tab also has
- *  its own hash so the cards can deep-link to a filtered view
- *  without leaving the page. */
-export const SHIFTS_LIST_ANCHOR = "shifts-list";
-
-/** Map hashes → tab labels. Keep in sync with TABS above. The
- *  KpiStrip uses these to send tab-aware scroll links. */
-const HASH_TO_TAB: Record<string, (typeof TABS)[number]> = {
-  "shifts-list": "All",
-  "shifts-list-all": "All",
-  "shifts-list-active": "In progress",
-  "shifts-list-needs-action": "Needs action",
-  "shifts-list-travelling": "Travelling",
-  "shifts-list-on-break": "On break",
-  "shifts-list-unassigned": "Unassigned",
-  "shifts-list-requested": "Requested",
-};
-
 /** A shift "needs action" when the rep has flagged unable-to-attend
  *  and the manager hasn't yet resolved the flag. Used by the
  *  ShiftsList tab + count pill on Live Ops so attention rows show up
@@ -132,29 +113,6 @@ export function ShiftsList() {
   >(() => new Map());
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<string>("All");
-
-  // Hashchange wiring — the KpiStrip cards on the page above send
-  // taps to e.g. #shifts-list-active or #shifts-list-needs-action.
-  // We map the hash to a tab + scroll the list into view, so a tap
-  // on a KPI brings the right slice of the list onto the screen
-  // without ever leaving the page. Fires on mount too so a cold
-  // load with the hash already in the URL still works.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const apply = () => {
-      const h = window.location.hash.replace(/^#/, "");
-      if (!h.startsWith("shifts-list")) return;
-      const tab = HASH_TO_TAB[h];
-      if (tab) setActive(tab);
-      // Smooth-scroll the list card into view. The element with the
-      // anchor id is the Card wrapper rendered further down.
-      const el = document.getElementById(SHIFTS_LIST_ANCHOR);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    };
-    apply();
-    window.addEventListener("hashchange", apply);
-    return () => window.removeEventListener("hashchange", apply);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -301,7 +259,7 @@ export function ShiftsList() {
   }, [rows, requests]);
 
   return (
-    <Card padding={0} id={SHIFTS_LIST_ANCHOR}>
+    <Card padding={0}>
       <div
         style={{
           padding: "12px 16px",
