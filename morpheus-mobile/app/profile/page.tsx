@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { AppHeader, AppFooter } from "@/components/Chrome";
 import { Glyph } from "@/components/Glyph";
+import { LocationCard } from "@/components/LocationCard";
 import { getUser, signOut } from "@/lib/auth";
 import {
   getMyProfile,
@@ -433,6 +434,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      <LocationCard />
       <NotificationsCard />
 
       <div style={{ padding: "0 16px 16px" }}>

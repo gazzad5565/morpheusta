@@ -163,6 +163,98 @@ export function clearGpsCache(): void {
   _gpsCache = null;
 }
 
+/**
+ * localStorage key for "I successfully fetched the rep's GPS at this
+ * timestamp." Used by getGeolocationStatus() to distinguish "first
+ * time we've ever asked" from "iOS forgot the rep's previous Allow
+ * Once choice". Stamped on every successful fix (see fetchNow below).
+ *
+ * Why we need this: iOS Safari doesn't persist the Permissions API
+ * state to `granted` when the user picks "Allow Once" — every new
+ * page load re-presents the OS prompt. Detecting "we've succeeded
+ * before" lets us show a one-time iOS-specific tip telling the rep
+ * to pick "Allow on Every Visit" so they stop seeing the prompt.
+ */
+const _GPS_GRANTED_LS_KEY = "morpheus.gps_granted_at";
+
+export interface GeolocationStatus {
+  /** Browser support. False on insecure contexts or extremely old browsers. */
+  supported: boolean;
+  /** Live Permissions-API state. "unknown" when the Permissions API
+   *  isn't available (Safari < 16 / some embedded webviews). */
+  permission: PermissionState | "unknown";
+  /** Best-effort device detection — drives whether we show iOS-only
+   *  guidance copy. Not used for any blocking behaviour. */
+  isIOS: boolean;
+  /** True when we've previously stamped a successful fetch in
+   *  localStorage. Combined with permission==='prompt' this is the
+   *  signal that iOS is re-prompting after a previous Allow Once. */
+  previouslyGranted: boolean;
+  /** True when the situation strongly suggests "iOS forgot the
+   *  previous Allow Once and is about to ask again" — i.e.
+   *  previouslyGranted AND permission==='prompt' AND iOS device.
+   *  Drives the /profile LocationCard's "iOS keeps forgetting"
+   *  callout. */
+  isLikelyRePrompting: boolean;
+}
+
+/**
+ * Read the current geolocation status without triggering a prompt.
+ * Pure observation — never asks the OS for permission. Used by the
+ * /profile LocationCard to show the rep what state they're in + by
+ * the one-time iOS tip surface.
+ */
+export async function getGeolocationStatus(): Promise<GeolocationStatus> {
+  const supported =
+    typeof window !== "undefined" && !!navigator.geolocation;
+  const isIOS =
+    typeof navigator !== "undefined" &&
+    /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+    !(navigator as { MSStream?: unknown }).MSStream;
+  let previouslyGranted = false;
+  try {
+    if (typeof window !== "undefined") {
+      previouslyGranted =
+        window.localStorage.getItem(_GPS_GRANTED_LS_KEY) !== null;
+    }
+  } catch {
+    /* ignore — Private Browsing on iOS throws on localStorage */
+  }
+
+  let permission: PermissionState | "unknown" = "unknown";
+  if (supported) {
+    type PermsAPI = {
+      query: (d: { name: PermissionName }) => Promise<{
+        state: PermissionState;
+      }>;
+    };
+    const perms = (
+      navigator as Navigator & { permissions?: PermsAPI }
+    ).permissions;
+    if (perms && typeof perms.query === "function") {
+      try {
+        const res = await perms.query({
+          name: "geolocation" as PermissionName,
+        });
+        permission = res.state;
+      } catch {
+        /* keep "unknown" */
+      }
+    }
+  }
+
+  const isLikelyRePrompting =
+    isIOS && previouslyGranted && permission === "prompt";
+
+  return {
+    supported,
+    permission,
+    isIOS,
+    previouslyGranted,
+    isLikelyRePrompting,
+  };
+}
+
 export async function requestGeolocationOnce(
   opts?: { highAccuracy?: boolean; timeoutMs?: number; maxAgeMs?: number }
 ): Promise<LatLng | null> {
@@ -191,6 +283,20 @@ export async function requestGeolocationOnce(
         (pos) => {
           const out = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           _gpsCache = { ...out, expiresAt: Date.now() + _GPS_CACHE_TTL_MS };
+          // Persist a "we got a fix" stamp so getGeolocationStatus()
+          // can tell whether iOS is re-prompting the rep after a
+          // previous Allow Once. Stamped fire-and-forget; localStorage
+          // throws in iOS Private Browsing so we swallow the failure.
+          try {
+            if (typeof window !== "undefined") {
+              window.localStorage.setItem(
+                _GPS_GRANTED_LS_KEY,
+                String(Date.now())
+              );
+            }
+          } catch {
+            /* ignore */
+          }
           resolve(out);
         },
         () => resolve(null),
