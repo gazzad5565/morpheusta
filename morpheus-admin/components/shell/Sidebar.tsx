@@ -258,85 +258,52 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Module switcher */}
-      <div style={{ padding: "0 12px 10px", borderBottom: `1px solid #1B2027` }}>
+      {/* Morpheus Ops branding strip.
+          May 14 — replaced the legacy module switcher (Time &
+          Attendance / Sales Orders / Auditing) now that Morpheus is
+          a single unified platform. Sales Orders + Advanced Auditing
+          live inside /tasks as locked Pro upgrades; no separate
+          top-level modules. The brand line below is small + muted on
+          purpose — the org name above carries customer identity,
+          this row reminds the user which product they're inside. */}
+      <div style={{ padding: "0 14px 12px", borderBottom: `1px solid #1B2027` }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 7,
+            fontFamily: AC.font,
+            fontSize: 10.5,
+            fontWeight: 700,
+            color: "#8A93A1",
+            letterSpacing: 0.6,
+            textTransform: "uppercase",
+          }}
+        >
+          <span
+            style={{
+              display: "inline-block",
+              width: 5,
+              height: 5,
+              borderRadius: 999,
+              background: AC.brand,
+            }}
+          />
+          Morpheus Ops
+        </div>
         <div
           style={{
             fontFamily: AC.font,
-            fontSize: 9.5,
+            fontSize: 11,
             color: "#5C6571",
-            fontWeight: 700,
-            letterSpacing: 1,
-            textTransform: "uppercase",
-            padding: "6px 4px 6px",
+            marginTop: 4,
+            letterSpacing: -0.05,
+            lineHeight: 1.35,
           }}
         >
-          Module
-        </div>
-        <button
-          type="button"
-          style={{
-            width: "100%",
-            display: "flex",
-            alignItems: "center",
-            gap: 9,
-            padding: "8px 10px",
-            borderRadius: 8,
-            background: AC.brandDeep,
-            border: "none",
-            cursor: "pointer",
-            color: "#fff",
-            textAlign: "left",
-          }}
-        >
-          <div
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 5,
-              background: "rgba(255,255,255,0.18)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <AGlyph name="clock" size={13} color="#fff" />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 12.5,
-                fontWeight: 700,
-                letterSpacing: -0.1,
-                lineHeight: 1.1,
-              }}
-            >
-              Time &amp; Attendance
-            </div>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 10,
-                opacity: 0.8,
-                marginTop: 1,
-              }}
-            >
-              Active
-            </div>
-          </div>
-          <AGlyph name="chev-d" size={13} color="#fff" />
-        </button>
-        <div style={{ display: "flex", flexDirection: "column", gap: 1, marginTop: 4 }}>
-          <ModulePeek glyph="building" label="Sales Orders" hint="Q3" />
-          <ModulePeek glyph="audit" label="Auditing" hint="Q4" />
+          Workforce operations. In real time.
         </div>
       </div>
-
-      {/* Org name + logo are shown in the brand block above. The
-          previous "Org switcher" pill below the module switcher used
-          mock ORG data + we don't have multi-org tenancy yet, so it's
-          gone. If we add tenancy later, drop a real switcher here. */}
 
       {/* Nav */}
       <div style={{ padding: "10px 8px", display: "flex", flexDirection: "column", gap: 1 }}>
@@ -522,68 +489,6 @@ export function Sidebar() {
         </span>
       </a>
     </div>
-  );
-}
-
-function ModulePeek({ glyph, label, hint }: { glyph: GlyphName; label: string; hint: string }) {
-  return (
-    <button
-      type="button"
-      style={{
-        width: "100%",
-        display: "flex",
-        alignItems: "center",
-        gap: 9,
-        padding: "6px 10px",
-        borderRadius: 8,
-        background: "transparent",
-        border: "none",
-        cursor: "pointer",
-        color: "#5C6571",
-        textAlign: "left",
-      }}
-    >
-      <div
-        style={{
-          width: 22,
-          height: 22,
-          borderRadius: 5,
-          background: "#171B22",
-          border: "1px solid #232932",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <AGlyph name={glyph} size={12} color="#5C6571" />
-      </div>
-      <div
-        style={{
-          flex: 1,
-          fontFamily: AC.font,
-          fontSize: 12,
-          fontWeight: 600,
-          letterSpacing: -0.1,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 9.5,
-          color: "#5C6571",
-          fontWeight: 700,
-          letterSpacing: 0.4,
-          textTransform: "uppercase",
-          padding: "1px 5px",
-          border: "1px solid #232932",
-          borderRadius: 4,
-        }}
-      >
-        {hint}
-      </div>
-    </button>
   );
 }
 

@@ -13,7 +13,7 @@ export type GlyphName =
   | "arrow-r" | "arrow-u" | "arrow-d"
   | "warn" | "info" | "dot" | "logout" | "edit" | "trash"
   | "upload" | "download" | "phone" | "mail" | "building"
-  | "face";
+  | "face" | "lock";
 
 interface Props {
   name: GlyphName | string;
@@ -79,6 +79,7 @@ export function AGlyph({ name, size = 18, color = "currentColor", strokeWidth = 
     case "mail":     return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 7 9-7"/></svg>;
     case "building": return <svg {...common}><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 7h.01M9 11h.01M9 15h.01M14 7h.01M14 11h.01M14 15h.01M9 21v-4h6v4"/></svg>;
     case "face":     return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>;
+    case "lock":     return <svg {...common}><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>;
     default:         return <svg {...common}><circle cx="12" cy="12" r="9"/></svg>;
   }
 }
