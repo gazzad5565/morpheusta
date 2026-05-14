@@ -712,29 +712,15 @@ CREATE POLICY "customer_seen_by_manager_all"
   USING (public.is_manager())
   WITH CHECK (public.is_manager());
 
--- ─── 18. organisation ──────────────────────────────────────────────
+-- ─── 18. org_assets storage bucket ─────────────────────────────────
 --
--- One-row org-config table. Reads open; writes manager-only.
-
-ALTER TABLE public.organisation ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS organisation_select          ON public.organisation;
-DROP POLICY IF EXISTS organisation_insert          ON public.organisation;
-DROP POLICY IF EXISTS organisation_update          ON public.organisation;
-DROP POLICY IF EXISTS organisation_delete          ON public.organisation;
-DROP POLICY IF EXISTS organisation_manager_all     ON public.organisation;
-
-CREATE POLICY "organisation_select"
-  ON public.organisation FOR SELECT
-  TO authenticated USING (true);
-
-CREATE POLICY "organisation_manager_all"
-  ON public.organisation FOR ALL
-  TO authenticated
-  USING (public.is_manager())
-  WITH CHECK (public.is_manager());
-
--- org_assets storage bucket — manager-only writes.
+-- Originally there was a `public.organisation` block here too, but
+-- that table doesn't actually exist — the 2026-05-06 "organisation"
+-- migration stored org settings as ROWS inside app_settings (keys
+-- 'organisation_name' + 'organisation_logo_url'), so those reads /
+-- writes are already gated by the app_settings policy above. Only
+-- the storage bucket policies for org logo uploads need to be
+-- tightened here.
 DROP POLICY IF EXISTS "org_assets_authed_select"  ON storage.objects;
 DROP POLICY IF EXISTS "org_assets_authed_insert"  ON storage.objects;
 DROP POLICY IF EXISTS "org_assets_authed_update"  ON storage.objects;
