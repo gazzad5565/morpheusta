@@ -807,13 +807,25 @@ export default function ShiftsListPage() {
             // Calm state — open the celebratory sheet instead of
             // navigating. Sheet has an "Open route anyway" link for
             // reps who want to view /route despite the calm state.
+            // Full UA reset so the native button renders identical
+            // to a Link inside the same flex row (otherwise default
+            // line-height + padding shift the icon a hair).
             return (
               <button
                 type="button"
                 onClick={() => setRouteSheetOpen(true)}
                 aria-label={ariaLabel}
                 title={titleAttr}
-                style={{ ...sharedStyle, cursor: "pointer" }}
+                style={{
+                  ...sharedStyle,
+                  cursor: "pointer",
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                  margin: 0,
+                  font: "inherit",
+                  lineHeight: 0,
+                  color: "inherit",
+                }}
               >
                 {iconNode}
               </button>

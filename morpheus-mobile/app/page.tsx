@@ -626,9 +626,13 @@ export default function DashboardPage() {
                     ) : (
                       // Calm state: tap opens the celebratory
                       // "Route optimized" sheet instead of routing
-                      // anywhere. Reps still get a subordinate
-                      // "Open route anyway" link inside the sheet
-                      // if they really want to see /route.
+                      // anywhere. The native <button> needs a
+                      // full reset so it renders identically to
+                      // the <Link> in the action branch above —
+                      // otherwise UA defaults (appearance, font,
+                      // line-height, margin, focus outline) make
+                      // the icon segment a touch wider / off-
+                      // center vs. the View-all half.
                       <button
                         type="button"
                         onClick={() => setRouteSheetOpen(true)}
@@ -642,7 +646,12 @@ export default function DashboardPage() {
                           background: MC.okTint,
                           border: "none",
                           cursor: "pointer",
-                          height: "100%",
+                          appearance: "none",
+                          WebkitAppearance: "none",
+                          margin: 0,
+                          font: "inherit",
+                          lineHeight: 0,
+                          color: "inherit",
                         }}
                       >
                         <Glyph
