@@ -264,20 +264,57 @@ export function Sidebar() {
           Ops" branding is already in the footer pill at the bottom
           of the sidebar, so we don't repeat it here — just the
           tagline, which reminds the user what the platform does
-          without competing with the org name above. */}
+          without competing with the org name above.
+
+          The shimmer below fires every ~7s for ~2s then rests — a
+          subtle "platform is alive" pulse. CSS-only, gradient
+          sweeps across the text using background-clip: text.
+          prefers-reduced-motion users see a static line. */}
       <div style={{ padding: "0 14px 12px", borderBottom: `1px solid #1B2027` }}>
         <div
+          className="sb-tagline"
           style={{
             fontFamily: AC.font,
-            fontSize: 11,
-            color: "#7A8492",
+            fontSize: 12.5,
+            color: "#8A95A4",
             letterSpacing: -0.05,
-            lineHeight: 1.35,
+            lineHeight: 1.4,
+            fontWeight: 500,
           }}
         >
           Workforce operations. In real time.
         </div>
       </div>
+      {/* Tagline shimmer keyframes. Kept inline with the sidebar so
+          the rule lives next to its only consumer. The animation
+          spends 70% of each cycle parked off-screen-right then
+          sweeps to off-screen-left over 30%, then a brief pause
+          before the cycle restarts — produces a "shimmer sometimes,
+          mostly still" rhythm. Total cycle 7s. */}
+      <style>{`
+        @keyframes sb-tagline-shimmer {
+          0%, 70% { background-position: 200% center; }
+          100%   { background-position: -200% center; }
+        }
+        @media (prefers-reduced-motion: no-preference) {
+          .sb-tagline {
+            background: linear-gradient(
+              90deg,
+              #8A95A4 0%,
+              #8A95A4 42%,
+              #C8E4F2 50%,
+              #8A95A4 58%,
+              #8A95A4 100%
+            );
+            background-size: 200% 100%;
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            color: transparent;
+            animation: sb-tagline-shimmer 7s ease-in-out infinite;
+          }
+        }
+      `}</style>
 
       {/* Nav */}
       <div style={{ padding: "10px 8px", display: "flex", flexDirection: "column", gap: 1 }}>
