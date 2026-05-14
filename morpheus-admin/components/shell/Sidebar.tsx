@@ -11,6 +11,7 @@ import { getUser, signOut } from "@/lib/auth";
 import {
   getOrganisationName,
   getOrganisationLogoUrl,
+  subscribeOrgChanges,
 } from "@/lib/settings-store";
 import { listPendingRequests, subscribeRequests } from "@/lib/requests-store";
 import { listOpenAttentionShifts, subscribeShifts } from "@/lib/shifts-store";
@@ -29,8 +30,20 @@ export function Sidebar() {
   const [userEmail, setUserEmail] = useState<string>("");
   // Org branding (set under /settings/organisation). Empty strings →
   // fall back to the built-in MORPHEUS / Field Operations Suite block.
-  const [orgName, setOrgName] = useState<string>("");
-  const [orgLogoUrl, setOrgLogoUrl] = useState<string>("");
+  //
+  // Initial values come from localStorage so the brand block paints
+  // the LAST KNOWN logo + name instantly on mount — no half-second
+  // flicker of the fallback brand cube while the DB fetch is in
+  // flight. The useEffect below revalidates against the DB and
+  // writes any changes back to the cache.
+  const [orgName, setOrgName] = useState<string>(() => readCachedOrg().name);
+  const [orgLogoUrl, setOrgLogoUrl] = useState<string>(() => readCachedOrg().logoUrl);
+  // True once the network fetch has resolved at least once. Used to
+  // keep the branded fallback cube hidden until we KNOW whether the
+  // org has a real logo set — first-ever visit shows a neutral
+  // skeleton during the in-flight fetch rather than the brand cube
+  // (which the user otherwise sees and reads as "wrong logo").
+  const [orgLoaded, setOrgLoaded] = useState<boolean>(() => readCachedOrg().hasCache);
   // Two queues both feed the Live Ops "Needs action" badge:
   //   - Pending rep-requests for NEW shifts (requested_shifts table)
   //   - Open unable-to-attend overlays on EXISTING shifts (shifts.attention)
@@ -45,13 +58,23 @@ export function Sidebar() {
     getUser().then((u) => {
       if (!cancelled) setUserEmail(u?.email || "");
     });
-    Promise.all([getOrganisationName(), getOrganisationLogoUrl()]).then(([n, u]) => {
-      if (cancelled) return;
-      setOrgName(n);
-      setOrgLogoUrl(u);
-    });
+    const fetchOrg = () => {
+      Promise.all([getOrganisationName(), getOrganisationLogoUrl()]).then(([n, u]) => {
+        if (cancelled) return;
+        setOrgName(n);
+        setOrgLogoUrl(u);
+        setOrgLoaded(true);
+        writeCachedOrg(n, u);
+      });
+    };
+    fetchOrg();
+    // Re-fetch when the manager saves a new name/logo on
+    // /settings/organisation. Custom event fires from the setters
+    // in lib/settings-store.ts — no page reload needed.
+    const unsubOrg = subscribeOrgChanges(fetchOrg);
     return () => {
       cancelled = true;
+      unsubOrg();
     };
   }, []);
 
@@ -206,7 +229,26 @@ export function Sidebar() {
               style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
             />
           </div>
+        ) : !orgLoaded ? (
+          // First-ever visit, fetch in flight. Neutral skeleton so we
+          // don't flash a branded cube the user reads as the "wrong"
+          // logo. Subsequent visits hit the localStorage cache and
+          // skip this state entirely.
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: "#1B2027",
+              border: "1px solid #232932",
+              flexShrink: 0,
+            }}
+            aria-label="Loading organisation logo"
+          />
         ) : (
+          // Loaded, no logo set in /settings/organisation. Render the
+          // generic brand cube — this is a legitimate default, not a
+          // loading state.
           <div
             style={{
               width: 28,
@@ -766,4 +808,47 @@ function SubNavItem({
       {body}
     </Link>
   );
+}
+
+/**
+ * Local cache of the org name + logo URL so the brand block paints
+ * instantly on every page load after the first. Plain localStorage —
+ * org branding is small (~10–20 KB max for the base64 logo), the
+ * data is non-sensitive, and a stale cache only costs a single
+ * frame before the network revalidation lands and overwrites it.
+ *
+ * Keyed by version so a future schema bump (e.g. adding a colour
+ * token to the cached blob) can invalidate cleanly by changing v1.
+ */
+const ORG_CACHE_KEY = "morpheus.org.cache.v1";
+
+function readCachedOrg(): { name: string; logoUrl: string; hasCache: boolean } {
+  if (typeof window === "undefined") return { name: "", logoUrl: "", hasCache: false };
+  try {
+    const raw = window.localStorage.getItem(ORG_CACHE_KEY);
+    if (!raw) return { name: "", logoUrl: "", hasCache: false };
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      return {
+        name: typeof parsed.name === "string" ? parsed.name : "",
+        logoUrl: typeof parsed.logoUrl === "string" ? parsed.logoUrl : "",
+        hasCache: true,
+      };
+    }
+  } catch {
+    /* corrupt cache — ignore */
+  }
+  return { name: "", logoUrl: "", hasCache: false };
+}
+
+function writeCachedOrg(name: string, logoUrl: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      ORG_CACHE_KEY,
+      JSON.stringify({ name, logoUrl, savedAt: Date.now() })
+    );
+  } catch {
+    /* quota / private mode — ignore */
+  }
 }

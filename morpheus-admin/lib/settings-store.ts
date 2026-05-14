@@ -114,6 +114,27 @@ export async function setDefaultGeofenceRadius(
 
 // ─── Organisation (name + logo) ────────────────────────────────────────
 
+// Custom-event channel. Sidebar (and any other chrome that paints
+// the org name/logo) subscribes via `subscribeOrgChanges` so a save
+// in /settings/organisation propagates instantly — no page reload.
+const ORG_CHANGED_EVENT = "morpheus.org.changed";
+function notifyOrgChanged(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent(ORG_CHANGED_EVENT));
+  } catch {
+    /* noop */
+  }
+}
+
+/** Subscribe to org name/logo changes. Returns an unsubscribe fn. */
+export function subscribeOrgChanges(onChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const handler = () => onChange();
+  window.addEventListener(ORG_CHANGED_EVENT, handler);
+  return () => window.removeEventListener(ORG_CHANGED_EVENT, handler);
+}
+
 export async function getOrganisationName(): Promise<string> {
   const v = await readSetting<string>("organisation_name", "");
   return typeof v === "string" ? v : "";
@@ -122,7 +143,9 @@ export async function getOrganisationName(): Promise<string> {
 export async function setOrganisationName(
   name: string
 ): Promise<{ ok: boolean; error?: string }> {
-  return writeSetting("organisation_name", name.trim());
+  const r = await writeSetting("organisation_name", name.trim());
+  if (r.ok) notifyOrgChanged();
+  return r;
 }
 
 export async function getOrganisationLogoUrl(): Promise<string> {
@@ -133,7 +156,9 @@ export async function getOrganisationLogoUrl(): Promise<string> {
 export async function setOrganisationLogoUrl(
   url: string
 ): Promise<{ ok: boolean; error?: string }> {
-  return writeSetting("organisation_logo_url", url);
+  const r = await writeSetting("organisation_logo_url", url);
+  if (r.ok) notifyOrgChanged();
+  return r;
 }
 
 // ─── Organisation contact details ──────────────────────────────────────
