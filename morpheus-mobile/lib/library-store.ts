@@ -42,6 +42,15 @@ export interface LibraryFile {
   /** Joined customer info for the ids above (when those customers exist). */
   customers: LibraryFileCustomer[];
   uploadedAt: string;
+  /** Pre-generated signed download URL (1-hour TTL). Populated by
+   *  listLibraryFiles in the same pass that loads the rows — lets
+   *  the rep tile render as a native `<a href>` anchor so the tap
+   *  is treated as a user-initiated navigation. (Lazy on-demand
+   *  fetch broke on iOS standalone PWA: awaiting the signed-URL
+   *  promise between the tap and window.open() lost the user-
+   *  gesture chain → iOS silently blocked the popup → the link
+   *  looked like a dead button.) Null = still loading or RLS error. */
+  downloadUrl: string | null;
 }
 
 interface FileRow {
@@ -78,7 +87,8 @@ async function fetchCustomerLookup(
 
 function rowToFile(
   r: FileRow,
-  lookup: Map<string, LibraryFileCustomer>
+  lookup: Map<string, LibraryFileCustomer>,
+  downloadUrl: string | null
 ): LibraryFile {
   const ids = r.customer_ids || [];
   return {
@@ -93,6 +103,7 @@ function rowToFile(
       .map((id) => lookup.get(id))
       .filter((c): c is LibraryFileCustomer => !!c),
     uploadedAt: r.uploaded_at,
+    downloadUrl,
   };
 }
 
@@ -108,8 +119,30 @@ export async function listLibraryFiles(): Promise<LibraryFile[]> {
     return [];
   }
   const rows = (data as FileRow[]) || [];
+  // Generate signed URLs for every row in one batched call instead
+  // of N sequential roundtrips. Supabase supports this since v2 —
+  // single network request, returns one URL per path.
+  const paths = rows.map((r) => r.storage_path);
+  let urlByPath = new Map<string, string>();
+  if (paths.length > 0) {
+    const { data: signed, error: signErr } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
+    if (signErr) {
+      // eslint-disable-next-line no-console
+      console.warn("[library] batch signed URLs failed:", signErr.message);
+    } else {
+      urlByPath = new Map(
+        ((signed as { path: string | null; signedUrl: string }[]) || [])
+          .filter((s) => s.path && s.signedUrl)
+          .map((s) => [s.path as string, s.signedUrl])
+      );
+    }
+  }
   const lookup = await fetchCustomerLookup(rows);
-  return rows.map((r) => rowToFile(r, lookup));
+  return rows.map((r) =>
+    rowToFile(r, lookup, urlByPath.get(r.storage_path) ?? null)
+  );
 }
 
 export async function getLibraryDownloadUrl(

@@ -14,7 +14,6 @@ import { AppHeader, AppFooter } from "@/components/Chrome";
 import { Glyph, type GlyphName } from "@/components/Glyph";
 import {
   listLibraryFiles,
-  getLibraryDownloadUrl,
   formatFileSize,
   subscribeLibrary,
   LIBRARY_CATEGORIES,
@@ -39,7 +38,10 @@ export default function LibraryPage() {
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("All");
-  const [opening, setOpening] = useState<string | null>(null);
+  // `opening` is no longer needed — each row is a real <a href>,
+  // so clicks are native anchor navigations with no in-flight
+  // state to track. Kept the prop on FileRow as a no-op so the
+  // rest of the layout / loading visuals don't churn.
 
   useEffect(() => {
     let cancelled = false;
@@ -79,26 +81,16 @@ export default function LibraryPage() {
     count: files.filter((f) => (f.category || DEFAULT_CATEGORY) === c).length,
   })).filter((c) => c.count > 0);
 
-  const onOpen = async (f: LibraryFile) => {
-    if (opening) return;
-    setOpening(f.id);
-    const r = await getLibraryDownloadUrl(f.storagePath);
-    setOpening(null);
-    if (!r.ok || !r.url) {
-      alert(`Couldn't open: ${r.error}`);
-      return;
-    }
-    // Library files (PDFs, images, docs) are web URLs that don't
-    // hand off to a separate native app, so the iOS PWA "white
-    // screen after return from external app" bug doesn't apply
-    // here — that bug specifically hits when iOS forwards a
-    // universal link to e.g. the Maps app. For arbitrary web URLs
-    // target="_blank" still gives the expected UX on both
-    // platforms: iOS Safari opens the file in a tab, Android
-    // Chrome opens a custom tab. Switching back to the PWA
-    // restores it cleanly in both cases.
-    window.open(r.url, "_blank", "noopener,noreferrer");
-  };
+  // Old onOpen() handler removed (May 14). Was doing:
+  //   1. setOpening(f.id)
+  //   2. await getLibraryDownloadUrl(...)  ← async!
+  //   3. window.open(signedUrl, "_blank")
+  // On iOS standalone PWA the await between user-tap and window.open
+  // broke the user-gesture chain — iOS treated the eventual window.open
+  // as a non-user-initiated popup and silently blocked it. The tap
+  // looked dead. Fix: pre-generate signed URLs in listLibraryFiles so
+  // each FileRow can be a real <a href> — native anchor activation
+  // bypasses every popup-blocker heuristic on iOS, Android, desktop.
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%" }}>
@@ -173,14 +165,7 @@ export default function LibraryPage() {
         ) : filtered.length === 0 ? (
           <Empty text={`No files match "${query}"`} />
         ) : (
-          filtered.map((f) => (
-            <FileRow
-              key={f.id}
-              file={f}
-              opening={opening === f.id}
-              onClick={() => onOpen(f)}
-            />
-          ))
+          filtered.map((f) => <FileRow key={f.id} file={f} />)
         )}
       </div>
 
@@ -231,42 +216,39 @@ function Empty({ text, sub }: { text: string; sub?: string }) {
   );
 }
 
-function FileRow({
-  file,
-  opening,
-  onClick,
-}: {
-  file: LibraryFile;
-  opening: boolean;
-  onClick: () => void;
-}) {
+function FileRow({ file }: { file: LibraryFile }) {
   const isImage = file.mimeType?.startsWith("image/");
   const tile = isImage
     ? { bg: "#FFEDE3", fg: "#9c4a2c" }
     : file.mimeType === "application/pdf"
     ? { bg: "#FDE4EC", fg: "#9c1a3c" }
     : { bg: MC.brandTint, fg: MC.brandDeep };
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={opening}
-      style={{
-        background: MC.card,
-        border: `1px solid ${MC.line}`,
-        borderRadius: 12,
-        padding: 12,
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        position: "relative",
-        cursor: opening ? "wait" : "pointer",
-        textAlign: "left",
-        opacity: opening ? 0.6 : 1,
-        width: "100%",
-      }}
-    >
+  // URL still resolving (rare — batched signing happens during the
+  // same listLibraryFiles call, so this only flashes on the first
+  // render of a slow connection). When it's null we render a
+  // disabled non-anchor row so the tap doesn't navigate to "#".
+  const downloadUrl = file.downloadUrl;
+  const ready = !!downloadUrl;
+  // Common visual style — shared between the anchor and the
+  // disabled span so the row layout stays consistent across states.
+  const rowStyle: React.CSSProperties = {
+    background: MC.card,
+    border: `1px solid ${MC.line}`,
+    borderRadius: 12,
+    padding: 12,
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    position: "relative",
+    cursor: ready ? "pointer" : "wait",
+    textAlign: "left",
+    opacity: ready ? 1 : 0.6,
+    width: "100%",
+    textDecoration: "none",
+    color: "inherit",
+  };
+  const inner = (
+    <>
       <div
         style={{
           width: 40,
@@ -389,7 +371,28 @@ function FileRow({
       >
         <Glyph name="log" size={16} color={MC.brandDeep} />
       </div>
-    </button>
+    </>
+  );
+  // Real <a href> when the signed URL is ready (so the tap is
+  // treated as a native, user-initiated navigation — which iOS PWA
+  // never blocks). Fall back to a plain disabled <div> until the
+  // URL resolves; should only flash on slow connections.
+  if (ready) {
+    return (
+      <a
+        href={downloadUrl as string}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={rowStyle}
+      >
+        {inner}
+      </a>
+    );
+  }
+  return (
+    <div role="button" aria-disabled="true" style={rowStyle}>
+      {inner}
+    </div>
   );
 }
 

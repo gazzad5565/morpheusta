@@ -202,6 +202,12 @@ export function LiveFeedPanel() {
   // refreshed on visibilitychange so a newly-invited rep shows up
   // when the manager returns to the tab.
   const [reps, setReps] = useState<Profile[]>([]);
+  // Last time we received a realtime event for Needs Action data
+  // (requests or shifts). Drives a small "Live" pulse indicator in
+  // the panel header so the manager can SEE that the subscription
+  // is alive — peace of mind that real-time is actually flowing.
+  // Reset on mount; bumped on every relevant onChange.
+  const [lastLiveAt, setLastLiveAt] = useState<number | null>(null);
 
   // Tab-title alert + sidebar badge are handled in the Sidebar so they
   // work across every page, not just Live Ops. We don't duplicate the
@@ -209,37 +215,49 @@ export function LiveFeedPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+    // `viaRealtime=true` callers also bump lastLiveAt so the header
+    // pulse indicator fires on every Supabase realtime event but
+    // NOT on plain polling ticks (those would make the pulse run
+    // every 15s regardless of actual activity, which is dishonest).
+    const load = async (viaRealtime = false) => {
       const rows = await listPendingRequests();
       if (cancelled) return;
       setRequests(rows);
       setRequestsLoaded(true);
+      if (viaRealtime) setLastLiveAt(Date.now());
     };
-    load();
-    // Same defence-in-depth as the sidebar — realtime is the happy
-    // path but websockets drop and there's a connect-window where
-    // freshly-mounted channels can miss the first INSERT.
-    const unsub = subscribeRequests(load);
+    void load();
+    // Defence in depth — realtime is the happy path but websockets
+    // drop and there's a connect-window where freshly-mounted
+    // channels can miss the first INSERT. Live Ops users are
+    // actively watching, so we poll at 15s here (vs the sidebar's
+    // 60s) and ALSO refetch on window focus (which catches some
+    // iOS Safari cases visibilitychange misses when returning
+    // from another app).
+    const unsub = subscribeRequests(() => void load(true));
     const onVis = () => {
-      if (document.visibilityState === "visible") load();
+      if (document.visibilityState === "visible") void load();
     };
+    const onFocus = () => void load();
     document.addEventListener("visibilitychange", onVis);
-    const poll = window.setInterval(load, 60_000);
+    window.addEventListener("focus", onFocus);
+    const poll = window.setInterval(() => void load(), 15_000);
     return () => {
       cancelled = true;
       unsub();
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onFocus);
       window.clearInterval(poll);
     };
   }, []);
 
   // Attention queue + rep roster — load on mount, subscribe to any
   // shifts-table change (rep raises / withdraws / manager actions
-  // from another tab) + visibility + 60s poll for the same reasons
+  // from another tab) + visibility + 15s poll for the same reasons
   // the requests subscription has them.
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
+    const load = async (viaRealtime = false) => {
       const [rows, profiles] = await Promise.all([
         listOpenAttentionShifts(),
         listProfiles({ role: "rep" }),
@@ -248,18 +266,22 @@ export function LiveFeedPanel() {
       setAttentionShifts(rows);
       setReps(profiles);
       setAttentionLoaded(true);
+      if (viaRealtime) setLastLiveAt(Date.now());
     };
-    load();
-    const unsub = subscribeShifts(load);
+    void load();
+    const unsub = subscribeShifts(() => void load(true));
     const onVis = () => {
-      if (document.visibilityState === "visible") load();
+      if (document.visibilityState === "visible") void load();
     };
+    const onFocus = () => void load();
     document.addEventListener("visibilitychange", onVis);
-    const poll = window.setInterval(load, 60_000);
+    window.addEventListener("focus", onFocus);
+    const poll = window.setInterval(() => void load(), 15_000);
     return () => {
       cancelled = true;
       unsub();
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onFocus);
       window.clearInterval(poll);
     };
   }, []);
@@ -509,6 +531,9 @@ export function LiveFeedPanel() {
         >
           <div
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
               fontFamily: AC.font,
               fontSize: 13,
               fontWeight: 700,
@@ -517,6 +542,12 @@ export function LiveFeedPanel() {
             }}
           >
             Live feed
+            {/* Realtime heartbeat indicator — green dot that pulses
+                briefly each time a postgres_changes event lands for
+                requests OR shifts. Confirms to the manager that the
+                websocket is alive AND that events ARE flowing (not
+                "I'm subscribed but nothing's ever come through"). */}
+            <LivePulse lastLiveAt={lastLiveAt} />
           </div>
           {/* Date range picker — moved up from above the activity
               list (it was duplicating the panel-header vertical
@@ -1489,5 +1520,70 @@ function AttentionRow({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * LivePulse — small realtime heartbeat dot for the Live feed header.
+ *
+ * Calm state: ~6 px steady green dot at the brand-ok colour.
+ * Bumped state: pulse + brighter ring for ~1.2s after the latest
+ * realtime event, so the manager can SEE that something just
+ * flowed through (vs the dot being permanently green and ambiguous
+ * about whether anything's actually working).
+ *
+ * Why a separate component: the pulse needs its own setInterval to
+ * decay the bumped state without re-rendering the rest of the
+ * LiveFeedPanel every tick. Encapsulated here so the parent only
+ * passes a timestamp and the visual is self-contained.
+ */
+function LivePulse({ lastLiveAt }: { lastLiveAt: number | null }) {
+  // Re-render every 600ms while we're inside the "bumped" window so
+  // the green ring fades correctly. Outside the window the interval
+  // is idle (60s tick just to confirm we're still in calm state).
+  const [, force] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => force((v) => v + 1), 600);
+    return () => window.clearInterval(t);
+  }, []);
+  const bumped =
+    lastLiveAt !== null && Date.now() - lastLiveAt < 1500;
+  return (
+    <span
+      title={
+        lastLiveAt
+          ? `Last realtime event: ${new Date(lastLiveAt).toLocaleTimeString()}`
+          : "Connected (no events yet)"
+      }
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+      }}
+    >
+      <span
+        style={{
+          width: 7,
+          height: 7,
+          borderRadius: 999,
+          background: AC.ok,
+          boxShadow: bumped ? `0 0 0 4px ${AC.ok}40` : "none",
+          transition: "box-shadow .25s ease-out",
+        }}
+      />
+      <span
+        style={{
+          fontFamily: AC.font,
+          fontSize: 10.5,
+          fontWeight: 700,
+          letterSpacing: 0.5,
+          textTransform: "uppercase",
+          color: bumped ? AC.ok : AC.mute,
+          transition: "color .25s",
+        }}
+      >
+        Live
+      </span>
+    </span>
   );
 }
