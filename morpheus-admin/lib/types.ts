@@ -43,6 +43,10 @@ export interface Customer {
    *  manager opens the customer's detail page.
    *  See db/migrations/2026_05_13_customers_created_by_rep.sql. */
   createdByRepId?: string | null;
+  /** ISO timestamp from the `customers.created_at` column. Pulled
+   *  by listCustomers + getCustomer so the admin list can sort and
+   *  filter by "recently added" without a separate query. */
+  createdAt?: string;
 }
 
 /**

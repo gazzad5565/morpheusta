@@ -42,8 +42,17 @@ const CustomersMap = dynamic(
   { ssr: false }
 );
 
-type StatusFilter = "all" | "active" | "inactive";
+type StatusFilter = "all" | "active" | "inactive" | "new";
 type ViewMode = "Grid" | "Table" | "Map";
+
+// Window for the "New" filter chip + the "recently added pinned
+// to the top of the list" behaviour. 7 days felt about right —
+// long enough that a customer added Monday is still surfacing on
+// Friday, short enough that the "New" filter isn't a dumping
+// ground for months-old entries. Adjust here if managers want a
+// different feel.
+const NEW_WINDOW_DAYS = 7;
+const NEW_WINDOW_MS = NEW_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 // localStorage key for /customers UI state — persists across nav so
 // going into a customer detail and back doesn't reset the view,
@@ -142,13 +151,27 @@ export default function CustomersPage() {
   const isNew = (c: Customer): boolean =>
     !!c.createdByRepId && !seenIds.has(c.id);
 
+  /** Recently-added gate: created within the last NEW_WINDOW_DAYS.
+   *  Source-agnostic (manager-added counts too — Gary's "I added
+   *  this customer, where is it?" mental model). Drives the new
+   *  "New" filter chip + the pin-to-top behaviour below. */
+  const now = Date.now();
+  const isRecentlyAdded = (c: Customer): boolean => {
+    if (!c.createdAt) return false;
+    const t = Date.parse(c.createdAt);
+    if (Number.isNaN(t)) return false;
+    return now - t < NEW_WINDOW_MS;
+  };
+
   const counts = useMemo(() => {
     const total = customers?.length ?? 0;
     const active = customers?.filter((c) => c.active !== false).length ?? 0;
     const inactive = customers?.filter((c) => c.active === false).length ?? 0;
     const withAddr =
       customers?.filter((c) => c.latitude != null && c.longitude != null).length ?? 0;
-    return { total, active, inactive, withAddr };
+    const recent = customers?.filter(isRecentlyAdded).length ?? 0;
+    return { total, active, inactive, withAddr, recent };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customers]);
 
   const filtered = useMemo(() => {
@@ -156,6 +179,7 @@ export default function CustomersPage() {
     let out = customers;
     if (statusFilter === "active") out = out.filter((c) => c.active !== false);
     if (statusFilter === "inactive") out = out.filter((c) => c.active === false);
+    if (statusFilter === "new") out = out.filter(isRecentlyAdded);
     if (withAddressOnly) out = out.filter((c) => c.latitude != null && c.longitude != null);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -168,7 +192,16 @@ export default function CustomersPage() {
     }
     // Sort — only impacts Table view visually, but the order is stable
     // across views so toggling Grid ↔ Table doesn't shuffle cards.
+    //
+    // Recently-added customers ALWAYS surface at the top regardless
+    // of which sort the user picked. Within the "recent" group + the
+    // "older" group, the user's chosen sort applies normally. This
+    // resolves Gary's "I added a customer and can't see it" feedback
+    // without overriding the sort UI affordances.
     const sorted = [...out].sort((a, b) => {
+      const aRecent = isRecentlyAdded(a);
+      const bRecent = isRecentlyAdded(b);
+      if (aRecent !== bRecent) return aRecent ? -1 : 1;
       switch (sort.key) {
         case "name":
           return compareBy(a, b, (c) => c.name, sort.dir);
@@ -181,6 +214,7 @@ export default function CustomersPage() {
       }
     });
     return sorted;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customers, statusFilter, withAddressOnly, search, sort]);
 
   return (
@@ -217,6 +251,12 @@ export default function CustomersPage() {
               onClick={() => setStatusFilter("inactive")}
             >
               Inactive · {counts.inactive}
+            </FilterChip>
+            <FilterChip
+              active={statusFilter === "new"}
+              onClick={() => setStatusFilter("new")}
+            >
+              New · {counts.recent}
             </FilterChip>
             <FilterChip
               active={withAddressOnly}

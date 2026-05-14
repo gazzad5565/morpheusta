@@ -36,6 +36,10 @@ interface DbRow {
    *  /add-customer (Feature A — May 13). NULL when admin-created.
    *  Drives the "NEW" badge on the customers list. */
   created_by_rep_id: string | null;
+  /** Supabase auto-managed timestamp. Used by the admin /customers
+   *  list to surface recently-added customers + power the "New"
+   *  filter chip. */
+  created_at?: string | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -58,6 +62,7 @@ function rowToCustomer(row: DbRow): Customer {
     timingExceptionsEnabled: row.timing_exceptions_enabled,
     logoUrl: row.logo_url ?? null,
     createdByRepId: row.created_by_rep_id ?? null,
+    createdAt: row.created_at ?? undefined,
   };
 }
 
