@@ -30,11 +30,8 @@ import { LIVE_FEED_NEEDS_ACTION_HASH } from "@/components/screens/live-ops/LiveF
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import { countTasksForCustomers } from "@/lib/tasks-store";
-import {
-  listPendingRequests,
-  subscribeRequests,
-  type PendingRequest,
-} from "@/lib/requests-store";
+import { type PendingRequest } from "@/lib/requests-store";
+import { useNeedsAction } from "@/lib/needs-action-context";
 
 const STATE_MAP: Record<string, { label: string; bg: string; ink: string; dot: string }> = {
   "in-progress": { label: "In progress", bg: AC.okTint, ink: "#0F5A38", dot: AC.ok },
@@ -100,7 +97,11 @@ type ListRow =
 
 export function ShiftsList() {
   const [rows, setRows] = useState<ShiftRow[]>([]);
-  const [requests, setRequests] = useState<PendingRequest[]>([]);
+  // Pending requests now come from the shared NeedsActionContext —
+  // see lib/needs-action-context.tsx. Single subscription across
+  // Sidebar / LiveFeedPanel / this list means the counts stay
+  // identical across all three surfaces in the same React frame.
+  const { requests, attentionShifts: contextAttentionShifts } = useNeedsAction();
   const [reps, setReps] = useState<Record<string, RepLite>>({});
   // Live customer-task counts. The shifts.tasks_total column is set
   // once at shift-creation time (or auto-derived from customer_tasks
@@ -114,13 +115,17 @@ export function ShiftsList() {
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<string>("All");
 
+  // Today's shifts list + rep roster — `requests` is no longer
+  // fetched here (the shared NeedsActionContext owns it; see above).
+  // We still subscribe to the `shifts` table for the today's-list
+  // contents — that's not the same data set as the needs-action
+  // context (which is filtered by attention/resolved state).
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const [shiftRows, profileRows, requestRows] = await Promise.all([
+      const [shiftRows, profileRows] = await Promise.all([
         listShifts(),
         listProfiles(),
-        listPendingRequests(),
       ]);
       if (cancelled) return;
       const repMap: Record<string, RepLite> = {};
@@ -133,12 +138,11 @@ export function ShiftsList() {
       }
       setReps(repMap);
       setRows(shiftRows);
-      setRequests(requestRows);
       setLoading(false);
 
       // Refresh the per-customer task counts off the visible shifts.
-      // This is N+1-safe — countTasksForCustomers does two batched
-      // queries regardless of customer count.
+      // N+1-safe — countTasksForCustomers does two batched queries
+      // regardless of customer count.
       const customerIds = Array.from(
         new Set(shiftRows.map((s) => s.customer_id).filter(Boolean))
       );
@@ -150,11 +154,7 @@ export function ShiftsList() {
       }
     };
     load();
-    // Realtime + visibility refetch on BOTH shifts and requested_shifts
-    // so the today's-shifts list (which now includes pending requests)
-    // stays current without a manual refresh.
     const unsubShifts = subscribeShifts(load);
-    const unsubRequests = subscribeRequests(load);
     const onVis = () => {
       if (document.visibilityState === "visible") load();
     };
@@ -162,7 +162,6 @@ export function ShiftsList() {
     return () => {
       cancelled = true;
       unsubShifts();
-      unsubRequests();
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
@@ -203,26 +202,31 @@ export function ShiftsList() {
     if (active === "Unassigned")
       return shiftRows.filter((r) => r.kind === "shift" && !r.shift.rep_id);
     if (active === "Needs action") {
-      // Needs action = anything that requires the manager to make a
-      // call right now: a rep flagged "I can't make this shift"
-      // (attention='unable_to_attend'), OR a rep submitted a new
-      // shift request waiting for approval/decline. Live Feed's
-      // Needs Action pill counts both; this filter mirrors that so
-      // the two surfaces stay consistent — managers were seeing the
-      // Live Feed counter climb while this list stayed empty after
-      // a rep requested a store.
-      return [
-        ...reqRows,
-        ...shiftRows.filter(
-          (r) => r.kind === "shift" && isNeedsAction(r.shift)
-        ),
-      ];
+      // Needs action items pulled from the shared NeedsActionContext
+      // — all pending requests AND all open attention shifts,
+      // regardless of date. Matches the Sidebar badge + LiveFeed
+      // pill counts exactly. Previously this filter walked today's
+      // shifts only, which made it disagree with the other two
+      // surfaces whenever an attention overlay sat on a non-today
+      // shift.
+      //
+      // We synthesise shift rows for any attention shift not already
+      // in `rows` so the list shows all relevant items even when
+      // they're not in today's view.
+      const todayShiftIds = new Set(rows.map((s) => s.id));
+      const attentionNotInToday = contextAttentionShifts
+        .filter((s) => !todayShiftIds.has(s.id))
+        .map((s) => ({ kind: "shift" as const, shift: s }));
+      const attentionInToday = shiftRows.filter(
+        (r) => r.kind === "shift" && isNeedsAction(r.shift)
+      );
+      return [...reqRows, ...attentionInToday, ...attentionNotInToday];
     }
     const key = active.toLowerCase().replace(" ", "-");
     return shiftRows.filter(
       (r) => r.kind === "shift" && effectiveState(r.shift) === key
     );
-  }, [rows, requests, active]);
+  }, [rows, requests, active, contextAttentionShifts]);
 
   // Per-tab counts so each filter shows a tiny "1" / "3" pill next to
   // its label. Subtle when zero, brand-tinted when there's something
@@ -244,9 +248,16 @@ export function ShiftsList() {
     ).length;
     const onBreak = rows.filter((s) => effectiveState(s) === "on-break").length;
     const unassigned = rows.filter((s) => !s.rep_id).length;
-    // Needs Action count = pending requests + attention-flagged
-    // shifts. Same definition Live Feed's pill uses.
-    const needsAction = rows.filter(isNeedsAction).length + dedupedRequests.length;
+    // Needs Action count = pending requests + open attention shifts
+    // from the SHARED NeedsActionContext — same source the Sidebar
+    // badge and the LiveFeedPanel "Needs action" tab pill read from.
+    // Single derivation = identical numbers across all three
+    // surfaces in the same React frame. Previously this was
+    // `rows.filter(isNeedsAction).length + dedupedRequests.length`,
+    // which filtered to TODAY's attention shifts only — that drifted
+    // away from the other two surfaces whenever an attention overlay
+    // sat on a future or past shift.
+    const needsAction = requests.length + contextAttentionShifts.length;
     return {
       All: totalShifts + dedupedRequests.length,
       "Needs action": needsAction,
@@ -256,7 +267,7 @@ export function ShiftsList() {
       Unassigned: unassigned,
       Requested: dedupedRequests.length,
     };
-  }, [rows, requests]);
+  }, [rows, requests, contextAttentionShifts]);
 
   return (
     <Card padding={0}>

@@ -13,8 +13,7 @@ import {
   getOrganisationLogoUrl,
   subscribeOrgChanges,
 } from "@/lib/settings-store";
-import { listPendingRequests, subscribeRequests } from "@/lib/requests-store";
-import { listOpenAttentionShifts, subscribeShifts } from "@/lib/shifts-store";
+import { useNeedsAction } from "@/lib/needs-action-context";
 import { nameFromEmail, initialsFromNameOrEmail } from "@/lib/format";
 
 function userDisplayBits(email: string | null | undefined): { name: string; initials: string } {
@@ -44,15 +43,13 @@ export function Sidebar() {
   // skeleton during the in-flight fetch rather than the brand cube
   // (which the user otherwise sees and reads as "wrong logo").
   const [orgLoaded, setOrgLoaded] = useState<boolean>(() => readCachedOrg().hasCache);
-  // Two queues both feed the Live Ops "Needs action" badge:
-  //   - Pending rep-requests for NEW shifts (requested_shifts table)
-  //   - Open unable-to-attend overlays on EXISTING shifts (shifts.attention)
-  // The badge sums them — one number tells the manager exactly how
-  // many things still want their attention. Kept live across every
-  // page so they see it no matter where they are.
-  const [pendingCount, setPendingCount] = useState<number>(0);
-  const [attentionCount, setAttentionCount] = useState<number>(0);
-  const needsActionCount = pendingCount + attentionCount;
+  // Needs Action count now comes from the shared NeedsActionContext
+  // (provided at AdminShell level). One subscription, one source of
+  // truth — the previous three independent subscribers drifted out of
+  // sync after realtime DELETE events (Gary saw 2 / 1 / 0 on the same
+  // screen). See lib/needs-action-context.tsx for the rationale.
+  const { count: needsActionCount, refresh: refreshNeedsAction } = useNeedsAction();
+
   useEffect(() => {
     let cancelled = false;
     getUser().then((u) => {
@@ -78,68 +75,12 @@ export function Sidebar() {
     };
   }, []);
 
-  // Pending requests — defence in depth so the sidebar badge can't
-  // silently drift to a stale count.
-  //   - initial fetch on mount
-  //   - realtime sub for live updates (best case, sub-second)
-  //   - visibilitychange refetch (covers backgrounded tabs / sleeping
-  //     phones where the websocket gets killed)
-  //   - 60-second poll (ultimate safety net for the case where
-  //     realtime silently drops without firing onError)
-  // The sidebar lives at layout level so this runs across every page.
+  // Refetch the shared needs-action data on every pathname change —
+  // covers the timing window where a request landed during nav
+  // transitions and the websocket reconnected just after.
   useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      const rows = await listPendingRequests();
-      if (!cancelled) setPendingCount(rows.length);
-    };
-    refresh();
-    const unsub = subscribeRequests(refresh);
-    const onVis = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    const poll = window.setInterval(refresh, 60_000);
-    return () => {
-      cancelled = true;
-      unsub();
-      document.removeEventListener("visibilitychange", onVis);
-      window.clearInterval(poll);
-    };
-  }, []);
-
-  // Attention overlay — same defence-in-depth: initial fetch +
-  // realtime shifts subscription + visibility refetch + 60s poll.
-  // Drives the sidebar badge in lockstep with pendingCount so a
-  // rep flagging "I can't make it" lights up Live Ops everywhere.
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      const rows = await listOpenAttentionShifts();
-      if (!cancelled) setAttentionCount(rows.length);
-    };
-    refresh();
-    const unsub = subscribeShifts(refresh);
-    const onVis = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-    document.addEventListener("visibilitychange", onVis);
-    const poll = window.setInterval(refresh, 60_000);
-    return () => {
-      cancelled = true;
-      unsub();
-      document.removeEventListener("visibilitychange", onVis);
-      window.clearInterval(poll);
-    };
-  }, []);
-
-  // Also refetch on every pathname change — covers the timing window
-  // where a request lands while a fresh realtime channel hasn't quite
-  // connected, or when the websocket dropped between page nav.
-  useEffect(() => {
-    listPendingRequests().then((rows) => setPendingCount(rows.length));
-    listOpenAttentionShifts().then((rows) => setAttentionCount(rows.length));
-  }, [pathname]);
+    refreshNeedsAction();
+  }, [pathname, refreshNeedsAction]);
 
   // Browser tab title alert — prepend "(N) " when something needs
   // attention so the manager notices on a different tab/window.

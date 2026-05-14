@@ -24,12 +24,11 @@ import { AGlyph } from "@/components/ui/AGlyph";
 import { Btn } from "@/components/ui/Btn";
 import { Combobox } from "@/components/ui/Combobox";
 import {
-  listPendingRequests,
   deleteRequest,
   approveRequest,
-  subscribeRequests,
   type PendingRequest,
 } from "@/lib/requests-store";
+import { useNeedsAction } from "@/lib/needs-action-context";
 import {
   listRecentEvents,
   countRecentEvents,
@@ -39,13 +38,11 @@ import {
   type ShiftEvent,
 } from "@/lib/events-store";
 import {
-  listOpenAttentionShifts,
   listRepConflictsForSlot,
   reassignShift,
   releaseShift,
   acknowledgeAttention,
   cancelShiftFromAttention,
-  subscribeShifts,
   type ShiftRow,
 } from "@/lib/shifts-store";
 import {
@@ -178,9 +175,20 @@ export function LiveFeedPanel() {
   // a manager who has deliberately switched back to a 0-count tab.
   // (Implemented further down where needsActionCount is in scope.)
 
-  // Pending requests (Needs action)
-  const [requests, setRequests] = useState<PendingRequest[]>([]);
-  const [requestsLoaded, setRequestsLoaded] = useState(false);
+  // Needs Action data — pending requests + open attention shifts —
+  // now comes from the shared NeedsActionContext at AdminShell level.
+  // One subscription, one source of truth, identical numbers across
+  // Sidebar, ShiftsList, and this panel. See
+  // lib/needs-action-context.tsx for the full rationale.
+  const {
+    requests,
+    attentionShifts,
+    loaded: needsActionLoaded,
+    lastEventAt: contextLastLiveAt,
+    refresh: refreshNeedsAction,
+  } = useNeedsAction();
+  const requestsLoaded = needsActionLoaded;
+  const attentionLoaded = needsActionLoaded;
   const [busyId, setBusyId] = useState<string | null>(null);
 
   // Activity (All activity)
@@ -193,96 +201,38 @@ export function LiveFeedPanel() {
   // HEAD query.
   const [eventsTotal, setEventsTotal] = useState<number>(0);
 
-  // Unable-to-attend shifts (also in Needs action). Loaded separately
-  // from requests because the underlying tables are different and
-  // each has its own realtime channel.
-  const [attentionShifts, setAttentionShifts] = useState<ShiftRow[]>([]);
-  const [attentionLoaded, setAttentionLoaded] = useState(false);
   // Rep roster used by the Reassign picker. Loaded once on mount;
   // refreshed on visibilitychange so a newly-invited rep shows up
   // when the manager returns to the tab.
   const [reps, setReps] = useState<Profile[]>([]);
-  // Last time we received a realtime event for Needs Action data
-  // (requests or shifts). Drives a small "Live" pulse indicator in
-  // the panel header so the manager can SEE that the subscription
-  // is alive — peace of mind that real-time is actually flowing.
-  // Reset on mount; bumped on every relevant onChange.
-  const [lastLiveAt, setLastLiveAt] = useState<number | null>(null);
+  // The "Live" pulse indicator reads from the shared context's
+  // lastEventAt — fires on every realtime event flowing through
+  // the provider, in lockstep with the Sidebar badge updates.
+  const lastLiveAt = contextLastLiveAt;
 
   // Tab-title alert + sidebar badge are handled in the Sidebar so they
   // work across every page, not just Live Ops. We don't duplicate the
   // logic here.
 
+  // Rep roster — loaded once on mount + refreshed on
+  // visibilitychange so a newly-invited rep shows up when the
+  // manager returns to the tab. The needs-action data
+  // (requests + attentionShifts) is now provided by
+  // NeedsActionContext; this effect only handles the rep list.
   useEffect(() => {
     let cancelled = false;
-    // `viaRealtime=true` callers also bump lastLiveAt so the header
-    // pulse indicator fires on every Supabase realtime event but
-    // NOT on plain polling ticks (those would make the pulse run
-    // every 15s regardless of actual activity, which is dishonest).
-    const load = async (viaRealtime = false) => {
-      const rows = await listPendingRequests();
-      if (cancelled) return;
-      setRequests(rows);
-      setRequestsLoaded(true);
-      if (viaRealtime) setLastLiveAt(Date.now());
+    const load = async () => {
+      const profiles = await listProfiles({ role: "rep" });
+      if (!cancelled) setReps(profiles);
     };
     void load();
-    // Defence in depth — realtime is the happy path but websockets
-    // drop and there's a connect-window where freshly-mounted
-    // channels can miss the first INSERT. Live Ops users are
-    // actively watching, so we poll at 15s here (vs the sidebar's
-    // 60s) and ALSO refetch on window focus (which catches some
-    // iOS Safari cases visibilitychange misses when returning
-    // from another app).
-    const unsub = subscribeRequests(() => void load(true));
     const onVis = () => {
       if (document.visibilityState === "visible") void load();
     };
-    const onFocus = () => void load();
     document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("focus", onFocus);
-    const poll = window.setInterval(() => void load(), 15_000);
     return () => {
       cancelled = true;
-      unsub();
       document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("focus", onFocus);
-      window.clearInterval(poll);
-    };
-  }, []);
-
-  // Attention queue + rep roster — load on mount, subscribe to any
-  // shifts-table change (rep raises / withdraws / manager actions
-  // from another tab) + visibility + 15s poll for the same reasons
-  // the requests subscription has them.
-  useEffect(() => {
-    let cancelled = false;
-    const load = async (viaRealtime = false) => {
-      const [rows, profiles] = await Promise.all([
-        listOpenAttentionShifts(),
-        listProfiles({ role: "rep" }),
-      ]);
-      if (cancelled) return;
-      setAttentionShifts(rows);
-      setReps(profiles);
-      setAttentionLoaded(true);
-      if (viaRealtime) setLastLiveAt(Date.now());
-    };
-    void load();
-    const unsub = subscribeShifts(() => void load(true));
-    const onVis = () => {
-      if (document.visibilityState === "visible") void load();
-    };
-    const onFocus = () => void load();
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("focus", onFocus);
-    const poll = window.setInterval(() => void load(), 15_000);
-    return () => {
-      cancelled = true;
-      unsub();
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("focus", onFocus);
-      window.clearInterval(poll);
     };
   }, []);
 
@@ -365,7 +315,11 @@ export function LiveFeedPanel() {
       alert(`Couldn't approve: ${result.error}`);
       return;
     }
-    setRequests((rs) => rs.filter((x) => x.id !== r.id));
+    // Trigger the shared context refresh — picks up the new state
+    // immediately AND retries at t+1s / t+3s to handle replica lag.
+    // The realtime DELETE event will ALSO fire and trigger the same
+    // path, so we have belt-and-braces coverage.
+    refreshNeedsAction();
   };
 
   const onDecline = async (r: PendingRequest) => {
@@ -377,18 +331,16 @@ export function LiveFeedPanel() {
       alert(`Couldn't decline: ${result.error}`);
       return;
     }
-    setRequests((rs) => rs.filter((x) => x.id !== r.id));
+    refreshNeedsAction();
   };
 
   // ─── Attention (unable-to-attend) actions ───────────────────────────
-  // Each handler optimistically removes the row from local state and
-  // then trusts the realtime channel + 60s poll to keep things in
-  // sync. If the DB call fails we re-fetch to roll back UI.
-
-  const refetchAttention = async () => {
-    const rows = await listOpenAttentionShifts();
-    setAttentionShifts(rows);
-  };
+  // Each handler delegates to the shared NeedsActionContext for
+  // post-mutation refresh. The context's realtime sub fires
+  // independently AND the explicit refresh() call below kicks an
+  // immediate refetch + t+1s / t+3s replica-lag retry — so the row
+  // disappears from every surface (sidebar badge, this panel,
+  // ShiftsList tab count) in the same React frame.
 
   const onReassign = async (shift: ShiftRow, newRepId: string) => {
     setBusyId(shift.id);
@@ -396,10 +348,8 @@ export function LiveFeedPanel() {
     setBusyId(null);
     if (!r.ok) {
       alert(`Couldn't reassign: ${r.error}`);
-      await refetchAttention();
-      return;
     }
-    setAttentionShifts((rs) => rs.filter((x) => x.id !== shift.id));
+    refreshNeedsAction();
   };
 
   const onRelease = async (shift: ShiftRow) => {
@@ -412,10 +362,8 @@ export function LiveFeedPanel() {
     setBusyId(null);
     if (!r.ok) {
       alert(`Couldn't release: ${r.error}`);
-      await refetchAttention();
-      return;
     }
-    setAttentionShifts((rs) => rs.filter((x) => x.id !== shift.id));
+    refreshNeedsAction();
   };
 
   const onAcknowledge = async (shift: ShiftRow) => {
@@ -432,10 +380,8 @@ export function LiveFeedPanel() {
     setBusyId(null);
     if (!r.ok) {
       alert(`Couldn't acknowledge: ${r.error}`);
-      await refetchAttention();
-      return;
     }
-    setAttentionShifts((rs) => rs.filter((x) => x.id !== shift.id));
+    refreshNeedsAction();
   };
 
   const onCancelShift = async (shift: ShiftRow) => {
@@ -452,10 +398,8 @@ export function LiveFeedPanel() {
     setBusyId(null);
     if (!r.ok) {
       alert(`Couldn't cancel: ${r.error}`);
-      await refetchAttention();
-      return;
     }
-    setAttentionShifts((rs) => rs.filter((x) => x.id !== shift.id));
+    refreshNeedsAction();
   };
 
   // Total open items across both flavours of "Needs action": rep
