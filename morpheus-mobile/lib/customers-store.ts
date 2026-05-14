@@ -340,7 +340,13 @@ export async function geocodeAddress(
  * the "set this customer's location" prompt.
  */
 export async function setCustomerSiteCoords(args: {
-  siteId: string;
+  /** Null when the shift was scheduled against a customer that
+   *  doesn't have a customer_sites row yet (legacy data, or rep-
+   *  created customer whose auto-site creation missed). In that
+   *  case we look up the customer's primary site OR create one,
+   *  then write the coords against it — so the rep can ALWAYS
+   *  self-pin a location and never has to "flag the manager". */
+  siteId: string | null;
   customerId: string;
   latitude: number;
   longitude: number;
@@ -364,8 +370,45 @@ export async function setCustomerSiteCoords(args: {
   if (!isSupabaseConfigured() || !supabase) {
     return { ok: false, error: "Database not configured" };
   }
-  const { siteId, customerId, latitude, longitude, source, resolvedDescription } = args;
+  const { customerId, latitude, longitude, source, resolvedDescription } = args;
+  let { siteId } = args;
   const cleanName = (args.name || "").trim();
+
+  // Resolve a real siteId when the caller didn't have one. Two
+  // sub-steps:
+  //   (a) try to find the customer's primary site (active first)
+  //   (b) if none exists, create a new "Head office" site
+  // This is what makes the rep-side flow tolerant of legacy data
+  // where shifts.site_id is null + customers have no site rows.
+  if (!siteId) {
+    const { data: existingSite } = await supabase
+      .from("customer_sites")
+      .select("id")
+      .eq("customer_id", customerId)
+      .order("active", { ascending: false })
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    siteId = (existingSite as { id?: string } | null)?.id ?? null;
+    if (!siteId) {
+      const { data: created, error: createErr } = await supabase
+        .from("customer_sites")
+        .insert({
+          customer_id: customerId,
+          name: cleanName || "Head office",
+          latitude,
+          longitude,
+          geofence_radius_m: 100,
+        })
+        .select("id")
+        .single();
+      if (createErr) return { ok: false, error: createErr.message };
+      siteId = (created as { id: string } | null)?.id ?? null;
+      if (!siteId) {
+        return { ok: false, error: "Couldn't create a site for this customer." };
+      }
+    }
+  }
 
   // 1. Update the customer_sites row — this is the one mobile uses
   //    for the geofence on check-in/out. When a name is supplied
@@ -393,6 +436,25 @@ export async function setCustomerSiteCoords(args: {
     .update(siteUpdate)
     .eq("id", siteId);
   if (siteErr) return { ok: false, error: siteErr.message };
+
+  // Backfill the shift's site_id link too so the next /active load
+  // resolves the site through the normal join. We don't know which
+  // shift the rep is on at this layer, so just patch every shift
+  // for this customer + this rep that's missing a site_id. Cheap
+  // (1–2 rows in practice). Service-role isn't needed — RLS lets
+  // the rep update their own shifts.
+  {
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+    if (userId) {
+      await supabase
+        .from("shifts")
+        .update({ site_id: siteId })
+        .eq("customer_id", customerId)
+        .eq("rep_id", userId)
+        .is("site_id", null);
+    }
+  }
 
   // 2. ALSO update the parent customers row if it's missing coords.
   //    Admin's customers page shows lat/lng on the customer overview;

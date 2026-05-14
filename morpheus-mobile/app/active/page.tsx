@@ -29,6 +29,7 @@ import {
   subscribeShiftTaskSignatures,
 } from "@/lib/signature-store";
 import { SignaturePad } from "@/components/SignaturePad";
+import { MapPreview } from "@/components/MapPreview";
 import {
   getMyActiveShift,
   getTasksForCustomer,
@@ -1058,83 +1059,94 @@ export default function ActiveShiftPage() {
               type scale all dropped one notch per Gary's "card is a
               touch too big" feedback so the address reads as a
               line of info, not a hero. */}
-          <div
-            style={{
-              marginTop: 10,
-              padding: "7px 10px",
-              background: shift.siteAddress ? MC.bg : MC.warnTint,
-              borderRadius: 9,
-              border: `1px solid ${shift.siteAddress ? MC.line : `${MC.warn}33`}`,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <span
+          {/* Location row — three states:
+              1. Coords + address  → small inline map + address text
+                 (calm; tappable to open Google Maps)
+              2. Coords + NO address → small inline map + "Pinned
+                 location" label. Previously this fell through to
+                 "flag manager" which was wrong — a site CAN have
+                 coords from a rep-geocode without ever having a
+                 street address typed in. (Gary's report May 14.)
+              3. No coords         → render nothing here. The
+                 GeocodeTaskCard above the hero owns the "needs
+                 geocoding" affordance; duplicating a "flag manager"
+                 warning under the hero would be noise.
+              The map preview is the cool-little-map per Gary's ask
+              — visible at a glance, no tap needed. Tapping the
+              entire row still deep-links to Google Maps. */}
+          {(shift.siteLat != null && shift.siteLng != null) && (
+            <div
               style={{
-                width: 20,
-                height: 20,
-                borderRadius: 6,
+                marginTop: 10,
+                borderRadius: 10,
+                border: `1px solid ${MC.line}`,
+                overflow: "hidden",
                 background: "#fff",
-                border: `1px solid ${shift.siteAddress ? MC.line : `${MC.warn}55`}`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
               }}
             >
-              <Glyph
-                name="pin"
-                size={11}
-                color={shift.siteAddress ? MC.brandDeep : MC.warn}
-                strokeWidth={2.4}
+              <MapPreview
+                latitude={shift.siteLat}
+                longitude={shift.siteLng}
+                height={110}
               />
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              {shift.siteAddress ? (
-                <a
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shift.siteAddress)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+              <a
+                href={
+                  shift.siteAddress
+                    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shift.siteAddress)}`
+                    : `https://www.google.com/maps/search/?api=1&query=${shift.siteLat},${shift.siteLng}`
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 10px",
+                  textDecoration: "none",
+                  borderTop: `1px solid ${MC.line}`,
+                }}
+                title={shift.siteAddress || "Pinned location"}
+              >
+                <span
                   style={{
-                    fontFamily: MC.font,
-                    fontSize: 11.5,
-                    color: MC.ink2,
-                    lineHeight: 1.35,
-                    textDecoration: "none",
-                    display: "block",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
+                    width: 18,
+                    height: 18,
+                    borderRadius: 5,
+                    background: MC.brandTint,
+                    border: `1px solid ${MC.brand}33`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
                   }}
-                  title={shift.siteAddress}
                 >
-                  {shift.siteAddress}
-                </a>
-              ) : (
+                  <Glyph
+                    name="pin"
+                    size={10}
+                    color={MC.brandDeep}
+                    strokeWidth={2.4}
+                  />
+                </span>
                 <div
                   style={{
+                    flex: 1,
+                    minWidth: 0,
                     fontFamily: MC.font,
                     fontSize: 11.5,
-                    color: "#7A560A",
-                    fontWeight: 600,
+                    color: shift.siteAddress ? MC.ink2 : MC.mute,
                     lineHeight: 1.35,
                     whiteSpace: "nowrap",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
+                    fontStyle: shift.siteAddress ? "normal" : "italic",
                   }}
                 >
-                  No address on file — flag this with your manager.
+                  {shift.siteAddress || "Pinned location"}
                 </div>
-              )}
+                <Glyph name="chev-r" size={14} color={MC.hint} />
+              </a>
             </div>
-            {shift.siteAddress && (
-              // Tiny chevron to make the row read as tappable (opens
-              // Google Maps in a new tab on web, or the system
-              // default maps app on mobile via the URL handler).
-              <Glyph name="chev-r" size={14} color={MC.hint} />
-            )}
-          </div>
+          )}
 
           {/* Site contact strip — only renders when the site has any
               contact info filled in. Phone + email are tappable so a
@@ -1451,13 +1463,14 @@ export default function ActiveShiftPage() {
         </div>
       </div>
 
-      {/* Geocode-task card (Feature B — May 13).
-          Renders only when the shift's site is missing lat/lng.
-          Treats geocoding as a synthetic task that sits ABOVE the
-          real task list so the rep knows to do it first. Two
-          paths: GPS-snap (most accurate when actually on-site) or
-          server-side Nominatim geocode of the typed address. */}
-      {shiftData && (shiftData.siteLat === null || shiftData.siteLng === null) && shiftData.siteId && (
+      {/* Geocode-task card (Feature B — May 13; relaxed May 14).
+          Renders whenever the shift's site is missing coords. The
+          rep can ALWAYS self-pin from here — we never want a "flag
+          your manager" dead-end since the rep is the one standing
+          at the place. setCustomerSiteCoords handles the
+          siteId=null case by looking up the customer's primary site
+          (or creating one) at submit time. */}
+      {shiftData && (shiftData.siteLat === null || shiftData.siteLng === null) && (
         <div style={{ padding: "12px 16px 0" }}>
           <GeocodeTaskCard
             siteId={shiftData.siteId}
@@ -2649,7 +2662,12 @@ function GeocodeTaskCard({
   customerName,
   onResolved,
 }: {
-  siteId: string;
+  /** Null when the shift was scheduled against a customer that
+   *  doesn't have a customer_sites row yet (legacy data, or a
+   *  rep-created customer whose auto-site-creation missed). In
+   *  that case setCustomerSiteCoords will look up or create a
+   *  primary site for the customer at submit time. */
+  siteId: string | null;
   customerId: string;
   customerName: string;
   /** Called after a successful save. Parent (/active) refetches
