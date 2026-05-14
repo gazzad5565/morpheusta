@@ -39,6 +39,15 @@ export const viewport = {
   maximumScale: 1,
   userScalable: false,
   themeColor: "#171A1F",
+  // viewportFit:"cover" is what makes env(safe-area-inset-*)
+  // resolve to real values on iPhones (notch + home indicator)
+  // and recent Android devices with rounded screens. Without it,
+  // iOS clamps every safe-area inset to 0 — which made the
+  // AppFooter's calc(env(safe-area-inset-bottom) + 18px) collapse
+  // to a flat 18px, putting "POWERED BY …" behind the home-
+  // indicator overlay. Page-level top headers also use the inset,
+  // so this one switch fixes both ends.
+  viewportFit: "cover" as const,
 };
 
 export default function RootLayout({
