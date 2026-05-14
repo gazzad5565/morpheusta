@@ -586,20 +586,48 @@ export async function checkInToShift(
     .eq("id", shiftId)
     .maybeSingle();
 
+  // Refuse to "check in" to an already-completed shift. Otherwise
+  // a stale mobile cache + a tap on Resume/Check-in lets the rep
+  // re-open a shift that the auto-checkout sweep (or a manual
+  // check-out) has already closed. We previously stamped a fresh
+  // check_in_at while leaving the old check_out_at intact —
+  // producing rows where check_in_at > check_out_at, which is what
+  // Gary saw on Mariska's timesheet on 2026-05-14.
+  // We ALSO null check_out_at on the update so even if a race
+  // somehow lands a fresh check-in after a sweep stamped an
+  // earlier check_out_at, the row stays internally consistent
+  // (check_in_at <= check_out_at always, or check_out_at is null).
   const { data: updated, error } = await supabase
     .from("shifts")
     .update({
       state: "in-progress",
       check_in_at: new Date().toISOString(),
+      check_out_at: null,
       rep_id: userId,
     })
     .eq("id", shiftId)
-    // Only succeed when the shift is unassigned or already mine.
-    // Postgrest .or() syntax: comma-separated filters in one OR group.
+    // Only succeed when (a) the shift is unassigned or already
+    // mine, AND (b) it isn't already complete or cancelled. The
+    // Postgrest .or() / .not() chain combines as AND across calls.
     .or(`rep_id.is.null,rep_id.eq.${userId}`)
-    .select("id");
+    .not("state", "in", "(complete,cancelled)")
+    .select("id, state");
   if (error) return { ok: false, error: error.message };
   if (!updated || updated.length === 0) {
+    // Filter rejected the row. Read it back to give a precise
+    // error — assigned to someone else vs. already completed.
+    const { data: row } = await supabase
+      .from("shifts")
+      .select("rep_id, state")
+      .eq("id", shiftId)
+      .maybeSingle();
+    const r = row as { rep_id?: string | null; state?: string } | null;
+    if (r?.state === "complete" || r?.state === "cancelled") {
+      return {
+        ok: false,
+        error: `That shift was already ${r.state} — please refresh and pick a fresh shift.`,
+      };
+    }
     return {
       ok: false,
       error: "That shift is assigned to another rep — can't check in.",
