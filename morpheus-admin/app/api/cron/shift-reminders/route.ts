@@ -191,10 +191,45 @@ async function runningLateSweep(): Promise<SweepResult> {
     }
   }
 
-  // Fire pushes + log idempotency events in parallel.
+  // Write the idempotency marker FIRST, then push only if the marker
+  // landed. Inverted from the original "push, then mark" order
+  // (May 14, Gary's report): a rep was getting a "running late"
+  // push every 5 minutes because the marker insert was failing
+  // silently — the code awaited the insert but never checked the
+  // returned error, so a transient DB error or any other glitch
+  // left no marker and the next cron tick re-fired the push.
+  //
+  // Pushing AFTER a confirmed marker means:
+  //  - If the marker insert fails we log loudly + skip the push,
+  //    so the rep gets zero spam (we'll catch up on the next tick
+  //    once the DB is happy).
+  //  - If the push itself fails after the marker landed, we miss
+  //    that one notification. Acceptable trade — the alternative
+  //    is re-spamming the rep every 5 min until something works.
   await Promise.all(
     toFire.map(async (s) => {
       if (!s.rep_id) return;
+      const lateMin = Math.round(
+        (now - shiftTimestampMs(s.shift_date, s.start_time)) / 60_000
+      );
+      const { error: markerErr } = await sb.from("shift_events").insert({
+        event_type: "shift.reminder_late_sent",
+        shift_id: s.id,
+        customer_id: s.customer_id,
+        rep_id: s.rep_id,
+        message: `Auto-reminder sent (rep was ${lateMin} min late)`,
+        meta: { phase: "marker_only" },
+      });
+      if (markerErr) {
+        // Don't push if we couldn't record the marker — better to
+        // miss one notification than to keep re-firing on every
+        // tick. Loud-log so the issue surfaces in Vercel logs.
+        console.warn(
+          "[cron/reminders] running-late: marker insert failed; skipping push",
+          { shiftId: s.id, error: markerErr.message }
+        );
+        return;
+      }
       const shiftForPayload: ShiftLike = {
         id: s.id,
         customer_name: s.customer_id ? customerNameById.get(s.customer_id) ?? null : null,
@@ -209,18 +244,6 @@ async function runningLateSweep(): Promise<SweepResult> {
       result.pushesDelivered += send.delivered;
       result.pushesPruned += send.pruned;
       result.pushesErrors += send.errors;
-      // Log the marker AFTER the send so a network blip during the
-      // push doesn't lock the shift out of a retry. If the marker
-      // insert fails the next cron tick will re-send — annoying but
-      // not destructive.
-      await sb.from("shift_events").insert({
-        event_type: "shift.reminder_late_sent",
-        shift_id: s.id,
-        customer_id: s.customer_id,
-        rep_id: s.rep_id,
-        message: `Auto-reminder sent (rep was ${Math.round((now - shiftTimestampMs(s.shift_date, s.start_time)) / 60_000)} min late)`,
-        meta: { delivered: send.delivered, attempted: send.attempted },
-      });
     })
   );
   return result;
@@ -301,9 +324,30 @@ async function eodCheckoutSweep(): Promise<SweepResult> {
     }
   }
 
+  // Same marker-first pattern as the running-late sweep (May 14):
+  // write the idempotency marker BEFORE the push so a marker-insert
+  // failure can't leave us re-firing the push every 5 min.
   await Promise.all(
     toFire.map(async (s) => {
       if (!s.rep_id) return;
+      const pastEndMin = Math.round(
+        (now - shiftTimestampMs(s.shift_date, s.end_time)) / 60_000
+      );
+      const { error: markerErr } = await sb.from("shift_events").insert({
+        event_type: "shift.reminder_eod_sent",
+        shift_id: s.id,
+        customer_id: s.customer_id,
+        rep_id: s.rep_id,
+        message: `Check-out reminder sent (${pastEndMin} min past end)`,
+        meta: { phase: "marker_only" },
+      });
+      if (markerErr) {
+        console.warn(
+          "[cron/reminders] eod-checkout: marker insert failed; skipping push",
+          { shiftId: s.id, error: markerErr.message }
+        );
+        return;
+      }
       const shiftForPayload: ShiftLike = {
         id: s.id,
         customer_name: s.customer_id ? customerNameById.get(s.customer_id) ?? null : null,
@@ -318,14 +362,6 @@ async function eodCheckoutSweep(): Promise<SweepResult> {
       result.pushesDelivered += send.delivered;
       result.pushesPruned += send.pruned;
       result.pushesErrors += send.errors;
-      await sb.from("shift_events").insert({
-        event_type: "shift.reminder_eod_sent",
-        shift_id: s.id,
-        customer_id: s.customer_id,
-        rep_id: s.rep_id,
-        message: `Check-out reminder sent (${Math.round((now - shiftTimestampMs(s.shift_date, s.end_time)) / 60_000)} min past end)`,
-        meta: { delivered: send.delivered, attempted: send.attempted },
-      });
     })
   );
   return result;
