@@ -41,8 +41,16 @@ const ITEMS: Item[] = [
   { id: "messages",  label: "Messages",       icon: "send",  color: MC.brand,  href: "/messages" },
   { id: "library",   label: "Library",         icon: "book",  color: "#5b3da5", href: "/library" },
   { id: "support",   label: "Support",         icon: "mic",   color: "#9c4a2c", href: "/support" },
-  { id: "profile",   label: "Profile", icon: "leave", color: MC.mute,   href: "/profile" },
-  { id: "logout",    label: "Log out", icon: "leave", color: MC.danger, href: "/login" },
+  // "Profile" used to be a row here. Promoted (May 14, Gary) to the
+  // header user block at the top of the menu — the avatar + name +
+  // email card is now a tappable Link to /profile with a chev-r
+  // affordance so reps can see it's interactive.
+  //
+  // "Log out" used to be a row here too. Demoted (May 14, Gary) to
+  // its own destructive button above the Last Sync / Powered By
+  // footer, matching how most native apps surface sign-out. The
+  // handleLogout handler lives where it always did; only the
+  // placement changed.
 ];
 // "Plan my day" intentionally NOT in the side menu — it's surfaced
 // where it's actually useful (home Up Next pill + /shifts header
@@ -175,32 +183,67 @@ export function SideMenu() {
               <Glyph name="close" size={18} color="#fff" />
             </button>
           </div>
-          <div
+          {/* Header user block is now the tappable entry point to
+              /profile (May 14, Gary). The whole row is a Link, with
+              an avatar tile + name + email and a small chev-r on the
+              right hinting interactivity. The previous separate
+              "Profile" item in the nav list below was redundant. */}
+          <Link
+            href="/profile"
+            onClick={close}
+            aria-label="Open profile"
             style={{
               marginTop: 18,
               display: "flex",
               alignItems: "center",
               gap: 12,
+              padding: "8px 10px",
+              marginInline: -10,
+              borderRadius: 12,
+              background: "rgba(255,255,255,0.06)",
+              textDecoration: "none",
+              color: "inherit",
             }}
           >
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 14,
-                background: MC.brand,
-                color: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontFamily: MC.font,
-                fontWeight: 700,
-                fontSize: 15,
-                letterSpacing: 0.5,
-              }}
-            >
-              {profile ? initialsFromNameOrEmail(profile.name, profile.email) : "··"}
-            </div>
+            {profile?.avatar_url ? (
+              // Profile photo when uploaded — eslint-disable-next-line
+              // gates the <img> rule (we deliberately use a plain
+              // <img> here since the data URL is small and varies per
+              // rep; next/image's bundled-asset pattern doesn't fit).
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={profile.avatar_url}
+                alt=""
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 14,
+                  objectFit: "cover",
+                  background: MC.brand,
+                  flexShrink: 0,
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 14,
+                  background: MC.brand,
+                  color: "#fff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontFamily: MC.font,
+                  fontWeight: 700,
+                  fontSize: 15,
+                  letterSpacing: 0.5,
+                  flexShrink: 0,
+                }}
+              >
+                {profile ? initialsFromNameOrEmail(profile.name, profile.email) : "··"}
+              </div>
+            )}
             <div style={{ flex: 1, minWidth: 0 }}>
               {/* flex:1 + minWidth:0 is what makes the ellipsis below
                   actually trigger. Without flex:1 the wrapper takes
@@ -225,18 +268,20 @@ export function SideMenu() {
               <div
                 style={{
                   fontFamily: MC.font,
-                  fontSize: 11.5,
+                  fontSize: 11,
                   color: "rgba(255,255,255,.55)",
                   marginTop: 2,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
+                  letterSpacing: 0.2,
                 }}
               >
-                {profile?.email || ""}
+                {profile?.email ? `${profile.email} · View profile` : "View profile"}
               </div>
             </div>
-          </div>
+            <Glyph name="chev-r" size={16} color="rgba(255,255,255,.55)" />
+          </Link>
         </div>
 
         {/* Items */}
@@ -260,7 +305,7 @@ export function SideMenu() {
               <Link
                 key={it.id}
                 href={it.href}
-                onClick={it.id === "logout" ? handleLogout : close}
+                onClick={close}
                 style={{
                   background: isCurrent ? MC.brandTint : "transparent",
                   borderRadius: 12,
@@ -290,7 +335,7 @@ export function SideMenu() {
                     fontFamily: MC.font,
                     fontSize: 14.5,
                     fontWeight: isCurrent ? 700 : 500,
-                    color: it.id === "logout" ? MC.danger : MC.ink,
+                    color: MC.ink,
                     letterSpacing: -0.1,
                   }}
                 >
@@ -338,6 +383,41 @@ export function SideMenu() {
               </Link>
             );
           })}
+        </div>
+
+        {/* Log out — its own destructive button, native-app style.
+            Sits between the nav list and the brand footer. Wraps the
+            same handleLogout that used to power the in-list row, so
+            the behaviour is unchanged; only the placement moved.
+            Power glyph signals "session end" universally. */}
+        <div style={{ padding: "8px 12px 12px" }}>
+          <button
+            type="button"
+            onClick={handleLogout}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 9,
+              padding: "12px 14px",
+              borderRadius: 12,
+              background: MC.dangerTint,
+              border: `1px solid ${MC.danger}33`,
+              cursor: "pointer",
+              fontFamily: MC.font,
+              fontSize: 14,
+              fontWeight: 600,
+              color: MC.danger,
+              letterSpacing: -0.05,
+              appearance: "none",
+              WebkitAppearance: "none",
+              margin: 0,
+            }}
+          >
+            <Glyph name="power" size={16} color={MC.danger} strokeWidth={2.2} />
+            Log out
+          </button>
         </div>
 
         {/* Footer — Last-sync heartbeat indicator was moved here off
