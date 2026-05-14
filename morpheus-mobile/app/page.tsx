@@ -1927,32 +1927,36 @@ function WelcomeStrip({
           the empty space below the menu that managers noticed when the
           rep had a long name. */}
       <div style={{ position: "relative", display: "flex", alignItems: "flex-start", gap: 12 }}>
-        <div
+        {/* Hamburger on the LEFT (May 14, Gary). Was on the right;
+            swapped with the org-logo tile so the primary nav
+            affordance reads at the start of the line. The two tiles
+            are visually identical apart from their content so the
+            swap is purely positional — same dimensions, same
+            chrome, same backdrop blur. */}
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Menu"
           style={{
             width: 38,
             height: 38,
             borderRadius: 10,
-            background: "rgba(255,255,255,.16)",
             border: "1px solid rgba(255,255,255,.25)",
+            background: "rgba(255,255,255,.16)",
             backdropFilter: "blur(8px)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
-            overflow: "hidden",
+            cursor: "pointer",
+            padding: 0,
+            appearance: "none",
+            WebkitAppearance: "none",
+            margin: 0,
           }}
         >
-          {orgLogoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={orgLogoUrl}
-              alt={orgName || "Org"}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
-          ) : (
-            <Glyph name="sparkle" size={18} color="#fff" strokeWidth={2.2} />
-          )}
-        </div>
+          <Glyph name="menu" size={20} color="#fff" strokeWidth={2.2} />
+        </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           {/* Top small-caps line — org + date on the LEFT (truncate
               on overflow), current time pinned on the RIGHT in its
@@ -2021,31 +2025,35 @@ function WelcomeStrip({
             {firstName ? `, ${firstName}` : ""}
           </div>
         </div>
-        {/* Hamburger menu — used to live in the black AppHeader strip
-            above the welcome card. Folding it inline frees up vertical
-            space and keeps everything on a single line so the greeting
-            is the first thing the rep notices. */}
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label="Menu"
+        {/* Org logo on the RIGHT (May 14, Gary). Was on the left,
+            swapped with the menu button above. Brand presence stays
+            on the row; just at the trailing edge instead of leading. */}
+        <div
           style={{
             width: 38,
             height: 38,
             borderRadius: 10,
-            border: "1px solid rgba(255,255,255,.25)",
             background: "rgba(255,255,255,.16)",
+            border: "1px solid rgba(255,255,255,.25)",
             backdropFilter: "blur(8px)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
-            cursor: "pointer",
-            padding: 0,
+            overflow: "hidden",
           }}
         >
-          <Glyph name="menu" size={20} color="#fff" strokeWidth={2.2} />
-        </button>
+          {orgLogoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={orgLogoUrl}
+              alt={orgName || "Org"}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          ) : (
+            <Glyph name="sparkle" size={18} color="#fff" strokeWidth={2.2} />
+          )}
+        </div>
       </div>
       {/* The "Last sync · …" line that used to live in its own row
           here has been folded into the small-caps line above next to

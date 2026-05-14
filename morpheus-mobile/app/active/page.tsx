@@ -1048,31 +1048,34 @@ export default function ActiveShiftPage() {
             </div>
           </div>
 
-          {/* Address row (May 13) — surfaces the site's physical
-              address right under the customer block so the rep can
-              see where they actually are. Tapping opens the
-              platform-default Maps app via the geo: + universal-link
-              fallback. When the site has no address on file we still
-              render the row but say so explicitly — a "no address"
-              empty state is clearer than the absence of any row. */}
+          {/* Address row (May 13, slimmed May 14). Surfaces the
+              site's physical address right under the customer block
+              so the rep can see where they actually are. Tapping
+              opens Google Maps in a new tab. When the site has no
+              address on file we still render the row but say so
+              explicitly — a "no address" empty state is clearer
+              than the absence of any row. Padding + icon size +
+              type scale all dropped one notch per Gary's "card is a
+              touch too big" feedback so the address reads as a
+              line of info, not a hero. */}
           <div
             style={{
-              marginTop: 12,
-              padding: "10px 12px",
+              marginTop: 10,
+              padding: "7px 10px",
               background: shift.siteAddress ? MC.bg : MC.warnTint,
-              borderRadius: 10,
+              borderRadius: 9,
               border: `1px solid ${shift.siteAddress ? MC.line : `${MC.warn}33`}`,
               display: "flex",
-              alignItems: "flex-start",
-              gap: 10,
+              alignItems: "center",
+              gap: 8,
             }}
           >
             <span
               style={{
-                width: 26,
-                height: 26,
-                borderRadius: 8,
-                background: shift.siteAddress ? "#fff" : "#fff",
+                width: 20,
+                height: 20,
+                borderRadius: 6,
+                background: "#fff",
                 border: `1px solid ${shift.siteAddress ? MC.line : `${MC.warn}55`}`,
                 display: "flex",
                 alignItems: "center",
@@ -1082,25 +1085,12 @@ export default function ActiveShiftPage() {
             >
               <Glyph
                 name="pin"
-                size={13}
+                size={11}
                 color={shift.siteAddress ? MC.brandDeep : MC.warn}
                 strokeWidth={2.4}
               />
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontFamily: MC.font,
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  letterSpacing: 0.5,
-                  textTransform: "uppercase",
-                  color: shift.siteAddress ? MC.hint : "#7A560A",
-                  marginBottom: 2,
-                }}
-              >
-                Address
-              </div>
               {shift.siteAddress ? (
                 <a
                   href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(shift.siteAddress)}`}
@@ -1108,13 +1098,16 @@ export default function ActiveShiftPage() {
                   rel="noopener noreferrer"
                   style={{
                     fontFamily: MC.font,
-                    fontSize: 13,
-                    color: MC.ink,
-                    lineHeight: 1.4,
+                    fontSize: 11.5,
+                    color: MC.ink2,
+                    lineHeight: 1.35,
                     textDecoration: "none",
                     display: "block",
-                    wordBreak: "break-word",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
                   }}
+                  title={shift.siteAddress}
                 >
                   {shift.siteAddress}
                 </a>
@@ -1122,10 +1115,13 @@ export default function ActiveShiftPage() {
                 <div
                   style={{
                     fontFamily: MC.font,
-                    fontSize: 13,
+                    fontSize: 11.5,
                     color: "#7A560A",
                     fontWeight: 600,
-                    lineHeight: 1.4,
+                    lineHeight: 1.35,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
                   }}
                 >
                   No address on file — flag this with your manager.
@@ -1346,19 +1342,26 @@ export default function ActiveShiftPage() {
                   setShiftData((d) => (d ? { ...d, state: "on-break" } : d));
                 }}
                 disabled={shiftData?.state === "on-break"}
+                // Same shape as Check out (May 14, Gary) — was an
+                // outlined transparent pill that looked out of
+                // place. Now matches the Check-out chip dimensions,
+                // typography, and radius, but on a translucent
+                // white background instead of the brand fill +
+                // shadow. Reads as "I'm the same kind of action,
+                // but secondary."
                 style={{
-                  background: "transparent",
-                  color: "rgba(255,255,255,.85)",
-                  border: "1px solid rgba(255,255,255,.25)",
-                  padding: "10px 14px",
+                  background: "rgba(255,255,255,.14)",
+                  color: "#fff",
+                  border: "1px solid rgba(255,255,255,.18)",
+                  padding: "12px 14px",
                   borderRadius: 12,
                   cursor:
                     shiftData?.state === "on-break" ? "not-allowed" : "pointer",
                   fontFamily: MC.font,
-                  fontSize: 13.5,
+                  fontSize: 14,
                   fontWeight: 600,
                   letterSpacing: -0.1,
-                  display: "inline-flex",
+                  display: "flex",
                   alignItems: "center",
                   gap: 6,
                   appearance: "none",
@@ -1367,7 +1370,7 @@ export default function ActiveShiftPage() {
                   opacity: shiftData?.state === "on-break" ? 0.45 : 1,
                 }}
               >
-                <Glyph name="pause" size={14} color="rgba(255,255,255,.85)" />
+                <Glyph name="pause" size={15} color="#fff" strokeWidth={2.2} />
                 Pause
               </button>
               <button
