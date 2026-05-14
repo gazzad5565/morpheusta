@@ -1,7 +1,7 @@
 # Morpheus Field Operations Suite
 
 > **🤖 Reading this from a fresh AI chat?**
-> Latest commit: **`4a23742`** (May 14, 2026 — late afternoon). Long polish + bug-fix day on top of the May 13 feature drop. ~30 commits in three groups:
+> Latest commit: **`6c518ea`** (May 14, 2026 — evening). Long polish + bug-fix day on top of the May 13 feature drop. ~35 commits in three groups:
 > 1. **Live bug fixes** — auto-checkout sweep was failing silently (Mariska's check-in > check-out timesheet bug; fixed with a marker-first dedup + the Vercel crons restored now we're on Pro). Push notifications were shipping to the wrong Vercel hostname (relative URL fix). /active threw React error #310 on cold load (conditional hooks past an early return). Late-reminder push fired every 5 min instead of once per shift (marker now writes before push). /active dumped reps to "no active shift" when they tapped Pause (getMyActiveShift now matches on-break too).
 > 2. **UX polish on the mobile + admin chrome** — sidebar tagline + Tasks expandable sub-nav with locked Pro tiles, profile promoted to header avatar tap target, logout demoted to a power-glyph button above the footer, viewport-fit=cover so the footer logo stops hiding behind the iPhone home indicator. Home page swapped hamburger left + org logo right. /active hero slimmed (smaller address tile, inline MapPreview, Pause button toggles to Resume in-place — no duplicate up top). "Plan my day" → "Route" everywhere user-facing.
 > 3. **Feature polish** — `/route` pill icon-only with two states (calm check-circle / brand-deep target + pulse), hourly route-improvement watcher fires the action state only when the auto-check finds ≥5 min savings, celebratory RouteOptimizedSheet on calm-state taps with hourly-check reassurance copy. Admin /customers gains a "New" filter + recently-added pinned to top. Calendar drag-drop conflicts now warn-but-allow ("8 stops same day, pick your order" pattern). Schedule/manage column widths tuned. Login + sidebar tagline capitalised ("Workforce Operations"). Geocode card removes every "flag your manager" dead-end — reps can always self-pin, setCustomerSiteCoords looks up or creates a customer_sites row when shifts.site_id is null.
@@ -117,7 +117,7 @@ If you switch computers (or hand this project to a developer), this section is t
 
 ### Where things stand right now (handover for the next chat)
 
-**Last commit:** `4a23742` — "/active Pause: one button toggles to Resume (no duplicate up top)" (May 14, 2026). Polish + bug-fix day on top of the huge May 13 feature drop. ~30 commits across three groups: live bug fixes (auto-checkout, push hostnames, late-reminder spam, React #310 on /active, pause-disappear), mobile + admin chrome polish (sidebar Tasks sub-nav, profile up / logout down, viewport-fit=cover, home logo+menu swap, /active hero slim + Pause↔Resume toggle), and feature polish (route pill two-state icon + hourly improvement watcher + celebratory sheet, /customers New filter, calendar warn-but-allow overlaps, geocode card removes "flag manager" dead-ends — reps can always self-pin). Vercel upgraded to Pro mid-day so the three cron schedules in `morpheus-admin/vercel.json` are now live (5 min / 15 min / 1 min). See "Today's session — what shipped (May 14, 2026)" for the canonical commit log.
+**Last commit:** `6c518ea` — "route icons rebrand + atomic request claim for double-approve race" (May 14, 2026 — evening). Polish + bug-fix day on top of the huge May 13 feature drop. ~35 commits across three groups: live bug fixes (auto-checkout, push hostnames, late-reminder spam, React #310 on /active, pause-disappear, requested_shifts RLS leak between reps, double-approve race producing duplicate shifts, paused timer kept ticking), mobile + admin chrome polish (sidebar Tasks sub-nav, profile up / logout down, viewport-fit=cover, home logo+menu swap, /active hero slim + Pause↔Resume toggle, Paused badge + sort-to-top on /shifts), and feature polish (route pill two-state icon redesign with route-shape glyphs + amber action tone, hourly improvement watcher, celebratory sheet, /route "Apply this new route" CTA, /customers New filter, calendar warn-but-allow overlaps, geocode card removes "flag manager" dead-ends, /active inline map). Vercel upgraded to Pro mid-day so the three cron schedules in `morpheus-admin/vercel.json` are now live (5 min / 15 min / 1 min). See "Today's session — what shipped (May 14, 2026)" for the canonical commit log.
 **Live URLs:** https://morpheus-admin.vercel.app · https://morpheusta-khaki-omega.vercel.app
 **Repo:** https://github.com/gazzad5565/morpheusta
 
@@ -290,7 +290,21 @@ bac96bb schedule: warn-but-allow overlapping shifts + /active pause button
 aadc5c1 revert: KPI cards back to static (Gary preferred the look)
 33910b1 /active: inline map + never "flag manager" on geocode-task card
 4a23742 /active Pause: one button toggles to Resume (no duplicate up top)
+f9c7a93 README: full May 14 handover so a fresh chat picks up cleanly
+839b6b6 fix: requested_shifts SELECT was leaking other reps' requests
+b2deb97 pause: timer freezes when paused + Paused badge on /shifts row
+a981b2d /route: clear "Apply this new route" CTA when watcher finds improvement
+6c518ea route icons rebrand + atomic request claim for double-approve race
 ```
+
+#### Late-afternoon additions (after the first README handover at f9c7a93)
+
+- **`839b6b6` — requested_shifts RLS leak fixed.** Critical: the old `requested_shifts_admin_select` policy used `USING (true)` to give admin inbox visibility but accidentally let every rep SELECT every OTHER rep's pending requests. Realtime respects RLS, so Rep B's INSERT also lit up Rep A's PendingRequestPill and "Awaiting approval" card. Migration `db/migrations/2026_05_14_requested_shifts_role_scoped.sql` re-scopes SELECT/UPDATE/DELETE to `rep_id = auth.uid() OR profiles.role = 'manager'`. **Gary ran this in the Supabase SQL Editor mid-afternoon.**
+- **`b2deb97` — paused timer freeze + /shifts "Paused" badge.** Hero timer on /active used to keep ticking through a pause; now an effective-now value freezes at the pause-start epoch and a pauseOffsetMs accumulator tracks total paused duration across multiple pauses in one shift, both localStorage-backed per shiftId. `/shifts` row gets a warn-tint "Paused" chip beside the customer name (mirrors the /active banner tone) AND the sort buckets on-break + travelling alongside in-progress so a paused shift sits at the top of the list, not buried with scheduled.
+- **`a981b2d` — /route "Apply this new route" CTA.** Once an order was saved the formerly-hidden Save button stayed hidden forever, so when the watcher found a better route there was no way to ADOPT it. Reps saw the green "New route — 17 min faster" banner with no action target. Fix: when a saved order exists AND the displayed optimised order differs from it, the button reappears as "Apply this new route" (same save handler; same downstream behaviour, clearer label + bigger CTA styling). Banner subtitle now points at the button.
+- **`6c518ea` — Route icons + double-approve race.** Two unrelated fixes shipped together.
+  - **Icons.** Action-state pill was blue (MC.brandDeep) with a `target` glyph — Gary read it as "a generic alert" not "act on the route." New `route-alert` (start dot → S-curve → end dot, amber MC.warn fill) + `route-done` (same route shape with a ringed check at the end, MC.ok green) glyphs added to mobile Glyph.tsx. Action no longer competes with the brand blue used everywhere else; calm clearly says "route, ticked". Pulse keyframe on /shifts recoloured to amber-tinted ring to match.
+  - **Mariska double-shift race.** `approveRequest` did SELECT → INSERT → DELETE with no row lock; double-tapping Approve (or two managers in parallel) raced two `createShift` calls. Replaced the opening SELECT with an atomic UPDATE that flips status=`'pending'` → `'approving'` AND returns rep/customer fields in one round-trip — if the filter clause misses, 0 rows affected and the second call bails with "Already being processed". UI guards (`disabled={busyId === r.id}`) were already in place but only covered same-tab clicks; the DB lock now covers cross-tab + cross-manager races too. Any failure between the claim and the final delete reverts status back to pending so the request stays approvable on retry.
 
 ### Today's session — what shipped (May 7, 2026)
 
@@ -1696,6 +1710,12 @@ Recently cleared (May 14 — polish + bug-fix day):
 - ✅ **Sidebar org-logo first-paint flicker** killed via localStorage cache. (`a9f31ff`)
 - ✅ **Morpheus Ops rebrand on admin** — layout title, login hero, sidebar capitalisation. (`6b22fe3`, `380ee77`)
 - ✅ **Hidden 5-tap debug reveal** on `error.tsx` (localStorage `morpheus.debug=1` for persistent on). (`0ed3096`)
+- ✅ **requested_shifts RLS leak** — reps were seeing other reps' pending requests via the realtime channel because the SELECT policy was `USING (true)`. Migration `2026_05_14_requested_shifts_role_scoped.sql` re-scopes by role. Gary ran it. (`839b6b6`)
+- ✅ **Paused timer was still ticking** — hero timer on /active now freezes at the pause moment + resumes from where it stopped via a localStorage-backed pauseOffsetMs accumulator. (`b2deb97`)
+- ✅ **Paused shift was hard to spot in the list** — `/shifts` row gets a "Paused" warn-tint chip + paused shifts sort to the top with in-progress. (`b2deb97`)
+- ✅ **/route had no way to apply a watcher-found better route** — Save button stayed hidden forever after first save, so when the watcher found "17 min faster" there was no action target. Now reappears as "Apply this new route". (`a981b2d`)
+- ✅ **Route pill icons rebranded** — new `route-alert` / `route-done` glyphs that read as a route (start dot → S-curve → end dot, end dot replaced by a ringed check in the calm state). Action tone moved from brand-blue to amber so it doesn't fight everything else blue on the app. (`6c518ea`)
+- ✅ **Mariska double-shift bug** — `approveRequest` now atomically claims the request via UPDATE status='approving' WHERE status='pending' before creating the shift, so a double-tap or two-manager race can't produce duplicate shifts. (`6c518ea`)
 
 Recently cleared (May 13 — afternoon + evening session):
 
