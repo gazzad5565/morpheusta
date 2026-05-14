@@ -425,6 +425,11 @@ CREATE POLICY "shifts_rep_self_update"
 -- Append-only audit log. INSERT: any authenticated user (mobile +
 -- admin both log here, including the rep when they log own events).
 -- SELECT: manager all; rep sees own events. DELETE: manager only.
+--
+-- IMPORTANT: shift_events uses `actor_id` (the user who did the
+-- thing) NOT `rep_id`. The first version of this migration
+-- referenced `rep_id` and bailed with `42703: column "rep_id" does
+-- not exist` — see schema in 2026_05_05_shift_events.sql.
 
 ALTER TABLE public.shift_events ENABLE ROW LEVEL SECURITY;
 
@@ -439,7 +444,7 @@ CREATE POLICY "shift_events_select"
   ON public.shift_events FOR SELECT
   TO authenticated
   USING (
-    rep_id = auth.uid()
+    actor_id = auth.uid()
     OR public.is_manager()
   );
 
