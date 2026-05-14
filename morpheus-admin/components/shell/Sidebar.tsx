@@ -133,7 +133,15 @@ export function Sidebar() {
       style={{
         width: AC.sideW,
         flexShrink: 0,
-        background: AC.side,
+        // Vertical gradient — top stays the original sidebar dark
+        // (AC.side = #0E1116) and fades to a slightly warmer
+        // #11151B at the bottom. Net effect on tall displays: the
+        // dead-space between the nav and the user card stops
+        // reading as a flat void. Subtle enough that on shorter
+        // displays where there's no void, the gradient blends
+        // into the rest of the chrome.
+        background:
+          "linear-gradient(180deg, #0E1116 0%, #0E1116 40%, #11151B 100%)",
         color: AC.sideInk,
         display: "flex",
         flexDirection: "column",
@@ -255,17 +263,42 @@ export function Sidebar() {
           prefers-reduced-motion users see a static line. */}
       <div style={{ padding: "0 14px 12px", borderBottom: `1px solid #1B2027` }}>
         <div
-          className="sb-tagline"
           style={{
             fontFamily: AC.font,
             fontSize: 12.5,
-            color: "#8A95A4",
             letterSpacing: -0.05,
             lineHeight: 1.4,
             fontWeight: 500,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flexWrap: "wrap",
           }}
         >
-          Workforce Operations. In real time.
+          <span className="sb-tagline" style={{ color: "#8A95A4" }}>
+            Workforce Operations.
+          </span>
+          {/* "In real time" treated as a brand pill — mirrors the
+              "OPS" chip in the footer wordmark + the admin's
+              MORPHEUS Ops sidebar pill, so the platform's two-tone
+              brand treatment lands consistently across surfaces.
+              The shimmer animation still sweeps across the whole
+              line via the wrapper class below; the pill background
+              stays static, only the gradient on the text fill
+              moves. */}
+          <span
+            className="sb-tagline-pill"
+            style={{
+              padding: "1px 7px",
+              borderRadius: 4,
+              background: "rgba(36, 173, 217, 0.18)",
+              color: AC.brand,
+              fontWeight: 700,
+              letterSpacing: 0.2,
+            }}
+          >
+            In real time
+          </span>
         </div>
       </div>
       {/* Tagline shimmer keyframes. Kept inline with the sidebar so
@@ -605,8 +638,11 @@ function NavItem({
         width: "100%",
         display: "flex",
         alignItems: "center",
-        gap: 11,
-        padding: "8px 12px",
+        gap: 12,
+        // Slightly bigger tap target — the previous 8/12 pad made
+        // the row feel cramped at 13px label. With 14px labels +
+        // 18px icons we want the row to breathe a little more.
+        padding: "10px 12px",
         borderRadius: 8,
         background: active ? "#1B2027" : "transparent",
         textDecoration: "none",
@@ -620,20 +656,20 @@ function NavItem({
           style={{
             position: "absolute",
             left: -8,
-            top: 8,
-            bottom: 8,
+            top: 10,
+            bottom: 10,
             width: 3,
             background: AC.brand,
             borderRadius: 99,
           }}
         />
       )}
-      <AGlyph name={glyph} size={17} color={active ? AC.brand : AC.sideMute} />
+      <AGlyph name={glyph} size={18} color={active ? AC.brand : AC.sideMute} />
       <span
         style={{
           flex: 1,
           fontFamily: AC.font,
-          fontSize: 13,
+          fontSize: 14,
           fontWeight: active ? 600 : 500,
           letterSpacing: -0.1,
         }}
