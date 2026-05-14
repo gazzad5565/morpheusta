@@ -880,13 +880,12 @@ export default function ActiveShiftPage() {
     <div style={{ background: MC.bg, minHeight: "100%", position: "relative" }}>
       <AppHeader title="Shift Dashboard" />
 
-      {/* Paused banner. Renders when shifts.state === 'on-break'.
-          Calm warn-tint card with a Resume CTA — the rep can pause
-          a shift from the Pause button in the hero below without
-          having to switch to another shift first. Pause was
-          previously only reachable via /add-shift → pause-and-
-          switch into another shift; now it's a first-class action
-          on /active. (May 14, Gary.) */}
+      {/* Paused info banner. Renders when shifts.state === 'on-break'.
+          Info-only — no Resume button here (May 14, Gary). The
+          Pause button in the hero below DOUBLES as Resume when the
+          shift is on-break, so there's no need for a second action
+          target up here. Banner just tells the rep what's happening
+          + that Check-out is locked. */}
       {shiftData?.state === "on-break" && (
         <div style={{ padding: "12px 16px 0" }}>
           <div
@@ -923,49 +922,10 @@ export default function ActiveShiftPage() {
                   lineHeight: 1.4,
                 }}
               >
-                Tap Resume to keep going. Check-out is locked until
-                you resume.
+                Tap Resume below to keep going. Check-out is locked
+                until you resume.
               </div>
             </div>
-            <button
-              type="button"
-              onClick={async () => {
-                if (!shiftData) return;
-                const r = await setShiftBreakState(shiftData.shiftId, false);
-                if (!r.ok) return;
-                void logEvent({
-                  event_type: "shift.break_ended",
-                  shift_id: shiftData.shiftId,
-                  customer_id: shiftData.customerId,
-                  message: "Resumed shift",
-                  meta: { kind: "open-ended" },
-                });
-                setShiftData((d) => (d ? { ...d, state: "in-progress" } : d));
-              }}
-              style={{
-                background: MC.brand,
-                color: "#fff",
-                border: "none",
-                padding: "9px 14px",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontFamily: MC.font,
-                fontSize: 13,
-                fontWeight: 700,
-                letterSpacing: -0.05,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 5,
-                boxShadow: `0 4px 12px ${MC.brand}55`,
-                appearance: "none",
-                WebkitAppearance: "none",
-                margin: 0,
-                flexShrink: 0,
-              }}
-            >
-              <Glyph name="play" size={13} color="#fff" strokeWidth={2.4} />
-              Resume
-            </button>
           </div>
         </div>
       )}
@@ -1328,47 +1288,57 @@ export default function ActiveShiftPage() {
                 Started {formatTime(shiftStartTs)}
               </div>
             </div>
-            {/* Pause + Check-out actions side-by-side. Pause is a
-                secondary affordance — the rep stays on /active, the
-                shift flips to state='on-break', and a banner near
-                the top of the page surfaces the Resume CTA. Check
-                out is disabled while paused so the rep resumes
-                before closing the shift (prevents "checked out
-                while on break" weirdness in the audit trail). */}
+            {/* Pause/Resume toggle + Check-out actions side-by-side.
+                One button does double duty (May 14, Gary): label +
+                glyph + handler swap based on state. When on-break
+                the same button reads "Resume" and flips state back
+                to in-progress; otherwise it pauses. Check-out stays
+                disabled while paused so the rep resumes before
+                closing the shift (prevents "checked out while on
+                break" weirdness in the audit trail). */}
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <button
                 type="button"
                 onClick={async () => {
                   if (!shiftData) return;
-                  const r = await setShiftBreakState(shiftData.shiftId, true);
+                  const paused = shiftData.state === "on-break";
+                  const r = await setShiftBreakState(shiftData.shiftId, !paused);
                   if (!r.ok) return;
                   void logEvent({
-                    event_type: "shift.break_started",
+                    event_type: paused
+                      ? "shift.break_ended"
+                      : "shift.break_started",
                     shift_id: shiftData.shiftId,
                     customer_id: shiftData.customerId,
-                    message: "Paused shift",
+                    message: paused ? "Resumed shift" : "Paused shift",
                     meta: { kind: "open-ended" },
                   });
                   // Optimistic flip + the realtime subscribe on the
                   // useEffect will re-confirm with the DB shortly.
-                  setShiftData((d) => (d ? { ...d, state: "on-break" } : d));
+                  setShiftData((d) =>
+                    d
+                      ? { ...d, state: paused ? "in-progress" : "on-break" }
+                      : d
+                  );
                 }}
-                disabled={shiftData?.state === "on-break"}
-                // Same shape as Check out (May 14, Gary) — was an
-                // outlined transparent pill that looked out of
-                // place. Now matches the Check-out chip dimensions,
-                // typography, and radius, but on a translucent
-                // white background instead of the brand fill +
-                // shadow. Reads as "I'm the same kind of action,
-                // but secondary."
+                // Same shape as Check out — matches its padding,
+                // radius, type. Differentiates via a translucent
+                // white background instead of the brand fill on
+                // pause; flips to brand fill when on-break to make
+                // Resume read as the active CTA.
                 style={{
-                  background: "rgba(255,255,255,.14)",
+                  background:
+                    shiftData?.state === "on-break"
+                      ? MC.brand
+                      : "rgba(255,255,255,.14)",
                   color: "#fff",
-                  border: "1px solid rgba(255,255,255,.18)",
+                  border:
+                    shiftData?.state === "on-break"
+                      ? "none"
+                      : "1px solid rgba(255,255,255,.18)",
                   padding: "12px 14px",
                   borderRadius: 12,
-                  cursor:
-                    shiftData?.state === "on-break" ? "not-allowed" : "pointer",
+                  cursor: "pointer",
                   fontFamily: MC.font,
                   fontSize: 14,
                   fontWeight: 600,
@@ -1379,11 +1349,19 @@ export default function ActiveShiftPage() {
                   appearance: "none",
                   WebkitAppearance: "none",
                   margin: 0,
-                  opacity: shiftData?.state === "on-break" ? 0.45 : 1,
+                  boxShadow:
+                    shiftData?.state === "on-break"
+                      ? `0 6px 18px ${MC.brand}55`
+                      : "none",
                 }}
               >
-                <Glyph name="pause" size={15} color="#fff" strokeWidth={2.2} />
-                Pause
+                <Glyph
+                  name={shiftData?.state === "on-break" ? "play" : "pause"}
+                  size={15}
+                  color="#fff"
+                  strokeWidth={2.2}
+                />
+                {shiftData?.state === "on-break" ? "Resume" : "Pause"}
               </button>
               <button
                 type="button"
