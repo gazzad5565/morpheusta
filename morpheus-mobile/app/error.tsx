@@ -3,21 +3,18 @@
 /**
  * Global error boundary for the mobile app.
  *
- * Next.js shows a minimal "This page couldn't load" UI when a page
- * throws during render — useful for production, useless for
- * debugging. This boundary surfaces the actual error message + the
- * stack so a rep (or a debugging session) can read what went wrong
- * and either Retry or copy-paste the details somewhere helpful.
+ * Catches any uncaught render-time error and shows a recovery UI
+ * instead of Next.js's bare "This page couldn't load" fallback.
+ * Logs the full error to the console for Web Inspector capture.
  *
- * Keep it tiny + dependency-free — if this component itself throws,
- * Next falls back to its own boundary and we get into an infinite
- * "couldn't load" loop.
- *
- * Should be made less verbose once the underlying issue is fixed —
- * full stack traces in front of real reps is debug-only behaviour.
+ * Was briefly verbose (full stack trace + Copy details button)
+ * during the May 14 React-error-#310 hunt on /active. Now trimmed
+ * back to a clean rep-facing UI; the stack still goes to the
+ * console for debugging, just not on-screen.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { MC } from "@/lib/tokens";
 
 export default function GlobalError({
   error,
@@ -26,118 +23,80 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  // Log to the console so it shows up in Safari Web Inspector / Chrome DevTools.
   useEffect(() => {
     // eslint-disable-next-line no-console
     console.error("[mobile global error boundary]", error);
   }, [error]);
 
-  const [copied, setCopied] = useState(false);
-  const onCopy = async () => {
-    const blob = `${error.name || "Error"}: ${error.message}\n\n${error.stack || ""}\n\nDigest: ${error.digest || "—"}\nURL: ${typeof window !== "undefined" ? window.location.href : "?"}\nUA: ${typeof navigator !== "undefined" ? navigator.userAgent : "?"}`;
-    try {
-      await navigator.clipboard.writeText(blob);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard denied — leave the on-screen text visible */
-    }
-  };
-
   return (
     <div
       style={{
-        padding: "24px 18px",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        color: "#1A1F26",
-        background: "#F4F5F7",
+        padding: "32px 20px",
+        fontFamily: MC.font,
+        color: MC.ink,
+        background: MC.bg,
         minHeight: "100vh",
         boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        textAlign: "center",
+        gap: 14,
       }}
     >
-      <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
-        Something went wrong on this page
-      </div>
-      <div style={{ fontSize: 14, color: "#54616D", marginBottom: 18, lineHeight: 1.45 }}>
-        Showing the technical details below so we can fix it. Tap <strong>Copy details</strong> and send them to Gary / Claude.
-      </div>
-
       <div
         style={{
-          background: "#fff",
-          border: "1px solid #E5E8EC",
-          borderRadius: 10,
-          padding: 14,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: 12,
-          color: "#9C1A3C",
-          marginBottom: 14,
-          wordBreak: "break-word",
+          fontSize: 44,
+          lineHeight: 1,
         }}
+        aria-hidden="true"
       >
-        <div style={{ fontWeight: 700, marginBottom: 6 }}>
-          {error.name || "Error"}: {error.message || "(no message)"}
-        </div>
-        {error.digest && (
-          <div style={{ color: "#5C6571", marginBottom: 6 }}>
-            digest: {error.digest}
-          </div>
-        )}
-        <pre
+        ⚠️
+      </div>
+      <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.2 }}>
+        Something went wrong
+      </div>
+      <div style={{ fontSize: 14, color: MC.mute, maxWidth: 320, lineHeight: 1.45 }}>
+        The page hit an error and couldn&apos;t finish loading. Tap Retry, or head back to the home screen.
+      </div>
+      {error.digest && (
+        <div
           style={{
-            margin: 0,
-            whiteSpace: "pre-wrap",
-            color: "#1A1F26",
             fontSize: 11,
-            lineHeight: 1.4,
-            maxHeight: 280,
-            overflow: "auto",
+            color: MC.hint,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            opacity: 0.7,
           }}
         >
-          {error.stack || "(no stack available)"}
-        </pre>
-      </div>
-
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          ref: {error.digest}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
         <button
           type="button"
-          onClick={onCopy}
+          onClick={() => reset()}
           style={{
-            padding: "11px 18px",
-            background: "#1A1F26",
+            padding: "11px 20px",
+            background: MC.brand,
             color: "#fff",
             border: "none",
             borderRadius: 10,
             fontSize: 14,
             fontWeight: 600,
             cursor: "pointer",
+            boxShadow: `0 6px 18px ${MC.brand}55`,
           }}
         >
-          {copied ? "Copied ✓" : "Copy details"}
-        </button>
-        <button
-          type="button"
-          onClick={() => reset()}
-          style={{
-            padding: "11px 18px",
-            background: "#fff",
-            color: "#1A1F26",
-            border: "1px solid #D5D9DE",
-            borderRadius: 10,
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
-        >
-          Try again
+          Retry
         </button>
         <a
           href="/"
           style={{
-            padding: "11px 18px",
+            padding: "11px 20px",
             background: "#fff",
-            color: "#1A1F26",
-            border: "1px solid #D5D9DE",
+            color: MC.ink,
+            border: `1px solid ${MC.line}`,
             borderRadius: 10,
             fontSize: 14,
             fontWeight: 600,

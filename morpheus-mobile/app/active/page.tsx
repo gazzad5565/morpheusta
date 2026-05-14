@@ -409,79 +409,14 @@ export default function ActiveShiftPage() {
   const completeCount = completedTaskIds.length;
   const totalCount = tasks.length;
 
-  // No active shift → guide the rep back to /shifts. Shows while the fetch
-  // is in flight too, so we don't briefly render placeholder customer info.
-  if (!shift) {
-    return (
-      <div style={{ background: MC.bg, minHeight: "100%" }}>
-        <AppHeader title="Shift Dashboard" onBack={() => router.push("/")} />
-        {!loadedShift && <LoadingBar />}
-        <div style={{ padding: "32px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
-          <div
-            style={{
-              background: MC.card,
-              border: `1px dashed ${MC.line}`,
-              borderRadius: MC.radiusCard,
-              padding: 28,
-              textAlign: "center",
-            }}
-          >
-            <div
-              style={{
-                fontFamily: MC.fontDisplay,
-                fontSize: 18,
-                fontWeight: 700,
-                color: MC.ink,
-                letterSpacing: -0.3,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 10,
-                justifyContent: "center",
-              }}
-            >
-              {!loadedShift && <Spinner size={16} />}
-              {loadedShift ? "No active shift" : "Loading shift…"}
-            </div>
-            {loadedShift && (
-              <div
-                style={{
-                  fontFamily: MC.font,
-                  fontSize: 13,
-                  color: MC.mute,
-                  marginTop: 8,
-                  lineHeight: 1.5,
-                }}
-              >
-                Check in to a shift first. Open <b>Today&apos;s shifts</b> and tap one to begin.
-              </div>
-            )}
-          </div>
-          {loadedShift && (
-            <button
-              type="button"
-              onClick={() => router.push("/shifts")}
-              style={{
-                marginTop: 6,
-                padding: "12px 16px",
-                borderRadius: 12,
-                border: "none",
-                background: MC.brand,
-                color: "#fff",
-                fontFamily: MC.font,
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: "pointer",
-                boxShadow: `0 6px 18px ${MC.brand}55`,
-              }}
-            >
-              Go to Today&apos;s shifts
-            </button>
-          )}
-        </div>
-        <AppFooter />
-      </div>
-    );
-  }
+  // The "no active shift" empty state used to early-return here, but
+  // that caused React error #310: hooks defined further down (photo
+  // flow, signature flow, hydration effects) were skipped on the
+  // first render and called on subsequent renders, violating the
+  // Rules of Hooks. The check now lives just before the main render
+  // below — every hook on this page is called unconditionally
+  // every render. See git history for the full conditional-return
+  // version if you need to read the empty state's history.
 
   const startTask = () => {
     if (!openSheet) return;
@@ -859,6 +794,82 @@ export default function ActiveShiftPage() {
     openSheet && activeTaskId === openSheet.task.id && activeTaskStartedAt
       ? Math.floor((now - activeTaskStartedAt) / 1000)
       : null;
+
+  // No active shift → guide the rep back to /shifts. Shows while the
+  // fetch is in flight too, so we don't briefly render placeholder
+  // customer info. Must live AFTER every hook on this page — see
+  // the explanatory comment further up where this used to live.
+  if (!shift) {
+    return (
+      <div style={{ background: MC.bg, minHeight: "100%" }}>
+        <AppHeader title="Shift Dashboard" onBack={() => router.push("/")} />
+        {!loadedShift && <LoadingBar />}
+        <div style={{ padding: "32px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div
+            style={{
+              background: MC.card,
+              border: `1px dashed ${MC.line}`,
+              borderRadius: MC.radiusCard,
+              padding: 28,
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: MC.fontDisplay,
+                fontSize: 18,
+                fontWeight: 700,
+                color: MC.ink,
+                letterSpacing: -0.3,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 10,
+                justifyContent: "center",
+              }}
+            >
+              {!loadedShift && <Spinner size={16} />}
+              {loadedShift ? "No active shift" : "Loading shift…"}
+            </div>
+            {loadedShift && (
+              <div
+                style={{
+                  fontFamily: MC.font,
+                  fontSize: 13,
+                  color: MC.mute,
+                  marginTop: 8,
+                  lineHeight: 1.5,
+                }}
+              >
+                Check in to a shift first. Open <b>Today&apos;s shifts</b> and tap one to begin.
+              </div>
+            )}
+          </div>
+          {loadedShift && (
+            <button
+              type="button"
+              onClick={() => router.push("/shifts")}
+              style={{
+                marginTop: 6,
+                padding: "12px 16px",
+                borderRadius: 12,
+                border: "none",
+                background: MC.brand,
+                color: "#fff",
+                fontFamily: MC.font,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: "pointer",
+                boxShadow: `0 6px 18px ${MC.brand}55`,
+              }}
+            >
+              Go to Today&apos;s shifts
+            </button>
+          )}
+        </div>
+        <AppFooter />
+      </div>
+    );
+  }
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%", position: "relative" }}>
