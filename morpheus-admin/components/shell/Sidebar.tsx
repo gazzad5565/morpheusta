@@ -11,6 +11,7 @@ import { getUser, signOut } from "@/lib/auth";
 import {
   getOrganisationName,
   getOrganisationLogoUrl,
+  getOrganisationNameColor,
   subscribeOrgChanges,
 } from "@/lib/settings-store";
 import { useNeedsAction } from "@/lib/needs-action-context";
@@ -37,6 +38,13 @@ export function Sidebar() {
   // writes any changes back to the cache.
   const [orgName, setOrgName] = useState<string>(() => readCachedOrg().name);
   const [orgLogoUrl, setOrgLogoUrl] = useState<string>(() => readCachedOrg().logoUrl);
+  // Optional accent colour for the org name — set in
+  // /settings/organisation. Empty string = inherit the default
+  // sideInk colour (#E6E9EE). Cached alongside name + logo so the
+  // first paint doesn't flash from default to coloured.
+  const [orgNameColor, setOrgNameColor] = useState<string>(
+    () => readCachedOrg().nameColor
+  );
   // True once the network fetch has resolved at least once. Used to
   // keep the branded fallback cube hidden until we KNOW whether the
   // org has a real logo set — first-ever visit shows a neutral
@@ -50,18 +58,39 @@ export function Sidebar() {
   // screen). See lib/needs-action-context.tsx for the rationale.
   const { count: needsActionCount, refresh: refreshNeedsAction } = useNeedsAction();
 
+  // Tasks sub-nav expansion. Defaults open when the user is on a
+  // /tasks route (auto-expand on arrival), but a click on the Tasks
+  // parent while ALREADY on /tasks toggles it closed — and vice
+  // versa. Without this manual override, a parent re-click was a
+  // no-op navigation that left the sub-nav stuck open.
+  const [tasksExpanded, setTasksExpanded] = useState<boolean>(() =>
+    typeof window !== "undefined" && window.location.pathname.startsWith("/tasks")
+  );
+  // Auto-open when the user navigates INTO /tasks from elsewhere.
+  // We don't auto-close when they leave — leaves room for the
+  // "I'm planning a Tasks visit" reading where the sub-nav stays
+  // visible after they nav away. Cheap to expand back on return.
+  useEffect(() => {
+    if (pathname.startsWith("/tasks")) setTasksExpanded(true);
+  }, [pathname]);
+
   useEffect(() => {
     let cancelled = false;
     getUser().then((u) => {
       if (!cancelled) setUserEmail(u?.email || "");
     });
     const fetchOrg = () => {
-      Promise.all([getOrganisationName(), getOrganisationLogoUrl()]).then(([n, u]) => {
+      Promise.all([
+        getOrganisationName(),
+        getOrganisationLogoUrl(),
+        getOrganisationNameColor(),
+      ]).then(([n, u, c]) => {
         if (cancelled) return;
         setOrgName(n);
         setOrgLogoUrl(u);
+        setOrgNameColor(c);
         setOrgLoaded(true);
-        writeCachedOrg(n, u);
+        writeCachedOrg(n, u, c);
       });
     };
     fetchOrg();
@@ -224,6 +253,17 @@ export function Sidebar() {
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
+              // Org-name accent — pulled from /settings/organisation.
+              // Empty string falls through to the inherited sideInk
+              // colour, so brand-new installs look unchanged.
+              color: orgNameColor || undefined,
+              // Subtle text-shadow when a custom colour is in play —
+              // some brand reds / yellows look washed out on a dark
+              // sidebar without a little ink-tone glow. Skipped when
+              // colour is default so the wordmark stays clean.
+              textShadow: orgNameColor
+                ? "0 1px 0 rgba(0,0,0,0.35)"
+                : undefined,
             }}
             title={orgName || "MORPHEUS"}
           >
@@ -351,6 +391,7 @@ export function Sidebar() {
               ? "/#live-feed-needs-action"
               : item.href;
           const parentActive = isActive(item.href);
+          const isTasks = item.id === "tasks";
           return (
             <React.Fragment key={item.id}>
               <NavItem
@@ -364,51 +405,92 @@ export function Sidebar() {
                     : false
                 }
                 badgeCount={item.id === "ops" ? needsActionCount : 0}
+                trailingCaret={isTasks}
+                caretOpen={isTasks && tasksExpanded}
+                onClick={
+                  isTasks
+                    ? (e) => {
+                        // Re-click while already on a /tasks route =
+                        // toggle the sub-nav. Without this the
+                        // re-click was a no-op navigation (the rep
+                        // tried to "close" Tasks and nothing
+                        // happened).
+                        if (pathname.startsWith("/tasks")) {
+                          e.preventDefault();
+                          setTasksExpanded((v) => !v);
+                        }
+                        // Otherwise let Next.js navigate; the
+                        // useEffect on pathname will auto-expand
+                        // when the user lands on /tasks.
+                      }
+                    : undefined
+                }
               />
-              {/* Tasks sub-nav. Expands inline when the user is on
-                  any /tasks* route. Three options:
+              {/* Tasks sub-nav. Three options:
                     - Tasks (Core, active when on /tasks)
                     - Advanced Auditing (Pro — locked)
                     - Sales Orders (Pro — locked)
                   Locked items aren't separate top-level nav per
                   product direction — they live as upgradeable
-                  capabilities inside Tasks. */}
-              {item.id === "tasks" && parentActive && (
+                  capabilities inside Tasks.
+                  Animation: outer wrapper does max-height + opacity
+                  transition; inner content slides down from the top
+                  via a tiny translateY. Cubic-bezier(.22, 1, .36, 1)
+                  is the "soft overshoot" curve I use elsewhere — feels
+                  more like a click landing than a generic ease. */}
+              {isTasks && (
                 <div
+                  aria-hidden={!tasksExpanded}
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 1,
-                    marginLeft: 16,
-                    paddingLeft: 12,
-                    borderLeft: `1px solid #232932`,
-                    marginTop: 2,
-                    marginBottom: 4,
+                    overflow: "hidden",
+                    maxHeight: tasksExpanded ? 160 : 0,
+                    opacity: tasksExpanded ? 1 : 0,
+                    transition:
+                      "max-height .32s cubic-bezier(.22, 1, .36, 1), opacity .22s ease-out, margin .22s ease-out",
+                    marginTop: tasksExpanded ? 2 : 0,
+                    marginBottom: tasksExpanded ? 4 : 0,
                   }}
                 >
-                  <SubNavItem
-                    label="Tasks"
-                    href="/tasks"
-                    active={pathname === "/tasks"}
-                  />
-                  <SubNavItem
-                    label="Advanced Auditing"
-                    locked
-                    onLockedClick={() =>
-                      alert(
-                        "Advanced Auditing is part of Morpheus Ops Pro — coming soon.\n\nTalk to us if you'd like early access."
-                      )
-                    }
-                  />
-                  <SubNavItem
-                    label="Sales Orders"
-                    locked
-                    onLockedClick={() =>
-                      alert(
-                        "Sales Orders is part of Morpheus Ops Pro — coming soon.\n\nTalk to us if you'd like early access."
-                      )
-                    }
-                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 1,
+                      marginLeft: 16,
+                      paddingLeft: 12,
+                      borderLeft: `1px solid #232932`,
+                      // Inner slide — each row eases in from -6px.
+                      transform: tasksExpanded
+                        ? "translateY(0)"
+                        : "translateY(-6px)",
+                      transition:
+                        "transform .32s cubic-bezier(.22, 1, .36, 1)",
+                    }}
+                  >
+                    <SubNavItem
+                      label="Tasks"
+                      href="/tasks"
+                      active={pathname === "/tasks"}
+                    />
+                    <SubNavItem
+                      label="Advanced Auditing"
+                      locked
+                      onLockedClick={() =>
+                        alert(
+                          "Advanced Auditing is part of Morpheus Ops Pro — coming soon.\n\nTalk to us if you'd like early access."
+                        )
+                      }
+                    />
+                    <SubNavItem
+                      label="Sales Orders"
+                      locked
+                      onLockedClick={() =>
+                        alert(
+                          "Sales Orders is part of Morpheus Ops Pro — coming soon.\n\nTalk to us if you'd like early access."
+                        )
+                      }
+                    />
+                  </div>
                 </div>
               )}
             </React.Fragment>
@@ -574,6 +656,9 @@ function NavItem({
   active,
   comingSoon = false,
   badgeCount = 0,
+  onClick,
+  trailingCaret,
+  caretOpen,
 }: {
   href: string;
   label: string;
@@ -582,6 +667,15 @@ function NavItem({
   comingSoon?: boolean;
   /** When > 0 a flashing red pill renders on the right of the row. */
   badgeCount?: number;
+  /** Optional click interceptor — fires BEFORE Next.js navigates. The
+   *  handler can call e.preventDefault() to cancel the nav (e.g. the
+   *  Tasks parent uses this to toggle its sub-nav when already on
+   *  /tasks instead of re-navigating). */
+  onClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void;
+  /** When set, renders a chevron at the trailing edge of the row to
+   *  signal "this item expands inline". Rotates based on caretOpen. */
+  trailingCaret?: boolean;
+  caretOpen?: boolean;
 }) {
   // Coming-soon items render as a non-clickable greyed row with a SOON
   // pill so the user knows the feature exists but isn't ready yet.
@@ -634,6 +728,7 @@ function NavItem({
   return (
     <Link
       href={href}
+      onClick={onClick}
       style={{
         width: "100%",
         display: "flex",
@@ -694,6 +789,27 @@ function NavItem({
           }}
         >
           {badgeCount}
+        </span>
+      )}
+      {trailingCaret && (
+        // Disclosure caret for items with an inline sub-nav. Rotates
+        // 90° when the sub-nav is open so the affordance reads as a
+        // chevron pointing INTO the open content. The whole row stays
+        // a Link (so URL still navigates); the caret is purely visual.
+        // Wrapped in a span because AGlyph itself doesn't accept a
+        // style prop — the rotation lives on the wrapper.
+        <span
+          style={{
+            display: "inline-flex",
+            transition: "transform .25s cubic-bezier(.22,1,.36,1)",
+            transform: caretOpen ? "rotate(90deg)" : "rotate(0deg)",
+          }}
+        >
+          <AGlyph
+            name="chev-r"
+            size={13}
+            color={active ? AC.brand : AC.sideMute}
+          />
         </span>
       )}
     </Link>
@@ -794,36 +910,50 @@ function SubNavItem({
  * data is non-sensitive, and a stale cache only costs a single
  * frame before the network revalidation lands and overwrites it.
  *
- * Keyed by version so a future schema bump (e.g. adding a colour
- * token to the cached blob) can invalidate cleanly by changing v1.
+ * Keyed by version. Bumped to v2 (May 14 evening) to add nameColor.
+ * Old v1 entries are silently ignored on read — the next save
+ * rewrites under v2 + the network revalidation fills the gap. No
+ * migration needed.
  */
-const ORG_CACHE_KEY = "morpheus.org.cache.v1";
+const ORG_CACHE_KEY = "morpheus.org.cache.v2";
 
-function readCachedOrg(): { name: string; logoUrl: string; hasCache: boolean } {
-  if (typeof window === "undefined") return { name: "", logoUrl: "", hasCache: false };
+function readCachedOrg(): {
+  name: string;
+  logoUrl: string;
+  nameColor: string;
+  hasCache: boolean;
+} {
+  const empty = { name: "", logoUrl: "", nameColor: "", hasCache: false };
+  if (typeof window === "undefined") return empty;
   try {
     const raw = window.localStorage.getItem(ORG_CACHE_KEY);
-    if (!raw) return { name: "", logoUrl: "", hasCache: false };
+    if (!raw) return empty;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object") {
       return {
         name: typeof parsed.name === "string" ? parsed.name : "",
         logoUrl: typeof parsed.logoUrl === "string" ? parsed.logoUrl : "",
+        nameColor:
+          typeof parsed.nameColor === "string" ? parsed.nameColor : "",
         hasCache: true,
       };
     }
   } catch {
     /* corrupt cache — ignore */
   }
-  return { name: "", logoUrl: "", hasCache: false };
+  return empty;
 }
 
-function writeCachedOrg(name: string, logoUrl: string): void {
+function writeCachedOrg(
+  name: string,
+  logoUrl: string,
+  nameColor: string
+): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(
       ORG_CACHE_KEY,
-      JSON.stringify({ name, logoUrl, savedAt: Date.now() })
+      JSON.stringify({ name, logoUrl, nameColor, savedAt: Date.now() })
     );
   } catch {
     /* quota / private mode — ignore */

@@ -161,6 +161,32 @@ export async function setOrganisationLogoUrl(
   return r;
 }
 
+/**
+ * Org-name accent colour. Used to brand the org name wherever it's
+ * shown (currently: the admin sidebar's brand block). Stored as a CSS
+ * hex string (e.g. "#15B4D6"); empty string = inherit the default
+ * sideInk colour.
+ *
+ * Validation is minimal — the admin's colour picker emits sane #rrggbb
+ * values, and any malformed string just falls through as the literal
+ * color value in the inline style (browser tolerates / ignores). We
+ * don't try to validate server-side because the value is read with
+ * the user's auth and the worst-case "rep injects gibberish" is just
+ * a broken local display.
+ */
+export async function getOrganisationNameColor(): Promise<string> {
+  const v = await readSetting<string>("organisation_name_color", "");
+  return typeof v === "string" ? v : "";
+}
+
+export async function setOrganisationNameColor(
+  color: string
+): Promise<{ ok: boolean; error?: string }> {
+  const r = await writeSetting("organisation_name_color", color.trim());
+  if (r.ok) notifyOrgChanged();
+  return r;
+}
+
 // ─── Organisation contact details ──────────────────────────────────────
 //
 // Free-text fields, all optional. KISS: anything you type is what we store.

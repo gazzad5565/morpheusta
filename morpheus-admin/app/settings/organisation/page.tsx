@@ -34,6 +34,8 @@ import {
   setOrganisationName,
   getOrganisationLogoUrl,
   setOrganisationLogoUrl,
+  getOrganisationNameColor,
+  setOrganisationNameColor,
   uploadOrgLogo,
   getOrganisationDetails,
   setOrganisationAddress,
@@ -48,6 +50,11 @@ import {
 export default function OrganisationSettingsPage() {
   const [name, setName] = useState<string>("");
   const [logoUrl, setLogoUrl] = useState<string>("");
+  // Org-name accent colour (hex string). Empty = inherit default.
+  // The colour picker writes here on change; an explicit Save below
+  // persists to app_settings + bumps the org-change event so the
+  // sidebar repaints without a reload.
+  const [nameColor, setNameColor] = useState<string>("");
 
   // Contact / company details — saved together when the user clicks
   // "Save details", so partial typing doesn't generate one toast per
@@ -83,7 +90,8 @@ export default function OrganisationSettingsPage() {
       getOrganisationName(),
       getOrganisationLogoUrl(),
       getOrganisationDetails(),
-    ]).then(([n, u, d]) => {
+      getOrganisationNameColor(),
+    ]).then(([n, u, d, c]) => {
       setName(n);
       setLogoUrl(u);
       setAddress(d.address);
@@ -93,6 +101,7 @@ export default function OrganisationSettingsPage() {
       setWebsite(d.website);
       setRegistrationNumber(d.registrationNumber);
       setCoords(d.coords);
+      setNameColor(c);
       setLoaded(true);
     });
   }, []);
@@ -101,10 +110,19 @@ export default function OrganisationSettingsPage() {
     setError(null);
     setMessage(null);
     setSaving(true);
-    const r = await setOrganisationName(name);
+    // Save name + accent colour together — same Save button, one
+    // toast, no surprises about which control needs its own button.
+    const [rName, rColor] = await Promise.all([
+      setOrganisationName(name),
+      setOrganisationNameColor(nameColor),
+    ]);
     setSaving(false);
-    if (!r.ok) {
-      setError(r.error || "Couldn't save.");
+    if (!rName.ok) {
+      setError(rName.error || "Couldn't save the name.");
+      return;
+    }
+    if (!rColor.ok) {
+      setError(rColor.error || "Couldn't save the accent colour.");
       return;
     }
     setMessage("Saved.");
@@ -262,6 +280,115 @@ export default function OrganisationSettingsPage() {
             </Btn>
           </div>
           <Hint>Shown next to the logo in the admin sidebar.</Hint>
+
+          {/* Org-name accent colour. Saved together with the name via
+              the Save button above — no separate Save here. Three
+              controls: a native colour picker (precise), a hex text
+              input (paste-friendly), and a small live preview pill
+              showing how the name renders with the chosen colour.
+              Empty / clearing the value reverts to the default
+              sideInk colour. */}
+          <div
+            style={{
+              marginTop: 16,
+              paddingTop: 14,
+              borderTop: `1px solid ${AC.line}`,
+            }}
+          >
+            <SectionLabel>Accent colour</SectionLabel>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <input
+                type="color"
+                value={nameColor || "#E6E9EE"}
+                disabled={!loaded || saving}
+                onChange={(e) => setNameColor(e.target.value)}
+                aria-label="Pick a colour for the organisation name"
+                style={{
+                  width: 44,
+                  height: 38,
+                  padding: 0,
+                  border: `1px solid ${AC.line}`,
+                  borderRadius: 8,
+                  background: "transparent",
+                  cursor: "pointer",
+                }}
+              />
+              <input
+                type="text"
+                value={nameColor}
+                disabled={!loaded || saving}
+                onChange={(e) => setNameColor(e.target.value)}
+                placeholder="#15B4D6 (leave blank for default)"
+                style={{
+                  flex: "1 1 180px",
+                  minWidth: 0,
+                  padding: "9px 11px",
+                  borderRadius: 10,
+                  border: `1px solid ${AC.line}`,
+                  background: "#fff",
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: 13,
+                  color: AC.ink,
+                }}
+              />
+              {nameColor && (
+                <button
+                  type="button"
+                  onClick={() => setNameColor("")}
+                  disabled={!loaded || saving}
+                  style={{
+                    background: "transparent",
+                    color: AC.mute,
+                    border: `1px solid ${AC.line}`,
+                    borderRadius: 8,
+                    padding: "8px 10px",
+                    fontFamily: AC.font,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+              {/* Live preview — same styling treatment the sidebar
+                  uses (dark background, uppercase wordmark). Reads
+                  exactly the colour the picker emits. */}
+              <span
+                style={{
+                  marginLeft: "auto",
+                  background: "#0E1116",
+                  color: nameColor || "#E6E9EE",
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  fontFamily: AC.font,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  letterSpacing: 0.4,
+                  textTransform: "uppercase",
+                  textShadow: nameColor ? "0 1px 0 rgba(0,0,0,0.35)" : "none",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  maxWidth: 200,
+                }}
+                title="Sidebar preview"
+              >
+                {(name || "MORPHEUS").toUpperCase()}
+              </span>
+            </div>
+            <Hint>
+              Applied to the wordmark above the nav. Tap Save to apply.
+              Leave blank to use the default.
+            </Hint>
+          </div>
         </Card>
 
         {/* Address — autocomplete + map preview, mirroring the customer
