@@ -305,36 +305,54 @@ export function Sidebar() {
         <div
           style={{
             fontFamily: AC.font,
-            fontSize: 12.5,
+            // Single-line guarantee at the 240px sidebar width — the
+            // earlier 12.5px size made "Workforce Operations. [In real
+            // time]" wrap to two lines. 11px reads correctly on
+            // standard-DPR + retina without feeling tiny since the
+            // wordmark above is already the focal point.
+            fontSize: 11,
             letterSpacing: -0.05,
             lineHeight: 1.4,
             fontWeight: 500,
             display: "flex",
             alignItems: "center",
-            gap: 6,
-            flexWrap: "wrap",
+            gap: 5,
+            flexWrap: "nowrap",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
           }}
         >
-          <span className="sb-tagline" style={{ color: "#8A95A4" }}>
+          <span
+            className="sb-tagline"
+            style={{
+              color: "#8A95A4",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              minWidth: 0,
+            }}
+          >
             Workforce Operations.
           </span>
           {/* "In real time" treated as a brand pill — mirrors the
               "OPS" chip in the footer wordmark + the admin's
               MORPHEUS Ops sidebar pill, so the platform's two-tone
               brand treatment lands consistently across surfaces.
-              The shimmer animation still sweeps across the whole
-              line via the wrapper class below; the pill background
-              stays static, only the gradient on the text fill
-              moves. */}
+              The shimmer animation still sweeps across the muted
+              text via the wrapper class below; the pill background
+              stays static, only the gradient on the text fill moves.
+              flexShrink:0 stops the pill collapsing first when the
+              row is tight — the prefix truncates with an ellipsis
+              instead, which preserves the brand cue. */}
           <span
             className="sb-tagline-pill"
             style={{
-              padding: "1px 7px",
+              padding: "1px 6px",
               borderRadius: 4,
               background: "rgba(36, 173, 217, 0.18)",
               color: AC.brand,
               fontWeight: 700,
               letterSpacing: 0.2,
+              flexShrink: 0,
             }}
           >
             In real time
