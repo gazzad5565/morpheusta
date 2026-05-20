@@ -13,12 +13,13 @@
 
 export const NAV_ITEMS = [
   { id: "ops", label: "Live Ops", glyph: "ops", href: "/" },
-  // Workforce/Reps — kept the route as /reps (matches the codebase
+  // Workforce / Reps — kept the route as /reps (matches the codebase
   // throughout) but the label is the broader "Workforce" since the
   // section now covers reps + managers + role/auth admin too.
-  { id: "reps", label: "Workforce/Reps", glyph: "reps", href: "/reps" },
+  { id: "reps", label: "Workforce / Reps", glyph: "reps", href: "/reps" },
   { id: "customers", label: "Customers", glyph: "customer", href: "/customers" },
   { id: "schedule", label: "Schedule / Calendar", glyph: "cal", href: "/schedule" },
+  { id: "past-shifts", label: "Past Shifts", glyph: "clock", href: "/past-shifts" },
   { id: "tasks", label: "Tasks", glyph: "tasks", href: "/tasks" },
   { id: "library", label: "Library", glyph: "lib", href: "/library" },
   // "Messaging" (renamed from "Notifications" May 13). Composer at

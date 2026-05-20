@@ -368,6 +368,7 @@ export default function TimesheetReportPage() {
               clearable={false}
               triggerIcon="reps"
               width={220}
+              searchable
               options={[
                 { value: "all", label: "All reps" },
                 ...profiles
@@ -377,6 +378,16 @@ export default function TimesheetReportPage() {
                     value: p.id,
                     label: displayName(p),
                     sublabel: p.email,
+                    renderLeading: () => (
+                      <RepAvatar
+                        rep={{
+                          initials: initialsFromNameOrEmail(p.name, p.email),
+                          avatarUrl: p.avatar_url,
+                        }}
+                        size={22}
+                        seed={p.id}
+                      />
+                    ),
                   })),
               ]}
             />

@@ -42,7 +42,7 @@ interface RepWithStats extends Profile {
 
 type StatusFilter = "all" | "with-shifts" | "no-shifts" | "managers";
 type ViewMode = "Grid" | "Table";
-type RepSortKey = "name" | "role" | "joined" | "shiftsToday";
+type RepSortKey = "name" | "email" | "role" | "joined" | "shiftsToday";
 
 export default function RepsPage() {
   const [reps, setReps] = useState<RepWithStats[] | null>(null);
@@ -115,6 +115,8 @@ export default function RepsPage() {
       switch (sort.key) {
         case "name":
           return compareBy(a, b, (r) => r.displayName, sort.dir);
+        case "email":
+          return compareBy(a, b, (r) => r.email, sort.dir);
         case "role":
           return compareBy(a, b, (r) => r.role, sort.dir);
         case "joined":
@@ -391,10 +393,7 @@ function GridView({ reps }: { reps: RepWithStats[] }) {
 
 // ─── Table view ─────────────────────────────────────────────────────────
 
-// Dropped the trailing 36 px "..." column — it was decorative, the
-// button did nothing (just preventDefault). Row click already
-// navigates to /reps/[id] which is the real edit affordance.
-const TABLE_COLS = "36px 2fr 110px 140px 130px";
+const TABLE_COLS = "1.5fr 1.5fr 110px 140px 130px";
 
 function TableView({
   reps,
@@ -408,9 +407,11 @@ function TableView({
   return (
     <Card padding={0}>
       <div style={tableHeader()}>
-        <div />
         <SortableHeader k="name" sort={sort} onChange={onSort}>
-          Rep
+          Name
+        </SortableHeader>
+        <SortableHeader k="email" sort={sort} onChange={onSort}>
+          Email
         </SortableHeader>
         <SortableHeader k="role" sort={sort} onChange={onSort}>
           Role
@@ -421,7 +422,6 @@ function TableView({
         <SortableHeader k="shiftsToday" sort={sort} onChange={onSort}>
           Shifts today
         </SortableHeader>
-        <div />
       </div>
 
       {reps.map((r, i) => (
@@ -440,40 +440,38 @@ function TableView({
             color: "inherit",
           }}
         >
-          <div style={{ paddingLeft: 4 }} onClick={(e) => e.preventDefault()}>
-            <input type="checkbox" style={CB} readOnly />
-          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
             <RepAvatar rep={{ initials: r.initials, avatarUrl: r.avatar_url }} size={32} seed={r.id} />
-            <div style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: AC.ink,
-                  letterSpacing: -0.1,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {r.displayName}
-              </div>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 11.5,
-                  color: AC.mute,
-                  marginTop: 1,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {r.email}
-              </div>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 13,
+                fontWeight: 600,
+                color: AC.ink,
+                letterSpacing: -0.1,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                minWidth: 0,
+              }}
+            >
+              {r.displayName}
             </div>
+          </div>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12.5,
+              color: AC.ink2,
+              fontWeight: 500,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              minWidth: 0,
+            }}
+            title={r.email}
+          >
+            {r.email}
           </div>
           <div>
             <RolePill role={r.role} />
@@ -489,8 +487,6 @@ function TableView({
     </Card>
   );
 }
-
-const CB: CSSProperties = { width: 14, height: 14, accentColor: AC.brand };
 
 function tableHeader(): CSSProperties {
   return {

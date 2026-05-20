@@ -19,6 +19,7 @@ import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { FilterChip } from "@/components/ui/Filters";
 import { Combobox } from "@/components/ui/Combobox";
+import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
 import { listAllTasks, deleteTask, type TaskRow } from "@/lib/tasks-store";
 
@@ -46,11 +47,14 @@ export default function TasksPage() {
   }, []);
 
   const customers = useMemo(() => {
-    const set = new Map<string, string>();
+    // Capture the full customer summary (initials/color/code/logoUrl)
+    // so the filter Combobox can render a real <CustomerSwatch> per
+    // option, not just a generic icon.
+    const set = new Map<string, NonNullable<TaskRow["customers"]>>();
     for (const r of rows) {
-      if (r.customers) set.set(r.customers.id, r.customers.name);
+      if (r.customers) set.set(r.customers.id, r.customers);
     }
-    return Array.from(set.entries()).map(([id, name]) => ({ id, name }));
+    return Array.from(set.values());
   }, [rows]);
 
   const filtered = useMemo(() => {
@@ -184,10 +188,16 @@ export default function TasksPage() {
               onChange={(v) => setCustomerFilter(v ?? "All")}
               clearable={false}
               triggerIcon="customer"
+              searchable
               options={[
                 { value: "All", label: "All customers" },
                 { value: "Universal", label: "Universal", sublabel: "All-customers tasks" },
-                ...customers.map((c) => ({ value: c.id, label: c.name, icon: "customer" })),
+                ...customers.map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                  sublabel: `#${c.code}`,
+                  renderLeading: () => <CustomerSwatch customer={c} size={22} />,
+                })),
               ]}
             />
           </div>

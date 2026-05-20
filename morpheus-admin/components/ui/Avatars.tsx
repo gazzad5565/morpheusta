@@ -1,7 +1,24 @@
 import { AC } from "@/lib/tokens";
 import type { Customer, Rep } from "@/lib/types";
+import { initialsFromNameOrEmail } from "@/lib/format";
+import type { Profile } from "@/lib/profiles-store";
 
-export function CustomerSwatch({ customer, size = 32 }: { customer: Customer; size?: number }) {
+/** Structural subset of Customer that the swatch actually reads.
+ *  Lets places that only carry a summary (joined task / shift rows)
+ *  use the swatch without faking the full Customer shape. */
+interface CustomerSwatchLike {
+  initials: string;
+  color: string;
+  logoUrl?: string | null;
+}
+
+export function CustomerSwatch({
+  customer,
+  size = 32,
+}: {
+  customer: CustomerSwatchLike | Customer;
+  size?: number;
+}) {
   const r = size <= 32 ? 7 : 9;
   // When the customer has uploaded a logo, render that on a white
   // tile instead of the coloured initials. Keeps every CustomerSwatch
@@ -145,5 +162,41 @@ export function RepAvatar({
     >
       {rep.initials}
     </div>
+  );
+}
+
+/**
+ * RepAvatar wrapped in a span that flags scheduling conflicts with a
+ * 2px red outer ring. Used by the Reassign pickers (shift detail +
+ * LiveFeedPanel "Needs action") inside the Combobox `renderLeading`
+ * slot, where a conflicted rep means "this rep already has an
+ * overlapping shift at the same time".
+ */
+export function RepConflictAvatar({
+  rep,
+  conflict,
+  size = 22,
+}: {
+  rep: Pick<Profile, "id" | "name" | "email" | "avatar_url">;
+  conflict: boolean;
+  size?: number;
+}) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        borderRadius: 99,
+        boxShadow: conflict ? `0 0 0 2px ${AC.danger}` : undefined,
+      }}
+    >
+      <RepAvatar
+        rep={{
+          initials: initialsFromNameOrEmail(rep.name, rep.email),
+          avatarUrl: rep.avatar_url,
+        }}
+        size={size}
+        seed={rep.id}
+      />
+    </span>
   );
 }

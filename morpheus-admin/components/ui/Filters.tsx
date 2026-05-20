@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { AC } from "@/lib/tokens";
-import { AGlyph } from "./AGlyph";
 
 export function FilterChip({
   children,
@@ -31,31 +30,6 @@ export function FilterChip({
       }}
     >
       {children}
-    </button>
-  );
-}
-
-export function FilterDropdown({ label, value }: { label: string; value: string }) {
-  return (
-    <button
-      type="button"
-      style={{
-        padding: "6px 11px",
-        borderRadius: 8,
-        background: "#fff",
-        border: `1px solid ${AC.line}`,
-        color: AC.ink2,
-        fontFamily: AC.font,
-        fontSize: 12,
-        fontWeight: 600,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        cursor: "pointer",
-      }}
-    >
-      <span style={{ color: AC.mute, fontWeight: 500 }}>{label}:</span> {value}
-      <AGlyph name="chev-d" size={11} color={AC.mute} />
     </button>
   );
 }
