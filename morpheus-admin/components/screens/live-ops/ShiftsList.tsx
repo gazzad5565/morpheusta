@@ -30,6 +30,7 @@ import { LIVE_FEED_NEEDS_ACTION_HASH } from "@/components/screens/live-ops/LiveF
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import { countTasksForCustomers } from "@/lib/tasks-store";
+import { listPhotoCountsForShifts } from "@/lib/photos-store";
 import { type PendingRequest } from "@/lib/requests-store";
 import { useNeedsAction } from "@/lib/needs-action-context";
 
@@ -118,6 +119,12 @@ export function ShiftsList() {
   const [taskCountByCustomer, setTaskCountByCustomer] = useState<
     Map<string, number>
   >(() => new Map());
+  // Per-shift photo upload counts for the camera badge. Refreshed
+  // alongside the shifts load (and on the same realtime ticks).
+  // Reps captured nothing yet → empty map → no badges rendered.
+  const [photoCountByShift, setPhotoCountByShift] = useState<
+    Map<string, number>
+  >(() => new Map());
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<string>("All");
 
@@ -157,6 +164,16 @@ export function ShiftsList() {
         if (!cancelled) setTaskCountByCustomer(counts);
       } else {
         if (!cancelled) setTaskCountByCustomer(new Map());
+      }
+
+      // Camera-count badge data. Single round-trip for all visible
+      // shifts; rows with 0 photos don't render a badge.
+      const shiftIds = shiftRows.map((s) => s.id);
+      if (shiftIds.length > 0) {
+        const photoCounts = await listPhotoCountsForShifts(shiftIds);
+        if (!cancelled) setPhotoCountByShift(photoCounts);
+      } else {
+        if (!cancelled) setPhotoCountByShift(new Map());
       }
     };
     load();
@@ -366,6 +383,7 @@ export function ShiftsList() {
                 row={r.shift}
                 rep={r.shift.rep_id ? reps[r.shift.rep_id] : undefined}
                 liveTaskTotal={taskCountByCustomer.get(r.shift.customer_id)}
+                photoCount={photoCountByShift.get(r.shift.id) ?? 0}
                 linkOverride={
                   isNeedsAction(r.shift)
                     ? `#${LIVE_FEED_NEEDS_ACTION_HASH}`
@@ -435,6 +453,7 @@ function ShiftRowView({
   rep,
   header,
   liveTaskTotal,
+  photoCount,
   linkOverride,
 }: {
   row?: ShiftRow;
@@ -445,6 +464,10 @@ function ShiftRowView({
    *  and never refreshed; this prop keeps the progress bar honest
    *  when a customer's task list grows after the shift was scheduled. */
   liveTaskTotal?: number;
+  /** Number of photos uploaded so far on this shift. When > 0 we
+   *  render a 📷 N chip inline with the state pill so the manager
+   *  can see photo evidence is mounting without drilling in. */
+  photoCount?: number;
   header?: boolean;
   /** When set, overrides the default shiftHref. Used by the Needs
    *  Action filter to send clicks to the Live Feed panel above
@@ -605,7 +628,7 @@ function ShiftRowView({
         {formatTimeLabel(row.end_time)}
       </div>
 
-      <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <span
           style={{
             display: "inline-flex",
@@ -623,6 +646,27 @@ function ShiftRowView({
           <span style={{ width: 5, height: 5, borderRadius: 99, background: state.dot }} />
           {state.label}
         </span>
+        {photoCount && photoCount > 0 ? (
+          <span
+            title={`${photoCount} photo${photoCount === 1 ? "" : "s"} uploaded`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 3,
+              padding: "2px 6px",
+              borderRadius: 99,
+              background: AC.bg,
+              color: AC.mute,
+              fontFamily: AC.font,
+              fontSize: 10.5,
+              fontWeight: 600,
+              lineHeight: 1,
+            }}
+          >
+            <AGlyph name="camera" size={11} color={AC.mute} />
+            {photoCount}
+          </span>
+        ) : null}
       </div>
 
       <TaskBar

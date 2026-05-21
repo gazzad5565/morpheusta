@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { RepAvatar } from "@/components/ui/Avatars";
+import { AGlyph } from "@/components/ui/AGlyph";
 import { TableColumnHeader } from "@/components/ui/TabHeader";
 import {
   SortableHeader,
@@ -28,10 +29,14 @@ export function TableView({
   rows,
   sort,
   onSort,
+  photoCounts,
 }: {
   rows: PastShiftRow[];
   sort: SortState<SortKey>;
   onSort: (s: SortState<SortKey>) => void;
+  /** Photo counts keyed by shift_id. When a row has no entry (or 0)
+   *  we render no badge — silence beats a "0" everywhere. */
+  photoCounts?: Map<string, number>;
 }) {
   return (
     <Card padding={0}>
@@ -57,6 +62,7 @@ export function TableView({
       {rows.map((r, i) => {
         const s = r.shift;
         const tone = STATE_TONE[s.state] || STATE_TONE.complete;
+        const photoN = photoCounts?.get(s.id) ?? 0;
         return (
           <Link
             key={s.id}
@@ -204,7 +210,14 @@ export function TableView({
               <TasksDonePill done={s.tasks_done} total={s.tasks_total} />
             </div>
 
-            <div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap",
+              }}
+            >
               <span
                 style={{
                   padding: "2px 8px",
@@ -220,6 +233,27 @@ export function TableView({
               >
                 {STATE_LABEL[s.state] || s.state}
               </span>
+              {photoN > 0 && (
+                <span
+                  title={`${photoN} photo${photoN === 1 ? "" : "s"} uploaded`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 3,
+                    padding: "2px 6px",
+                    borderRadius: 99,
+                    background: AC.bg,
+                    color: AC.mute,
+                    fontFamily: AC.font,
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    lineHeight: 1,
+                  }}
+                >
+                  <AGlyph name="camera" size={11} color={AC.mute} />
+                  {photoN}
+                </span>
+              )}
             </div>
           </Link>
         );

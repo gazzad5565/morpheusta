@@ -2,17 +2,17 @@
 
 /**
  * /past-shifts — dedicated archive of completed (and optionally
- * cancelled) shifts. Drill-in to /shifts/[id] for the read-only detail,
- * which already renders rep notes, the task list with who/when each
- * task was ticked off, and any custom fields. Photo evidence is
- * deferred — the schema has photo_count on tasks but there's no
- * task_photos / shift_photos table yet, so we can't surface real photos
- * without a migration. When that lands, the slot drops in next to the
- * tasks card on the detail page.
+ * cancelled) shifts. Drill-in to /shifts/[id] for the read-only
+ * detail, which renders rep notes, the task list with who/when each
+ * task was ticked off, any custom fields, AND a per-task thumbnail
+ * strip + full-shift lightbox gallery for any photos the rep
+ * captured (Feature C — shift_task_photos table). Each row in the
+ * list below shows a camera-count badge so the manager can spot
+ * photo-heavy shifts at a glance without drilling in.
  *
- * Patterns mirror the gold-standard list page (/reps): filter card row
- * with FilterChips + local search + view toggle, then a body card
- * with either Table or Grid.
+ * Patterns mirror the gold-standard list page (/reps): filter card
+ * row with FilterChips + local search + view toggle, then a body
+ * card with either Table or Grid.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -32,6 +32,7 @@ import {
   PAST_SHIFTS_DEFAULT_LIMIT,
 } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import { listPhotoCountsForShifts } from "@/lib/photos-store";
 import { todayLocalISO, isoDaysAgo } from "@/lib/format";
 
 type Period = "7" | "30" | "90" | "all";
@@ -54,6 +55,13 @@ export default function PastShiftsPage() {
     dir: "desc",
   });
   const [rows, setRows] = useState<PastShiftRow[] | null>(null);
+  // Camera-count badges per shift. One fetch alongside the shifts
+  // payload — see `listPhotoCountsForShifts`. Empty map until the
+  // fetch lands; the list views skip the badge when count is 0 or
+  // undefined.
+  const [photoCounts, setPhotoCounts] = useState<Map<string, number>>(
+    () => new Map()
+  );
   // Per-period counts. Only counts for windows that are a subset of
   // the currently-fetched window are accurate — e.g. when viewing
   // "30 days", the 7-day count is exact (subset) but the 90-day and
@@ -104,6 +112,14 @@ export default function PastShiftsPage() {
         };
       });
       setRows(enriched);
+
+      // Per-shift photo counts for the badge. One round-trip in
+      // parallel with the rest of the page hydration; the views
+      // tolerate an empty map gracefully (no badge shown).
+      const shiftIds = enriched.map((r) => r.shift.id);
+      const counts = await listPhotoCountsForShifts(shiftIds);
+      if (cancelled) return;
+      setPhotoCounts(counts);
 
       // Compute period counts off the current fetch. Counts for
       // narrower-or-equal windows are exact; wider-window counts are
@@ -342,9 +358,14 @@ export default function PastShiftsPage() {
             )}
           </Card>
         ) : view === "Table" ? (
-          <TableView rows={filtered} sort={sort} onSort={setSort} />
+          <TableView
+            rows={filtered}
+            sort={sort}
+            onSort={setSort}
+            photoCounts={photoCounts}
+          />
         ) : (
-          <GridView rows={filtered} />
+          <GridView rows={filtered} photoCounts={photoCounts} />
         )}
       </div>
     </AdminShell>

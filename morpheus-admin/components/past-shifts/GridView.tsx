@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { RepAvatar } from "@/components/ui/Avatars";
+import { AGlyph } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
 import { shiftHref } from "@/lib/shifts-store";
 import { formatDate, formatTimeRange, initialsFromNameOrEmail } from "@/lib/format";
@@ -13,7 +14,15 @@ import { STATE_LABEL, STATE_TONE, type PastShiftRow } from "./types";
  * the same way whether you're skimming an archive or watching today's
  * board.
  */
-export function GridView({ rows }: { rows: PastShiftRow[] }) {
+export function GridView({
+  rows,
+  photoCounts,
+}: {
+  rows: PastShiftRow[];
+  /** Per-shift photo counts. Rows with no entry (or 0) render no
+   *  camera chip — silence beats a "0" on every card. */
+  photoCounts?: Map<string, number>;
+}) {
   return (
     <div
       style={{
@@ -25,6 +34,7 @@ export function GridView({ rows }: { rows: PastShiftRow[] }) {
       {rows.map((r) => {
         const s = r.shift;
         const tone = STATE_TONE[s.state] || STATE_TONE.complete;
+        const photoN = photoCounts?.get(s.id) ?? 0;
         return (
           <Card key={s.id} padding={0} style={{ overflow: "hidden" }}>
             <Link
@@ -95,22 +105,52 @@ export function GridView({ rows }: { rows: PastShiftRow[] }) {
                       ` · ${s.site.name}`}
                   </div>
                 </div>
-                <span
+                <div
                   style={{
-                    padding: "2px 8px",
-                    borderRadius: 99,
-                    background: tone.bg,
-                    color: tone.fg,
-                    fontFamily: AC.font,
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    letterSpacing: 0.4,
-                    textTransform: "uppercase",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
                     flexShrink: 0,
                   }}
                 >
-                  {STATE_LABEL[s.state] || s.state}
-                </span>
+                  {photoN > 0 && (
+                    <span
+                      title={`${photoN} photo${photoN === 1 ? "" : "s"} uploaded`}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 3,
+                        padding: "2px 7px",
+                        borderRadius: 99,
+                        background: "#fff",
+                        color: AC.mute,
+                        fontFamily: AC.font,
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        lineHeight: 1,
+                        border: `1px solid ${AC.line}`,
+                      }}
+                    >
+                      <AGlyph name="camera" size={11} color={AC.mute} />
+                      {photoN}
+                    </span>
+                  )}
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 99,
+                      background: tone.bg,
+                      color: tone.fg,
+                      fontFamily: AC.font,
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      letterSpacing: 0.4,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {STATE_LABEL[s.state] || s.state}
+                  </span>
+                </div>
               </div>
               <div
                 style={{

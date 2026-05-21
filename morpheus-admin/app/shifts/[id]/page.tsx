@@ -7,7 +7,10 @@
  *   - Header card: customer / rep / date / times / state / counts.
  *   - Tasks card: every customer_task for this customer, with the
  *     rep's tick-off state for this specific shift (who and when),
- *     pulled from `shift_task_completions`.
+ *     pulled from `shift_task_completions`. Each task row carries an
+ *     inline strip of photo thumbnails the rep captured during that
+ *     task (Feature C — shift_task_photos). Clicking a thumbnail
+ *     opens a full-shift lightbox carousel.
  *   - Custom fields card (entity="shift").
  *
  * Linked from the Live Ops shifts list, the rep detail page's
@@ -50,6 +53,10 @@ import {
   type ShiftTaskCompletion,
   type ActiveTask,
 } from "@/lib/task-completions-store";
+import {
+  listPhotosForShift,
+  type ShiftTaskPhoto,
+} from "@/lib/photos-store";
 
 function attentionReasonLabel(value: string | null | undefined): string {
   switch (value) {
@@ -128,6 +135,13 @@ export default function ShiftDetailPage({
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [completions, setCompletions] = useState<ShiftTaskCompletion[]>([]);
   const [rep, setRep] = useState<Profile | null>(null);
+  // Photos for this shift, flat array (task-id then slot-index
+  // ordering). The Tasks card groups by task_id for the per-row
+  // thumbnail strips; the lightbox treats the flat array as the
+  // carousel, so prev / next steps across task boundaries.
+  const [photos, setPhotos] = useState<ShiftTaskPhoto[]>([]);
+  // Lightbox state — index into `photos`. null = closed.
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   // Currently-active task for in-progress shifts. Refreshed every
@@ -194,19 +208,22 @@ export default function ShiftDetailPage({
         return;
       }
       setShift(s);
-      const [taskRows, comps, repProfile, active] = await Promise.all([
-        listTasksForCustomer(s.customer_id),
-        listCompletionsForShift(s.id),
-        s.rep_id ? getProfileById(s.rep_id) : Promise.resolve(null),
-        s.state === "in-progress" || s.state === "on-break"
-          ? getActiveTaskForShift(s.id)
-          : Promise.resolve(null),
-      ]);
+      const [taskRows, comps, repProfile, active, photoRows] =
+        await Promise.all([
+          listTasksForCustomer(s.customer_id),
+          listCompletionsForShift(s.id),
+          s.rep_id ? getProfileById(s.rep_id) : Promise.resolve(null),
+          s.state === "in-progress" || s.state === "on-break"
+            ? getActiveTaskForShift(s.id)
+            : Promise.resolve(null),
+          listPhotosForShift(s.id),
+        ]);
       if (cancelled) return;
       setTasks(taskRows);
       setCompletions(comps);
       setRep(repProfile);
       setActiveTask(active);
+      setPhotos(photoRows);
       setLoading(false);
     })();
     return () => {
@@ -347,6 +364,27 @@ export default function ShiftDetailPage({
   // Build a quick lookup of completions by task id.
   const compByTaskId = new Map<string, ShiftTaskCompletion>();
   for (const c of completions) compByTaskId.set(c.taskId, c);
+
+  // Group photos by task_id for the per-task thumbnail strips. The
+  // backing array stays as `photos` (flat, task→slot order) so the
+  // lightbox can prev/next across the whole shift.
+  const photosByTaskId = new Map<string, ShiftTaskPhoto[]>();
+  for (const p of photos) {
+    const list = photosByTaskId.get(p.task_id);
+    if (list) list.push(p);
+    else photosByTaskId.set(p.task_id, [p]);
+  }
+  // For the lightbox caption — map task_id → task name. Customer's
+  // tasks are already loaded above; universal tasks aren't joined
+  // into `tasks`, so an orphan photo (universal task that's since
+  // been deleted, edge case) falls back to "Task" generically.
+  const taskNameById = new Map<string, string>();
+  for (const t of tasks) taskNameById.set(t.id, t.name);
+
+  // Look up the photo's index in the flat array — needed when the
+  // thumbnail-strip click opens the lightbox.
+  const photoIndexById = new Map<string, number>();
+  photos.forEach((p, i) => photoIndexById.set(p.id, i));
 
   const compulsory = tasks.filter((t) => t.compulsory);
   const optional = tasks.filter((t) => !t.compulsory);
@@ -844,11 +882,17 @@ export default function ShiftDetailPage({
               <div>
                 {tasks.map((t, i) => {
                   const c = compByTaskId.get(t.id) || null;
+                  const taskPhotos = photosByTaskId.get(t.id) || [];
                   return (
                     <TaskCompletionRow
                       key={t.id}
                       task={t}
                       completion={c}
+                      photos={taskPhotos}
+                      onPhotoClick={(p) => {
+                        const idx = photoIndexById.get(p.id);
+                        if (idx !== undefined) setLightboxIdx(idx);
+                      }}
                       isLast={i === tasks.length - 1}
                     />
                   );
@@ -936,6 +980,24 @@ export default function ShiftDetailPage({
           </Card>
         </div>
       </div>
+      {lightboxIdx !== null && photos[lightboxIdx] && (
+        <PhotoLightbox
+          photos={photos}
+          index={lightboxIdx}
+          taskNameById={taskNameById}
+          onClose={() => setLightboxIdx(null)}
+          onPrev={() =>
+            setLightboxIdx((i) =>
+              i === null ? null : (i - 1 + photos.length) % photos.length
+            )
+          }
+          onNext={() =>
+            setLightboxIdx((i) =>
+              i === null ? null : (i + 1) % photos.length
+            )
+          }
+        />
+      )}
     </AdminShell>
   );
 }
@@ -1016,13 +1078,26 @@ function Stat({
 function TaskCompletionRow({
   task,
   completion,
+  photos,
+  onPhotoClick,
   isLast,
 }: {
   task: TaskRow;
   completion: ShiftTaskCompletion | null;
+  /** Photos the rep uploaded for this task on this shift. Ordered
+   *  by slot_index ascending. */
+  photos: ShiftTaskPhoto[];
+  /** Open the shift-wide lightbox at the clicked photo. */
+  onPhotoClick: (photo: ShiftTaskPhoto) => void;
   isLast: boolean;
 }) {
   const done = completion !== null;
+  // "No photos" only matters when the task was *expected* to have
+  // photos (photo_count > 0) and none came through — otherwise we
+  // render nothing in the photo lane so rows without photo
+  // requirements stay clean.
+  const expectedPhotos = task.photo_count ?? 0;
+  const showEmptyState = expectedPhotos > 0 && photos.length === 0;
   return (
     <div
       style={{
@@ -1115,6 +1190,61 @@ function TaskCompletionRow({
             <>Not yet completed</>
           )}
         </div>
+        {photos.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              marginTop: 10,
+            }}
+          >
+            {photos.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onPhotoClick(p)}
+                title={`Open photo ${p.slot_index + 1}`}
+                style={{
+                  width: 64,
+                  height: 64,
+                  padding: 0,
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  border: `1px solid ${AC.line}`,
+                  background: AC.bg,
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={p.public_url}
+                  alt={`Photo ${p.slot_index + 1} for ${task.name}`}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    display: "block",
+                  }}
+                />
+              </button>
+            ))}
+          </div>
+        )}
+        {showEmptyState && (
+          <div
+            style={{
+              marginTop: 8,
+              fontFamily: AC.font,
+              fontSize: 11.5,
+              color: AC.mute,
+              fontStyle: "italic",
+            }}
+          >
+            No photos uploaded (expected {expectedPhotos}).
+          </div>
+        )}
       </div>
       <div
         style={{
@@ -1271,4 +1401,208 @@ function formatElapsed(ms: number | null): string | null {
   const hrs = Math.floor(mins / 60);
   const remMins = mins % 60;
   return remMins === 0 ? `${hrs}h` : `${hrs}h ${remMins}m`;
+}
+
+/**
+ * PhotoLightbox — fullscreen overlay carousel for shift photos.
+ *
+ * Receives the flat shift-wide photo list + the active index. Prev /
+ * next chevrons wrap around so a single keypress never strands the
+ * manager mid-shift. Backdrop click + Escape + the explicit × button
+ * all close. Focus is trapped (loosely) on the close button on open
+ * — autoFocus is enough since there are no other inputs inside.
+ *
+ * Inline styles only; no new deps. The dark backdrop is fixed-
+ * positioned with a high z-index so it sits above the AdminShell.
+ */
+function PhotoLightbox({
+  photos,
+  index,
+  taskNameById,
+  onClose,
+  onPrev,
+  onNext,
+}: {
+  photos: ShiftTaskPhoto[];
+  index: number;
+  taskNameById: Map<string, string>;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const photo = photos[index];
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        onPrev();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        onNext();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose, onPrev, onNext]);
+
+  if (!photo) return null;
+
+  const taskName = taskNameById.get(photo.task_id) ?? "Task";
+  const timeLabel = new Date(photo.created_at).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const canStep = photos.length > 1;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Photo ${index + 1} of ${photos.length}`}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.85)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      {/* Close (×) — top right. autoFocus traps the initial keyboard
+          focus inside the dialog so Escape / arrows route here. */}
+      <button
+        type="button"
+        autoFocus
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        aria-label="Close photo viewer"
+        style={{
+          position: "absolute",
+          top: 16,
+          right: 16,
+          width: 40,
+          height: 40,
+          borderRadius: 99,
+          background: "rgba(255,255,255,0.12)",
+          border: "1px solid rgba(255,255,255,0.25)",
+          color: "#fff",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <AGlyph name="x" size={18} color="#fff" />
+      </button>
+
+      {canStep && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPrev();
+          }}
+          aria-label="Previous photo"
+          style={{
+            position: "absolute",
+            left: 16,
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: 44,
+            height: 44,
+            borderRadius: 99,
+            background: "rgba(255,255,255,0.12)",
+            border: "1px solid rgba(255,255,255,0.25)",
+            color: "#fff",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <AGlyph name="chev-l" size={20} color="#fff" />
+        </button>
+      )}
+
+      {canStep && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNext();
+          }}
+          aria-label="Next photo"
+          style={{
+            position: "absolute",
+            right: 16,
+            top: "50%",
+            transform: "translateY(-50%)",
+            width: 44,
+            height: 44,
+            borderRadius: 99,
+            background: "rgba(255,255,255,0.12)",
+            border: "1px solid rgba(255,255,255,0.25)",
+            color: "#fff",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <AGlyph name="chev-r" size={20} color="#fff" />
+        </button>
+      )}
+
+      {/* Stop-propagation wrapper around the image + caption — clicks
+          on the photo itself should NOT close the overlay (only
+          backdrop clicks do). */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: "90vw",
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={photo.public_url}
+          alt={`Photo ${index + 1} of ${photos.length} — ${taskName}`}
+          style={{
+            maxWidth: "90vw",
+            maxHeight: "80vh",
+            objectFit: "contain",
+            borderRadius: 8,
+            background: "#000",
+          }}
+        />
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            color: "rgba(255,255,255,0.9)",
+            textAlign: "center",
+            lineHeight: 1.5,
+            maxWidth: "90vw",
+          }}
+        >
+          Photo {index + 1} of {photos.length} · {taskName} · {timeLabel}
+        </div>
+      </div>
+    </div>
+  );
 }
