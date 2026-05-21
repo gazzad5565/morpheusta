@@ -30,7 +30,7 @@ every customer visit with a timestamped audit trail. Built on Next.js
 |---|---|
 | Admin web app | https://morpheus-admin.vercel.app |
 | Mobile rep app (PWA) | https://morpheusta-khaki-omega.vercel.app |
-| Source | https://github.com/gazzad5565/morpheusta |
+| Source | https://github.com/gazzad5565/morpheus-opps |
 
 ---
 

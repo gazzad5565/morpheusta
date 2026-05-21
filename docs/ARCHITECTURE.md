@@ -19,7 +19,7 @@
 ## Repo layout (monorepo)
 
 ```
-/                                  ← this repo (gazzad5565/morpheusta)
+/                                  ← this repo (gazzad5565/morpheus-opps)
 ├── README.md                      ← you are here
 ├── .gitignore
 ├── db/

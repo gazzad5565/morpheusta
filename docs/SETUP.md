@@ -10,7 +10,7 @@
 
 | What | Where |
 |---|---|
-| Source code | https://github.com/gazzad5565/morpheusta |
+| Source code | https://github.com/gazzad5565/morpheus-opps |
 | Live admin app | https://morpheus-admin.vercel.app |
 | Live mobile app | https://morpheusta-khaki-omega.vercel.app |
 | Database + auth | https://supabase.com/dashboard/project/otweltzwwhrvhtvaqsci |
@@ -55,8 +55,8 @@ Copy-paste this whole block into Terminal (it sets up both apps):
 ```bash
 # Pick a folder for the project — adjust if you want it elsewhere
 cd ~                                              # your home folder
-git clone https://github.com/gazzad5565/morpheusta.git
-cd morpheusta
+git clone https://github.com/gazzad5565/morpheus-opps.git
+cd morpheus-opps
 
 # --- Mobile app ---
 cd morpheus-mobile
@@ -88,7 +88,7 @@ That's it — both apps are ready to run.
 
 AI conversations (Claude, ChatGPT, etc.) don't follow you across devices or sessions. When you start a fresh chat to keep working on this project, give the AI context like this:
 
-1. Paste the GitHub URL: `https://github.com/gazzad5565/morpheusta` and ask the AI to read the README.
+1. Paste the GitHub URL: `https://github.com/gazzad5565/morpheus-opps` and ask the AI to read the README.
 2. **Or** paste this README's full content into the first message.
 3. Then tell it what you want to do today, e.g. *"I want to add a check-out button to the mobile app"*.
 

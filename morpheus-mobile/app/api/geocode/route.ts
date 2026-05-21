@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   const res = await fetch(url, {
     headers: {
       "User-Agent":
-        "morpheusta-mobile/0.1 (https://github.com/gazzad5565/morpheusta)",
+        "morpheus-ops-mobile/0.1 (https://github.com/gazzad5565/morpheus-opps)",
       "Accept-Language": "en",
     },
   });

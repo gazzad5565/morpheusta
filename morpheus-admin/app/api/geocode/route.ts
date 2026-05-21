@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   const res = await fetch(url, {
     headers: {
-      "User-Agent": "morpheusta-admin/0.1 (https://github.com/gazzad5565/morpheusta)",
+      "User-Agent": "morpheus-ops-admin/0.1 (https://github.com/gazzad5565/morpheus-opps)",
       "Accept-Language": "en",
     },
   });

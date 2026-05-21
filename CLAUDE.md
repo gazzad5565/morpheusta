@@ -39,10 +39,7 @@ Supabase project.
   `await` between a tap handler and a `.click()` / `window.open()`
   drops the activation flag and the OS silently blocks the popup.
 - **Verify before claiming done**: run `npx --no-install next build`
-  in any app you've changed before saying it ships. README still
-  references the old repo URL (`morpheusta`); the repo was renamed
-  to `morpheus-opps` on May 21 but GitHub auto-redirects so it
-  still pushes cleanly.
+  in any app you've changed before saying it ships.
 - **Commits**: prefer NEW commits over amends. Include a Co-Authored-By
   trailer. Use HEREDOC for multi-line commit messages.
 
