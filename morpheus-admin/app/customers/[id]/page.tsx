@@ -72,8 +72,7 @@ const TABS: { key: TabKey; label: string; glyph: GlyphName }[] = [
   { key: "overview", label: "Overview", glyph: "info" },
   { key: "sites", label: "Sites", glyph: "pin" },
   // Contacts sits between Sites (their place) and Reps (our people)
-  // so the "who is involved" cluster reads in one sweep. Read-only
-  // here — full CRUD lives on /customers/[id]/edit → Contacts tab.
+  // so the "who is involved" cluster reads in one sweep.
   { key: "contacts", label: "Contacts", glyph: "reps" },
   { key: "reps", label: "Reps", glyph: "reps" },
   { key: "tasks", label: "Tasks", glyph: "tasks" },
@@ -95,9 +94,8 @@ export default function CustomerDetailPage() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [files, setFiles] = useState<LibraryFile[]>([]);
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
-  // Sites are shared between OverviewTab (head-office card) and SitesTab
-  // (full CRUD list). Owning the fetch here means swapping between those
-  // two tabs doesn't re-hit the API.
+  // Sites feed the SitesTab. Owning the fetch here means re-opening
+  // the tab after CRUD doesn't re-hit the API.
   const [sites, setSites] = useState<CustomerSite[] | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -106,8 +104,7 @@ export default function CustomerDetailPage() {
   const [savingAssignments, setSavingAssignments] = useState(false);
   const [taskBusyId, setTaskBusyId] = useState<string | null>(null);
 
-  // Reload sites. SitesTab calls this after CRUD so OverviewTab's
-  // head-office card stays in sync with the SitesTab list.
+  // Reload sites after CRUD in the SitesTab.
   async function reloadSites() {
     const rows = await listSitesForCustomer(id, { includeInactive: true });
     setSites(rows);
@@ -369,14 +366,12 @@ export default function CustomerDetailPage() {
         {activeTab === "overview" && (
           <OverviewTab
             customer={c}
-            sites={sites}
             stats={{
               repsAssigned: assignedRepIds.length,
               tasks: tasks.length,
               files: files.length,
               shiftsToday: shifts.length,
             }}
-            onJumpToSites={() => setActiveTab("sites")}
           />
         )}
 
