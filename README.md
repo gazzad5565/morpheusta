@@ -49,7 +49,6 @@ file that matches your question:
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | "How does X work?" — stack, repo layout, schema, RLS, auth flow, routing model. |
 | [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) | "How do I add a new page / table / env var?" — day-to-day reference + files-of-note map. |
 | [`docs/ENGINEERING_REVIEW.md`](docs/ENGINEERING_REVIEW.md) | The May 11, 2026 senior-engineer handoff — preserved verbatim as the closest thing we have to a code-quality backlog. |
-| [`MARKETING_BRIEF.md`](MARKETING_BRIEF.md) | "How do I market this?" — canonical product reference for the Marketing Muse / ChatGPT marketing agent. Full feature inventory, brand voice, taglines, audience value props. |
 
 If you're a fresh chat and the user just dropped you into the repo
 with no other context, **read `docs/SESSIONS.md` top-to-first-heading
@@ -81,7 +80,6 @@ Full stack details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 ```
 /
 ├── README.md               ← you are here (lean index)
-├── MARKETING_BRIEF.md      ← product reference for marketing agents
 ├── docs/                   ← deep-dive docs (see table above)
 ├── morpheus-admin/         ← admin web app (Next.js)
 ├── morpheus-mobile/        ← rep mobile PWA (Next.js)

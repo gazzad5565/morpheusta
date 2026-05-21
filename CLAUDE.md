@@ -23,7 +23,6 @@ Supabase project.
 4. **`docs/OPS.md`** — deploy, migrations, Vercel traps, push pipeline.
 5. **`docs/ARCHITECTURE.md`** — stack, schema, RLS, auth flow.
 6. **`docs/CHEATSHEET.md`** — common tasks + files-of-note map.
-7. **`MARKETING_BRIEF.md`** — product reference for marketing work.
 
 ## Project-specific rules
 
