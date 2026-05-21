@@ -45,7 +45,8 @@ import {
   type Profile,
 } from "@/lib/profiles-store";
 import { countTasksForCustomers } from "@/lib/tasks-store";
-import { localISO } from "@/lib/format";
+import { localISO, initialsFromNameOrEmail } from "@/lib/format";
+import { RepAvatar, CustomerSwatch } from "@/components/ui/Avatars";
 import type { Customer } from "@/lib/types";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -413,11 +414,12 @@ export default function EditShiftPage({
               triggerIcon="customer"
               placeholder="Pick a customer…"
               clearable={false}
+              searchable
               options={customers.map((c) => ({
                 value: c.id,
                 label: c.name,
                 sublabel: `#${c.code}`,
-                color: c.color || undefined,
+                renderLeading: () => <CustomerSwatch customer={c} size={22} />,
               }))}
             />
           </Field>
@@ -474,10 +476,21 @@ export default function EditShiftPage({
               onChange={(v) => setRepId(v ?? "")}
               triggerIcon="reps"
               placeholder="— Unassigned (claimable) —"
+              searchable
               options={reps.map((r) => ({
                 value: r.id,
                 label: displayName(r),
                 sublabel: r.email,
+                renderLeading: () => (
+                  <RepAvatar
+                    rep={{
+                      initials: initialsFromNameOrEmail(r.name, r.email),
+                      avatarUrl: r.avatar_url,
+                    }}
+                    size={22}
+                    seed={r.id}
+                  />
+                ),
               }))}
             />
           </Field>

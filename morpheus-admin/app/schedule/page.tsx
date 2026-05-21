@@ -43,7 +43,8 @@ import {
 } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listCustomers } from "@/lib/customers-store";
-import { localISO as isoDate, formatTime, timeToMin, minToTime } from "@/lib/format";
+import { localISO as isoDate, formatTime, timeToMin, minToTime, initialsFromNameOrEmail } from "@/lib/format";
+import { RepAvatar, CustomerSwatch } from "@/components/ui/Avatars";
 import type { Customer } from "@/lib/types";
 
 // ─── Date helpers (week starts Monday) ──────────────────────────────────
@@ -793,10 +794,25 @@ export default function SchedulePage() {
               onChange={(v) => setRepFilter(v ?? "All")}
               clearable={false}
               triggerIcon="reps"
+              searchable
               options={[
                 { value: "All", label: "All reps" },
                 { value: UNASSIGNED_KEY, label: "Unassigned" },
-                ...repsForRows.map((r) => ({ value: r.id, label: displayName(r) })),
+                ...repsForRows.map((r) => ({
+                  value: r.id,
+                  label: displayName(r),
+                  sublabel: r.email,
+                  renderLeading: () => (
+                    <RepAvatar
+                      rep={{
+                        initials: initialsFromNameOrEmail(r.name, r.email),
+                        avatarUrl: r.avatar_url,
+                      }}
+                      size={22}
+                      seed={r.id}
+                    />
+                  ),
+                })),
               ]}
             />
             <Combobox
@@ -804,12 +820,14 @@ export default function SchedulePage() {
               onChange={(v) => setCustomerFilter(v ?? "All")}
               clearable={false}
               triggerIcon="customer"
+              searchable
               options={[
                 { value: "All", label: "All customers" },
                 ...customers.map((c) => ({
                   value: c.id,
                   label: c.name,
-                  color: c.color || undefined,
+                  sublabel: `#${c.code}`,
+                  renderLeading: () => <CustomerSwatch customer={c} size={22} />,
                 })),
               ]}
             />

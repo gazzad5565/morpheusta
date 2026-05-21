@@ -2,60 +2,51 @@
 
 /**
  * Sites tab on the customer detail page. Lists every site (location)
- * belonging to a customer with full CRUD: add, rename, edit address,
- * change geofence, deactivate / reactivate / delete.
+ * belonging to a customer with full CRUD.
  *
- *   - Single-site customer: one card, no fanfare. Editing it is
- *     equivalent to the old "Address & geofence" tab.
- *   - Multi-site customer: one card per site. Add another with the
- *     "Add site" button. Each card has its own map + geofence slider.
+ * UI follows the same archetype as Contacts on this same page:
  *
- * Hard-delete is blocked when shifts reference the site (FK is
- * ON DELETE SET NULL but we don't want to silently lose attribution).
- * Manager can still soft-delete via Deactivate.
+ *   - One wrapping Card with a <TabHeader> on top
+ *   - Compact table-style rows (Name / Address / Geofence / actions)
+ *   - Click row → expand to reveal map preview + contact + access notes
+ *   - Pencil → expand row into an inline editor (split form + live map)
+ *   - Trash  → hard-delete with confirmation (blocked when shifts FK)
+ *   - Deactivate / Reactivate lives in the expanded panel (it's a mode
+ *     toggle, not a row action — soft-delete that keeps shift history)
+ *
+ * Inactive sites render at opacity 0.6 with an "Inactive" badge; the
+ * show/hide toggle sits in a footer strip when there's anything to
+ * hide.
+ *
+ * Sites state lives in the parent (CustomerDetailPage) so OverviewTab
+ * and SitesTab share one fetch — `sites` arrives as a prop, and a
+ * `reload` callback re-fetches after CRUD.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
+import { useMemo, useState } from "react";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
-import { AGlyph } from "@/components/ui/AGlyph";
-import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
-import { Spinner } from "@/components/ui/LoadingBar";
+import { EmptyState, TabLoading } from "@/components/ui/EmptyState";
+import { TabHeader, TableColumnHeader } from "@/components/ui/TabHeader";
+import { SiteEditor } from "./SiteEditor";
+import { SiteRow, SITE_COLS } from "./SiteRow";
 import { AC } from "@/lib/tokens";
-import {
-  listSitesForCustomer,
-  createSite,
-  updateSite,
-  deactivateSite,
-  reactivateSite,
-  deleteSite,
-  type CustomerSite,
-} from "@/lib/sites-store";
+import type { CustomerSite } from "@/lib/sites-store";
 import type { Customer } from "@/lib/types";
 
-const AddressMap = dynamic(
-  () => import("@/components/CustomerAddressMap").then((m) => m.CustomerAddressMap),
-  { ssr: false }
-);
-
-const DEFAULT_GEOFENCE_M = 100;
-
-export function SitesTab({ customer }: { customer: Customer }) {
-  const [sites, setSites] = useState<CustomerSite[] | null>(null);
+export function SitesTab({
+  customer,
+  sites,
+  reload,
+}: {
+  customer: Customer;
+  sites: CustomerSite[] | null;
+  reload: () => Promise<void>;
+}) {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showInactive, setShowInactive] = useState(false);
-
-  const reload = async () => {
-    const rows = await listSitesForCustomer(customer.id, { includeInactive: true });
-    setSites(rows);
-  };
-
-  useEffect(() => {
-    reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customer.id]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const visible = useMemo(() => {
     const all = sites ?? [];
@@ -63,92 +54,39 @@ export function SitesTab({ customer }: { customer: Customer }) {
   }, [sites, showInactive]);
 
   const inactiveCount = (sites ?? []).filter((s) => !s.active).length;
+  const count = visible.length;
 
   if (sites === null) {
     return (
-      <Card padding={28}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            color: AC.mute,
-            fontFamily: AC.font,
-            fontSize: 13,
-          }}
-        >
-          <Spinner size={14} />
-          Loading sites…
-        </div>
+      <Card padding={0}>
+        <TabHeader title="Sites at this customer" />
+        <TabLoading label="Loading sites…" />
       </Card>
     );
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Header row */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div
-          style={{
-            fontFamily: AC.font,
-            fontSize: 13,
-            color: AC.mute,
-            fontWeight: 600,
-          }}
-        >
-          {visible.length} site{visible.length === 1 ? "" : "s"}
-          {inactiveCount > 0 && !showInactive && (
-            <button
-              type="button"
-              onClick={() => setShowInactive(true)}
-              style={{
-                marginLeft: 10,
-                padding: 0,
-                background: "transparent",
-                border: "none",
-                color: AC.brandDeep,
-                cursor: "pointer",
-                fontFamily: AC.font,
-                fontSize: 12,
-                fontWeight: 600,
+    <Card padding={0}>
+      <TabHeader
+        title="Sites at this customer"
+        count={count}
+        action={
+          !adding && count > 0 ? (
+            <Btn
+              size="sm"
+              kind="primary"
+              icon="plus"
+              onClick={() => {
+                setEditingId(null);
+                setAdding(true);
               }}
             >
-              + show {inactiveCount} inactive
-            </button>
-          )}
-          {showInactive && inactiveCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowInactive(false)}
-              style={{
-                marginLeft: 10,
-                padding: 0,
-                background: "transparent",
-                border: "none",
-                color: AC.brandDeep,
-                cursor: "pointer",
-                fontFamily: AC.font,
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              hide inactive
-            </button>
-          )}
-        </div>
-        <div style={{ flex: 1 }} />
-        <Btn
-          icon="plus"
-          kind="primary"
-          size="sm"
-          onClick={() => setAdding(true)}
-          disabled={adding}
-        >
-          Add site
-        </Btn>
-      </div>
+              Add site
+            </Btn>
+          ) : null
+        }
+      />
 
-      {/* New-site form */}
       {adding && (
         <SiteEditor
           mode="create"
@@ -162,748 +100,101 @@ export function SitesTab({ customer }: { customer: Customer }) {
         />
       )}
 
-      {/* Existing sites */}
-      {visible.length === 0 && !adding && (
-        <Card padding={28}>
-          <div
-            style={{
-              textAlign: "center",
-              color: AC.mute,
-              fontFamily: AC.font,
-              fontSize: 13,
-            }}
-          >
-            No sites yet. Click <b>Add site</b> to attach the customer&apos;s first location.
-          </div>
-        </Card>
-      )}
-
-      {visible.map((s) =>
-        editingId === s.id ? (
-          <SiteEditor
-            key={s.id}
-            mode="edit"
-            customer={customer}
-            initial={s}
-            onCancel={() => setEditingId(null)}
-            onSaved={async () => {
-              setEditingId(null);
-              await reload();
-            }}
-          />
-        ) : (
-          <SiteCard
-            key={s.id}
-            site={s}
-            customer={customer}
-            onEdit={() => setEditingId(s.id)}
-            onChanged={reload}
-          />
-        )
-      )}
-    </div>
-  );
-}
-
-function SiteCard({
-  site,
-  customer,
-  onEdit,
-  onChanged,
-}: {
-  site: CustomerSite;
-  customer: Customer;
-  onEdit: () => void;
-  onChanged: () => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false);
-  const hasCoords = site.latitude != null && site.longitude != null;
-  const radius = site.geofence_radius_m ?? DEFAULT_GEOFENCE_M;
-
-  async function onToggleActive() {
-    setBusy(true);
-    if (site.active) {
-      await deactivateSite(site.id);
-    } else {
-      await reactivateSite(site.id);
-    }
-    setBusy(false);
-    await onChanged();
-  }
-
-  async function onDelete() {
-    if (
-      !confirm(
-        `Delete site "${site.name}"?\n\nThis is a hard delete. If any shifts are attached, the operation will fail and you'll need to deactivate the site instead.`
-      )
-    ) {
-      return;
-    }
-    setBusy(true);
-    const r = await deleteSite(site.id);
-    setBusy(false);
-    if (!r.ok) {
-      alert(r.error || "Couldn't delete this site.");
-      return;
-    }
-    await onChanged();
-  }
-
-  return (
-    <Card padding={0}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 320px",
-          gap: 0,
-          alignItems: "stretch",
-          opacity: site.active ? 1 : 0.6,
-        }}
-      >
-        <div
-          style={{
-            borderRight: `1px solid ${AC.lineDim}`,
-            minHeight: 240,
-            overflow: "hidden",
-            borderTopLeftRadius: 14,
-            borderBottomLeftRadius: 14,
-          }}
-        >
-          {hasCoords ? (
-            <AddressMap
-              lat={site.latitude!}
-              lng={site.longitude!}
-              radiusM={radius}
-              color={customer.color}
-              initials={customer.initials}
-              height={240}
-            />
-          ) : (
-            <div
-              style={{
-                height: 240,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexDirection: "column",
-                fontFamily: AC.font,
-                color: AC.mute,
-                fontSize: 13,
-                gap: 8,
-                background: "#F1F4F7",
-              }}
-            >
-              <AGlyph name="pin" size={26} color={AC.faint} />
-              <div>No coordinates yet</div>
-            </div>
-          )}
-        </div>
-
-        <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 10 }}>
-          <div>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 16,
-                fontWeight: 700,
-                color: AC.ink,
-                letterSpacing: -0.2,
-              }}
-            >
-              {site.name}
-              {!site.active && (
-                <span
-                  style={{
-                    marginLeft: 8,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: 0.5,
-                    textTransform: "uppercase",
-                    color: AC.mute,
-                    background: AC.bg,
-                    padding: "2px 8px",
-                    borderRadius: 99,
-                  }}
-                >
-                  Inactive
-                </span>
-              )}
-            </div>
-            {site.address ? (
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 12.5,
-                  color: AC.ink2,
-                  marginTop: 4,
-                  lineHeight: 1.5,
-                }}
-              >
-                {site.address}
-              </div>
-            ) : (
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 12,
-                  color: AC.mute,
-                  marginTop: 4,
-                  fontStyle: "italic",
-                }}
-              >
-                No address yet — edit to add one.
-              </div>
-            )}
-            {hasCoords && (
-              <div
-                style={{
-                  fontFamily: AC.fontMono,
-                  fontSize: 11,
-                  color: AC.mute,
-                  marginTop: 4,
-                }}
-              >
-                {site.latitude!.toFixed(5)}, {site.longitude!.toFixed(5)}
-              </div>
-            )}
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontFamily: AC.font,
-              fontSize: 12,
-              color: AC.ink2,
-              marginTop: 4,
-            }}
-          >
-            <AGlyph name="pin" size={12} color={AC.mute} />
-            Geofence · {radius} m
-          </div>
-
-          {/* Contact — only renders the lines that are actually filled
-              in. Phone/email get tap targets so a manager can call or
-              email straight from the admin (matches the rep app's UX). */}
-          {(site.contact_name || site.contact_phone || site.contact_email) && (
-            <div
-              style={{
-                marginTop: 8,
-                padding: "8px 10px",
-                background: AC.bg,
-                borderRadius: 8,
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
-                fontFamily: AC.font,
-                fontSize: 12,
-                color: AC.ink2,
-              }}
-            >
-              {site.contact_name && (
-                <div style={{ fontWeight: 600, color: AC.ink }}>
-                  {site.contact_name}
-                </div>
-              )}
-              {site.contact_phone && (
-                <a
-                  href={`tel:${site.contact_phone}`}
-                  style={{
-                    color: AC.brandDeep,
-                    textDecoration: "none",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  <AGlyph name="clock" size={11} color={AC.brandDeep} />
-                  {site.contact_phone}
-                </a>
-              )}
-              {site.contact_email && (
-                <a
-                  href={`mailto:${site.contact_email}`}
-                  style={{
-                    color: AC.brandDeep,
-                    textDecoration: "none",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  <AGlyph name="mail" size={11} color={AC.brandDeep} />
-                  {site.contact_email}
-                </a>
-              )}
-            </div>
-          )}
-          {site.notes && (
-            <div
-              style={{
-                marginTop: 8,
-                padding: "8px 10px",
-                background: AC.warnTint,
-                borderRadius: 8,
-                fontFamily: AC.font,
-                fontSize: 12,
-                color: "#6d4808",
-                lineHeight: 1.45,
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: 0.4,
-                  textTransform: "uppercase",
-                  marginBottom: 4,
-                  color: "#7d5708",
-                }}
-              >
-                Access notes
-              </div>
-              {site.notes}
-            </div>
+      {count === 0 && !adding ? (
+        <EmptyState
+          icon="pin"
+          title="No sites yet"
+          hint="Attach the customer's first location so reps can check in on site with geofence-backed accuracy."
+          actionLabel="Add site"
+          onAction={() => setAdding(true)}
+        />
+      ) : (
+        <>
+          {count > 0 && (
+            <TableColumnHeader columns={SITE_COLS} borderTop={adding}>
+              <div>Name</div>
+              <div>Address</div>
+              <div>Geofence</div>
+              <div />
+            </TableColumnHeader>
           )}
 
-          <div style={{ flex: 1 }} />
-
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <Btn size="sm" icon="edit" onClick={onEdit} disabled={busy}>
-              Edit
-            </Btn>
-            <Btn size="sm" onClick={onToggleActive} disabled={busy}>
-              {site.active ? "Deactivate" : "Reactivate"}
-            </Btn>
-            <Btn size="sm" kind="danger" onClick={onDelete} disabled={busy}>
-              Delete
-            </Btn>
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function SiteEditor({
-  mode,
-  customer,
-  initial,
-  onCancel,
-  onSaved,
-}: {
-  mode: "create" | "edit";
-  customer: Customer;
-  initial: CustomerSite | null;
-  onCancel: () => void;
-  onSaved: () => Promise<void>;
-}) {
-  const [name, setName] = useState(initial?.name ?? "");
-  const [address, setAddress] = useState(initial?.address ?? "");
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
-    initial?.latitude != null && initial?.longitude != null
-      ? { lat: initial.latitude, lng: initial.longitude }
-      : null
-  );
-  const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [geofenceM, setGeofenceM] = useState<number>(
-    initial?.geofence_radius_m ?? DEFAULT_GEOFENCE_M
-  );
-  // Per-site contact details — every field optional. Reps see these
-  // on the mobile shift detail (tap-to-call, tap-to-mail, access notes).
-  const [contactName, setContactName] = useState(initial?.contact_name ?? "");
-  const [contactPhone, setContactPhone] = useState(initial?.contact_phone ?? "");
-  const [contactEmail, setContactEmail] = useState(initial?.contact_email ?? "");
-  const [notes, setNotes] = useState(initial?.notes ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<string | null>(null);
-
-  async function onSave() {
-    if (busy) return;
-    setError(null);
-    setNote(null);
-    if (!name.trim()) {
-      setError("Site name is required.");
-      return;
-    }
-    setBusy(true);
-
-    let latitude: number | null = coords?.lat ?? null;
-    let longitude: number | null = coords?.lng ?? null;
-    const trimmed = address.trim();
-
-    if (trimmed && (mode === "create" || trimmed !== (initial?.address ?? ""))) {
-      if (pickedCoords) {
-        latitude = pickedCoords.lat;
-        longitude = pickedCoords.lng;
-      } else {
-        try {
-          const res = await fetch(`/api/geocode?q=${encodeURIComponent(trimmed)}`);
-          if (res.ok) {
-            const data = (await res.json()) as { latitude: number; longitude: number };
-            latitude = data.latitude;
-            longitude = data.longitude;
-          } else {
-            setNote("Couldn't geocode that address — saved without coordinates.");
-            latitude = null;
-            longitude = null;
-          }
-        } catch {
-          setNote("Geocoder unreachable — saved without coordinates.");
-          latitude = null;
-          longitude = null;
-        }
-      }
-    } else if (!trimmed) {
-      latitude = null;
-      longitude = null;
-    }
-
-    const payload = {
-      name: name.trim(),
-      address: trimmed || null,
-      latitude,
-      longitude,
-      geofence_radius_m: geofenceM,
-      contact_name: contactName.trim() || null,
-      contact_phone: contactPhone.trim() || null,
-      contact_email: contactEmail.trim() || null,
-      notes: notes.trim() || null,
-    };
-
-    const r =
-      mode === "create"
-        ? await createSite({ customer_id: customer.id, ...payload })
-        : await updateSite(initial!.id, payload);
-    setBusy(false);
-    if (!r.ok) {
-      setError(r.error || "Couldn't save.");
-      return;
-    }
-    await onSaved();
-  }
-
-  // Live coords for the map preview: the picked-from-autocomplete
-  // override wins over the original. When neither exists yet we just
-  // render the empty placeholder.
-  const liveCoords = pickedCoords ?? coords;
-
-  return (
-    <Card padding={0}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 340px",
-          gap: 0,
-          alignItems: "stretch",
-        }}
-      >
-        {/* Form side */}
-        <div
-          style={{
-            padding: 18,
-            borderRight: `1px solid ${AC.lineDim}`,
-            minWidth: 0,
-          }}
-        >
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 11,
-              fontWeight: 700,
-              color: AC.mute,
-              letterSpacing: 0.4,
-              textTransform: "uppercase",
-              marginBottom: 12,
-            }}
-          >
-            {mode === "create" ? "New site" : "Edit site"}
-          </div>
-
-          <FieldRow label="Name" required>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Main store, Warehouse B"
-              autoFocus={mode === "create"}
-              style={inputStyle}
-            />
-          </FieldRow>
-
-          <FieldRow
-            label="Address"
-            hint={
-              pickedCoords
-                ? `New coordinates: ${pickedCoords.lat.toFixed(5)}, ${pickedCoords.lng.toFixed(5)}`
-                : coords
-                ? `Current: ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
-                : "Start typing — pick a match to lock coordinates."
+          {visible.map((s, i) => {
+            if (editingId === s.id) {
+              return (
+                <SiteEditor
+                  key={s.id}
+                  mode="edit"
+                  customer={customer}
+                  initial={s}
+                  onCancel={() => setEditingId(null)}
+                  onSaved={async () => {
+                    setEditingId(null);
+                    await reload();
+                  }}
+                />
+              );
             }
-          >
-            <AddressAutocomplete
-              value={address}
-              onChange={(v) => {
-                setAddress(v);
-                if (pickedCoords) setPickedCoords(null);
-              }}
-              onSelect={(s) => {
-                setPickedCoords({ lat: s.latitude, lng: s.longitude });
-              }}
-              placeholder="e.g. 1480 Riverside Way, Cape Town"
-            />
-          </FieldRow>
-
-          <FieldRow
-            label={`Geofence radius · ${geofenceM} m`}
-            hint="Reps must be inside this radius to check in without an off-site exception."
-          >
-            <input
-              type="range"
-              min={25}
-              max={500}
-              step={5}
-              value={geofenceM}
-              onChange={(e) => setGeofenceM(parseInt(e.target.value, 10))}
-              style={{ width: "100%" }}
-            />
-            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-              {[50, 75, 100, 150, 250].map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setGeofenceM(m)}
-                  style={{
-                    padding: "4px 10px",
-                    borderRadius: 99,
-                    border: `1px solid ${geofenceM === m ? AC.ink : AC.line}`,
-                    background: geofenceM === m ? AC.ink : "#fff",
-                    color: geofenceM === m ? "#fff" : AC.ink2,
-                    fontFamily: AC.font,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  {m} m
-                </button>
-              ))}
-            </div>
-          </FieldRow>
-
-          {/* Contact section — every field optional. Reps see these on
-              the mobile shift detail (tap-to-call, mailto, access
-              notes shown while travelling). */}
-          <div
-            style={{
-              borderTop: `1px solid ${AC.lineDim}`,
-              paddingTop: 14,
-              marginTop: 4,
-              marginBottom: 4,
-              fontFamily: AC.font,
-              fontSize: 11,
-              fontWeight: 700,
-              color: AC.mute,
-              letterSpacing: 0.4,
-              textTransform: "uppercase",
-            }}
-          >
-            Contact (optional)
-          </div>
-          <FieldRow label="Contact name">
-            <input
-              value={contactName}
-              onChange={(e) => setContactName(e.target.value)}
-              placeholder="e.g. Sarah Lewis — Store Manager"
-              style={inputStyle}
-            />
-          </FieldRow>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <FieldRow label="Phone" hint="Tappable on mobile.">
-              <input
-                type="tel"
-                value={contactPhone}
-                onChange={(e) => setContactPhone(e.target.value)}
-                placeholder="+1 555 010 1234"
-                style={inputStyle}
+            return (
+              <SiteRow
+                key={s.id}
+                site={s}
+                customer={customer}
+                isLast={i === visible.length - 1}
+                expanded={expandedId === s.id}
+                onToggleExpand={() =>
+                  setExpandedId(expandedId === s.id ? null : s.id)
+                }
+                onEdit={() => {
+                  setAdding(false);
+                  setEditingId(s.id);
+                  setExpandedId(null);
+                }}
+                onChanged={reload}
               />
-            </FieldRow>
-            <FieldRow label="Email">
-              <input
-                type="email"
-                value={contactEmail}
-                onChange={(e) => setContactEmail(e.target.value)}
-                placeholder="site@example.com"
-                style={inputStyle}
-              />
-            </FieldRow>
-          </div>
-          <FieldRow
-            label="Access notes"
-            hint="Where to park, buzzer codes, back-entrance instructions, etc."
-          >
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder={'e.g. "Use back entrance after 6pm. Buzz #1234. Park in lot B."'}
-              rows={3}
-              style={{
-                ...inputStyle,
-                resize: "vertical",
-                minHeight: 64,
-                fontFamily: AC.font,
-                lineHeight: 1.5,
-              }}
-            />
-          </FieldRow>
-
-      {note && (
-        <div
-          style={{
-            padding: "10px 12px",
-            background: AC.bg,
-            color: AC.ink2,
-            borderRadius: 10,
-            fontSize: 12.5,
-            fontWeight: 500,
-            marginBottom: 12,
-            border: `1px solid ${AC.line}`,
-          }}
-        >
-          {note}
-        </div>
+            );
+          })}
+        </>
       )}
-      {error && (
+
+      {/* Footer strip — toggle inactive sites in/out. Only renders when
+          the customer has any inactive sites. */}
+      {inactiveCount > 0 && (
         <div
           style={{
-            padding: "10px 12px",
-            background: AC.dangerTint,
-            color: "#9c1a3c",
-            borderRadius: 10,
-            fontSize: 12.5,
-            fontWeight: 500,
-            marginBottom: 12,
+            padding: "10px 16px",
+            background: AC.bg,
+            borderTop: `1px solid ${AC.line}`,
+            fontFamily: AC.font,
+            fontSize: 11.5,
+            color: AC.mute,
             display: "flex",
+            alignItems: "center",
             gap: 8,
           }}
         >
-          <AGlyph name="warn" size={14} color="#9c1a3c" />
-          <span>{error}</span>
+          <span>
+            {inactiveCount} inactive site{inactiveCount === 1 ? "" : "s"} hidden
+          </span>
+          <div style={{ flex: 1 }} />
+          <button
+            type="button"
+            onClick={() => setShowInactive((v) => !v)}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              color: AC.brandDeep,
+              cursor: "pointer",
+              fontFamily: AC.font,
+              fontSize: 11.5,
+              fontWeight: 600,
+            }}
+          >
+            {showInactive ? "Hide inactive" : `Show ${inactiveCount} inactive`}
+          </button>
         </div>
       )}
-
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Btn size="sm" onClick={onCancel} disabled={busy}>
-              Cancel
-            </Btn>
-            <Btn size="sm" kind="primary" icon="check" onClick={onSave} disabled={busy}>
-              {busy
-                ? "Saving…"
-                : mode === "create"
-                ? "Create site"
-                : "Save changes"}
-            </Btn>
-          </div>
-        </div>
-
-        {/* Map side — live preview that updates as the manager picks
-            an address from the autocomplete and slides the geofence.
-            Shows a dashed empty placeholder until coordinates exist. */}
-        <div
-          style={{
-            minHeight: 320,
-            background: "#F1F4F7",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            overflow: "hidden",
-            borderTopRightRadius: 14,
-            borderBottomRightRadius: 14,
-          }}
-        >
-          {liveCoords ? (
-            <AddressMap
-              lat={liveCoords.lat}
-              lng={liveCoords.lng}
-              radiusM={geofenceM}
-              color={customer.color}
-              initials={customer.initials}
-              height={320}
-            />
-          ) : (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 8,
-                fontFamily: AC.font,
-                color: AC.mute,
-                fontSize: 12.5,
-                padding: 16,
-                textAlign: "center",
-              }}
-            >
-              <AGlyph name="pin" size={26} color={AC.faint} />
-              <div>Pick an address to preview</div>
-              <div style={{ fontSize: 11, color: AC.hint }}>
-                The geofence circle updates as you slide.
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
     </Card>
   );
 }
-
-function FieldRow({
-  label,
-  hint,
-  required,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 11,
-          color: AC.mute,
-          fontWeight: 700,
-          letterSpacing: 0.3,
-          textTransform: "uppercase",
-          marginBottom: 6,
-        }}
-      >
-        {label}
-        {required && <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>}
-      </div>
-      {children}
-      {hint && (
-        <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, marginTop: 4 }}>
-          {hint}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "9px 12px",
-  borderRadius: 8,
-  border: `1px solid ${AC.line}`,
-  fontFamily: AC.font,
-  fontSize: 13,
-  color: AC.ink,
-  background: "#fff",
-  outline: "none",
-};

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
+import { TabHeader } from "@/components/ui/TabHeader";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
 import { supabase } from "@/lib/supabase";
@@ -138,15 +139,23 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
       <div
         style={{
           padding: 20,
-          display: "grid",
-          gridTemplateColumns: "320px 1fr",
+          display: "flex",
+          flexDirection: "column",
           gap: 16,
-          alignItems: "start",
         }}
       >
-        {/* Left: profile card */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Card padding={20}>
+        {/* Top row: profile card + today's shifts. Grid items stretch
+            by default, so both cards share the same row height — the
+            bottom of "Today's shifts" lines up with the bottom of the
+            rep details card on the left. */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "320px 1fr",
+            gap: 16,
+          }}
+        >
+          <Card padding={20} style={{ height: "100%" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
               {profile.avatar_url ? (
                 <div
@@ -239,12 +248,8 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
               />
             </div>
           </Card>
-          <CustomFieldsCard entity="rep" entityId={profile.id} />
-        </div>
 
-        {/* Right: shifts list */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <Card padding={0}>
+          <Card padding={0} style={{ height: "100%" }}>
             <div style={{ padding: 16 }}>
               <SectionTitle>Today’s shifts</SectionTitle>
               <div
@@ -362,39 +367,35 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
               )}
             </div>
           </Card>
+        </div>
 
+        {/* Second row: custom fields on the left, assigned customers
+            + other shifts on the right. Independent column heights —
+            only the top row needs to stay bottom-aligned. */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "320px 1fr",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          <CustomFieldsCard entity="rep" entityId={profile.id} />
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Assigned customers editor */}
           <Card padding={0}>
-            <div
-              style={{
-                padding: "14px 16px",
-                borderBottom: `1px solid ${AC.line}`,
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
-              <SectionTitle>Assigned customers</SectionTitle>
-              <span
-                style={{
-                  padding: "2px 7px",
-                  borderRadius: 99,
-                  background: AC.bg,
-                  color: AC.mute,
-                  fontFamily: AC.font,
-                  fontSize: 11,
-                  fontWeight: 600,
-                }}
-              >
-                {assignedCustomerIds.length}
-              </span>
-              <div style={{ flex: 1 }} />
-              {savingAssignments && (
-                <span style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute }}>
-                  Saving…
-                </span>
-              )}
-            </div>
+            <TabHeader
+              title="Assigned customers"
+              count={assignedCustomerIds.length}
+              action={
+                savingAssignments ? (
+                  <span style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute }}>
+                    Saving…
+                  </span>
+                ) : null
+              }
+            />
             <div style={{ padding: 16 }}>
               {assignError && (
                 <div
@@ -455,6 +456,7 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
               </div>
             </Card>
           )}
+          </div>
         </div>
       </div>
     </AdminShell>

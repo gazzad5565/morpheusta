@@ -5,45 +5,44 @@
  *
  * Tabs:
  *   - Overview: header + at-a-glance counts
- *   - Address: MapLibre map + address text + geofence radius slider
+ *   - Sites: per-site CRUD with map preview
+ *   - Contacts: per-customer contact list with inline CRUD
  *   - Reps: assigned reps multi-select
  *   - Tasks: customer's task templates
  *   - Library: files attached to this customer
  *   - Shifts: today's shifts at this customer
  *   - Custom fields: dynamic admin-defined fields
+ *
+ * Each tab lives in its own file under components/customers/ so this
+ * page stays focused on data loading + the tab switch. See:
+ *   - OverviewTab, ContactsTab, RepsTab, TasksTab, LibraryTab, ShiftsTab
+ *   - SitesTab (was already its own file)
  */
 
-import { useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
-import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
-import { Card, SectionTitle } from "@/components/ui/Card";
+import { Card } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
-import { LoadingBar, Spinner } from "@/components/ui/LoadingBar";
+import { LoadingBar } from "@/components/ui/LoadingBar";
 import { SitesTab } from "@/components/customers/SitesTab";
+import { OverviewTab } from "@/components/customers/OverviewTab";
+import { ContactsTab } from "@/components/customers/ContactsTab";
+import { RepsTab } from "@/components/customers/RepsTab";
+import { TasksTab } from "@/components/customers/TasksTab";
+import { LibraryTab } from "@/components/customers/LibraryTab";
+import { ShiftsTab } from "@/components/customers/ShiftsTab";
 import { CustomerSwatch } from "@/components/ui/Avatars";
-import { initialsFromNameOrEmail, formatTimeRange } from "@/lib/format";
-import {
-  listSitesForCustomer,
-  type CustomerSite,
-} from "@/lib/sites-store";
-
-// MapLibre needs `window`; client-only.
-const AddressMap = dynamic(
-  () => import("@/components/CustomerAddressMap").then((m) => m.CustomerAddressMap),
-  { ssr: false }
-);
+import { Pill } from "@/components/ui/Pill";
 import { AC } from "@/lib/tokens";
 import {
   getCustomer,
   setCustomerActive,
   deleteCustomer,
-  updateCustomer,
   markCustomerSeen,
 } from "@/lib/customers-store";
-import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import { listProfiles, type Profile } from "@/lib/profiles-store";
 import {
   listRepsForCustomer,
   setRepsForCustomer,
@@ -52,14 +51,10 @@ import { listTasksForCustomer, deleteTask, type TaskRow } from "@/lib/tasks-stor
 import {
   listLibraryFilesForCustomer,
   getLibraryDownloadUrl,
-  formatFileSize,
   type LibraryFile,
 } from "@/lib/library-store";
-import { listShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
-import {
-  listCustomerContacts,
-  type CustomerContact,
-} from "@/lib/customer-contacts-store";
+import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listSitesForCustomer, type CustomerSite } from "@/lib/sites-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
 
@@ -77,8 +72,7 @@ const TABS: { key: TabKey; label: string; glyph: GlyphName }[] = [
   { key: "overview", label: "Overview", glyph: "info" },
   { key: "sites", label: "Sites", glyph: "pin" },
   // Contacts sits between Sites (their place) and Reps (our people)
-  // so the "who is involved" cluster reads in one sweep. Read-only
-  // here — full CRUD lives on /customers/[id]/edit → Contacts tab.
+  // so the "who is involved" cluster reads in one sweep.
   { key: "contacts", label: "Contacts", glyph: "reps" },
   { key: "reps", label: "Reps", glyph: "reps" },
   { key: "tasks", label: "Tasks", glyph: "tasks" },
@@ -86,12 +80,6 @@ const TABS: { key: TabKey; label: string; glyph: GlyphName }[] = [
   { key: "shifts", label: "Today's shifts", glyph: "cal" },
   { key: "custom", label: "Custom fields", glyph: "settings" },
 ];
-
-// Local formatTimeRange removed — use shared helper from lib/format.ts.
-
-// Local deriveInitials removed — wraps the shared helper from
-// lib/format.ts which has the same word-split + uppercase logic.
-const deriveInitials = (p: Profile) => initialsFromNameOrEmail(p.name, p.email);
 
 export default function CustomerDetailPage() {
   const router = useRouter();
@@ -106,6 +94,9 @@ export default function CustomerDetailPage() {
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [files, setFiles] = useState<LibraryFile[]>([]);
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
+  // Sites feed the SitesTab. Owning the fetch here means re-opening
+  // the tab after CRUD doesn't re-hit the API.
+  const [sites, setSites] = useState<CustomerSite[] | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -113,17 +104,25 @@ export default function CustomerDetailPage() {
   const [savingAssignments, setSavingAssignments] = useState(false);
   const [taskBusyId, setTaskBusyId] = useState<string | null>(null);
 
+  // Reload sites after CRUD in the SitesTab.
+  async function reloadSites() {
+    const rows = await listSitesForCustomer(id, { includeInactive: true });
+    setSites(rows);
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [customerRow, reps, repIds, taskRows, fileRows, shiftRows] = await Promise.all([
-        getCustomer(id),
-        listProfiles({ role: "rep" }),
-        listRepsForCustomer(id),
-        listTasksForCustomer(id),
-        listLibraryFilesForCustomer(id),
-        listShifts({ limit: 200 }),
-      ]);
+      const [customerRow, reps, repIds, taskRows, fileRows, shiftRows, siteRows] =
+        await Promise.all([
+          getCustomer(id),
+          listProfiles({ role: "rep" }),
+          listRepsForCustomer(id),
+          listTasksForCustomer(id),
+          listLibraryFilesForCustomer(id),
+          listShifts({ limit: 200 }),
+          listSitesForCustomer(id, { includeInactive: true }),
+        ]);
       if (cancelled) return;
       setC(customerRow);
       setAllReps(reps);
@@ -131,6 +130,7 @@ export default function CustomerDetailPage() {
       setTasks(taskRows);
       setFiles(fileRows);
       setShifts(shiftRows.filter((s) => s.customer_id === id));
+      setSites(siteRows);
       setLoading(false);
 
       // Mark this rep-added customer as "seen" by the current
@@ -299,25 +299,20 @@ export default function CustomerDetailPage() {
               </div>
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                 <Pill
-                  label={isActive ? "● Active" : "● Inactive"}
                   bg={isActive ? AC.okTint : AC.bg}
                   fg={isActive ? "#0F5A38" : AC.mute}
-                />
-                <Pill
-                  label={`${assignedRepIds.length} rep${assignedRepIds.length === 1 ? "" : "s"}`}
-                  bg={AC.bg}
-                  fg={AC.ink2}
-                />
-                <Pill
-                  label={`${tasks.length} task${tasks.length === 1 ? "" : "s"}`}
-                  bg={AC.bg}
-                  fg={AC.ink2}
-                />
-                <Pill
-                  label={`${files.length} file${files.length === 1 ? "" : "s"}`}
-                  bg={AC.bg}
-                  fg={AC.ink2}
-                />
+                >
+                  {isActive ? "● Active" : "● Inactive"}
+                </Pill>
+                <Pill>
+                  {assignedRepIds.length} rep{assignedRepIds.length === 1 ? "" : "s"}
+                </Pill>
+                <Pill>
+                  {tasks.length} task{tasks.length === 1 ? "" : "s"}
+                </Pill>
+                <Pill>
+                  {files.length} file{files.length === 1 ? "" : "s"}
+                </Pill>
               </div>
             </div>
           </div>
@@ -338,6 +333,7 @@ export default function CustomerDetailPage() {
               <button
                 key={t.key}
                 type="button"
+                data-testid={`customer-tab-${t.key}`}
                 onClick={() => setActiveTab(t.key)}
                 style={{
                   padding: "10px 14px",
@@ -376,11 +372,12 @@ export default function CustomerDetailPage() {
               files: files.length,
               shiftsToday: shifts.length,
             }}
-            onJumpToSites={() => setActiveTab("sites")}
           />
         )}
 
-        {activeTab === "sites" && <SitesTab customer={c} />}
+        {activeTab === "sites" && (
+          <SitesTab customer={c} sites={sites} reload={reloadSites} />
+        )}
 
         {activeTab === "contacts" && <ContactsTab customerId={id} />}
 
@@ -407,7 +404,7 @@ export default function CustomerDetailPage() {
         )}
 
         {activeTab === "shifts" && (
-          <ShiftsTab shifts={shifts} customerId={id} />
+          <ShiftsTab shifts={shifts} reps={allReps} customerId={id} />
         )}
 
         {activeTab === "custom" && (
@@ -418,1177 +415,3 @@ export default function CustomerDetailPage() {
   );
 }
 
-// ─── Tab components ─────────────────────────────────────────────────────
-
-function OverviewTab({
-  customer,
-  stats,
-  onJumpToSites,
-}: {
-  customer: Customer;
-  stats: {
-    repsAssigned: number;
-    tasks: number;
-    files: number;
-    shiftsToday: number;
-  };
-  onJumpToSites: () => void;
-}) {
-  // Load sites for the head-office card (the oldest active site is the
-  // head office; the rest list as "additional sites" below). Loaded
-  // here rather than threaded as a prop because OverviewTab is a leaf
-  // component and the small extra fetch keeps the parent simple.
-  const [sites, setSites] = useState<CustomerSite[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    listSitesForCustomer(customer.id).then((rows) => {
-      if (!cancelled) setSites(rows);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [customer.id]);
-
-  const headOffice = useMemo(
-    () => (sites ?? []).find((s) => s.active) ?? null,
-    [sites]
-  );
-  // The `additional` sites list (non-head-office, active) used to
-  // drive a dedicated Card below; that Card was removed because it
-  // duplicated the Sites tab + the Head office card's "Manage N
-  // sites" button. The memo stays for now in case a future need
-  // for the same shape pops up; underscore-prefixed so the linter
-  // doesn't flag an unused variable.
-  const _additional = useMemo(
-    () => (sites ?? []).filter((s) => s.active && s.id !== headOffice?.id),
-    [sites, headOffice]
-  );
-  void _additional;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "start" }}>
-        {/* Left: Quick summary */}
-        <Card padding={20}>
-          <SectionTitle>Quick summary</SectionTitle>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, 1fr)",
-              gap: 12,
-              marginTop: 12,
-            }}
-          >
-            <Stat label="Reps assigned" value={stats.repsAssigned} />
-            <Stat label="Tasks defined" value={stats.tasks} />
-            <Stat label="Library files" value={stats.files} />
-            <Stat label="Shifts today" value={stats.shiftsToday} />
-          </div>
-          <div
-            style={{
-              marginTop: 16,
-              padding: "12px 14px",
-              background: AC.brandSoft,
-              borderRadius: 10,
-              fontFamily: AC.font,
-              fontSize: 12.5,
-              color: AC.brandInk,
-              lineHeight: 1.5,
-            }}
-          >
-            Use the tabs above to manage this customer&apos;s sites
-            (locations + geofences), assigned reps, tasks, library
-            files, today&apos;s shifts, and any custom fields you&apos;ve
-            defined in Settings.
-          </div>
-        </Card>
-
-        {/* Right: Head office card — the customer's primary location.
-            Map + geofence circle render by default. Click the address
-            chip or the action button to jump straight to the Sites tab. */}
-        <Card padding={0}>
-          <div
-            style={{
-              padding: "14px 16px",
-              borderBottom: `1px solid ${AC.lineDim}`,
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: AC.font,
-                fontSize: 11,
-                fontWeight: 700,
-                color: AC.mute,
-                letterSpacing: 0.4,
-                textTransform: "uppercase",
-              }}
-            >
-              Head office
-            </span>
-            <div style={{ flex: 1 }} />
-            <Btn size="sm" icon="settings" onClick={onJumpToSites}>
-              {sites && sites.length > 1
-                ? `Manage ${sites.filter((s) => s.active).length} sites`
-                : "Edit"}
-            </Btn>
-          </div>
-
-          {sites === null ? (
-            <div
-              style={{
-                height: 240,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 10,
-                color: AC.mute,
-                fontFamily: AC.font,
-                fontSize: 12.5,
-              }}
-            >
-              <Spinner size={14} /> Loading head office…
-            </div>
-          ) : headOffice ? (
-            <>
-              <div style={{ overflow: "hidden" }}>
-                {headOffice.latitude != null && headOffice.longitude != null ? (
-                  <AddressMap
-                    lat={headOffice.latitude}
-                    lng={headOffice.longitude}
-                    radiusM={headOffice.geofence_radius_m ?? 100}
-                    color={customer.color}
-                    initials={customer.initials}
-                    height={220}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      height: 220,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexDirection: "column",
-                      fontFamily: AC.font,
-                      color: AC.mute,
-                      fontSize: 13,
-                      gap: 8,
-                      background: "#F1F4F7",
-                    }}
-                  >
-                    <AGlyph name="pin" size={26} color={AC.faint} />
-                    <div>No coordinates yet</div>
-                    <Btn size="sm" icon="edit" onClick={onJumpToSites}>
-                      Add an address
-                    </Btn>
-                  </div>
-                )}
-              </div>
-              <div style={{ padding: "12px 16px 16px" }}>
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 13.5,
-                    color: AC.ink,
-                    fontWeight: 600,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {/* Three-way fallback so a rep-geocoded site (which
-                      has coords + a site name + a synthesised
-                      address line, but no proper street address)
-                      shows something meaningful here instead of the
-                      "no address yet" string. Order of preference:
-                        1. Real street address if set.
-                        2. The site's own `name` if it's been
-                           customised (i.e. not still "Main").
-                        3. Coords-only fallback so reps + managers
-                           can see a pin exists.
-                        4. Final "no address" empty state. */}
-                  {headOffice.address ? (
-                    headOffice.address
-                  ) : headOffice.name && headOffice.name !== "Main" ? (
-                    <span>
-                      {headOffice.name}
-                      <span
-                        style={{
-                          fontWeight: 500,
-                          color: AC.mute,
-                          fontStyle: "italic",
-                          marginLeft: 6,
-                        }}
-                      >
-                        · no street address on file
-                      </span>
-                    </span>
-                  ) : headOffice.latitude != null &&
-                    headOffice.longitude != null ? (
-                    <span style={{ fontWeight: 500, color: AC.mute, fontStyle: "italic" }}>
-                      Pinned location · no street address on file
-                    </span>
-                  ) : (
-                    <span style={{ fontWeight: 500, color: AC.mute, fontStyle: "italic" }}>
-                      No address yet — open Sites to add one.
-                    </span>
-                  )}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    marginTop: 8,
-                    fontFamily: AC.font,
-                    fontSize: 11.5,
-                    color: AC.mute,
-                  }}
-                >
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                    <AGlyph name="pin" size={11} color={AC.mute} />
-                    Geofence · {headOffice.geofence_radius_m ?? 100} m
-                  </span>
-                  {headOffice.latitude != null && headOffice.longitude != null && (
-                    <span style={{ fontFamily: AC.fontMono }}>
-                      {headOffice.latitude.toFixed(4)}, {headOffice.longitude.toFixed(4)}
-                    </span>
-                  )}
-                </div>
-
-                {/* Contact block — only renders the lines that exist.
-                    Phone + email are tap targets. */}
-                {(headOffice.contact_name ||
-                  headOffice.contact_phone ||
-                  headOffice.contact_email) && (
-                  <div
-                    style={{
-                      marginTop: 10,
-                      padding: "8px 10px",
-                      background: AC.bg,
-                      borderRadius: 8,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 4,
-                      fontFamily: AC.font,
-                      fontSize: 12.5,
-                      color: AC.ink2,
-                    }}
-                  >
-                    {headOffice.contact_name && (
-                      <div style={{ fontWeight: 600, color: AC.ink }}>
-                        {headOffice.contact_name}
-                      </div>
-                    )}
-                    {headOffice.contact_phone && (
-                      <a
-                        href={`tel:${headOffice.contact_phone}`}
-                        style={{ color: AC.brandDeep, textDecoration: "none" }}
-                      >
-                        {headOffice.contact_phone}
-                      </a>
-                    )}
-                    {headOffice.contact_email && (
-                      <a
-                        href={`mailto:${headOffice.contact_email}`}
-                        style={{ color: AC.brandDeep, textDecoration: "none" }}
-                      >
-                        {headOffice.contact_email}
-                      </a>
-                    )}
-                  </div>
-                )}
-                {headOffice.notes && (
-                  <div
-                    style={{
-                      marginTop: 8,
-                      padding: "8px 10px",
-                      background: AC.warnTint,
-                      borderRadius: 8,
-                      fontFamily: AC.font,
-                      fontSize: 12,
-                      color: "#6d4808",
-                      lineHeight: 1.45,
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: 0.4,
-                        textTransform: "uppercase",
-                        marginBottom: 4,
-                        color: "#7d5708",
-                      }}
-                    >
-                      Access notes
-                    </div>
-                    {headOffice.notes}
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div
-              style={{
-                padding: 24,
-                textAlign: "center",
-                fontFamily: AC.font,
-                fontSize: 13,
-                color: AC.mute,
-              }}
-            >
-              No sites yet.
-              <div style={{ marginTop: 10 }}>
-                <Btn size="sm" icon="plus" kind="primary" onClick={onJumpToSites}>
-                  Add head office
-                </Btn>
-              </div>
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* "Additional sites" list used to live here as a separate
-          Card with its own "Manage" button + per-site rows. Removed
-          (May 12) because it duplicated:
-            (a) the Sites tab in the page-level tab bar above, and
-            (b) the "Manage N sites" button already on the Head
-                office card.
-          Two paths to the same destination on one screen was noise.
-          The Sites tab itself remains the canonical place for site
-          CRUD. */}
-    </div>
-  );
-}
-
-
-/**
- * Customer contacts (read-only). Mirror of the Contacts tab on the
- * EDIT page minus the CRUD affordances — the detail page surfaces
- * who's on file so a manager can scan the customer at a glance,
- * with click-to-call / click-to-email tap targets on phone + email.
- * Edits live on /customers/[id]/edit → Contacts tab.
- */
-function ContactsTab({ customerId }: { customerId: string }) {
-  const [contacts, setContacts] = useState<CustomerContact[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    listCustomerContacts(customerId)
-      .then((rows) => {
-        if (!cancelled) setContacts(rows);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [customerId]);
-
-  return (
-    <Card padding={0}>
-      <div
-        style={{
-          padding: "12px 16px",
-          borderBottom: `1px solid ${AC.lineDim}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <SectionTitle>Contacts</SectionTitle>
-        <div style={{ flex: 1 }} />
-        <Btn
-          size="sm"
-          icon="edit"
-          onClick={() => router.push(`/customers/${customerId}/edit`)}
-        >
-          Manage contacts
-        </Btn>
-      </div>
-      {loading && (
-        <div style={{ padding: 18, color: AC.mute, fontFamily: AC.font, fontSize: 13 }}>
-          Loading…
-        </div>
-      )}
-      {!loading && contacts && contacts.length === 0 && (
-        <div
-          style={{
-            padding: "18px 16px",
-            color: AC.mute,
-            fontFamily: AC.font,
-            fontSize: 13,
-          }}
-        >
-          No contacts on file yet.{" "}
-          <button
-            type="button"
-            onClick={() => router.push(`/customers/${customerId}/edit`)}
-            style={{
-              background: "transparent",
-              border: "none",
-              padding: 0,
-              color: AC.brandDeep,
-              cursor: "pointer",
-              fontFamily: AC.font,
-              fontSize: 13,
-              fontWeight: 600,
-              textDecoration: "underline",
-            }}
-          >
-            Add the first one →
-          </button>
-        </div>
-      )}
-      {!loading && contacts && contacts.length > 0 && (
-        <div>
-          {contacts.map((c, i) => (
-            <div
-              key={c.id}
-              style={{
-                padding: "14px 16px",
-                borderTop: i === 0 ? "none" : `1px solid ${AC.lineDim}`,
-                display: "grid",
-                gridTemplateColumns: "1fr auto",
-                gap: 12,
-                alignItems: "start",
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 14,
-                    fontWeight: 700,
-                    color: AC.ink,
-                    letterSpacing: -0.1,
-                  }}
-                >
-                  {c.name}
-                  {c.role_label && (
-                    <span
-                      style={{
-                        marginLeft: 8,
-                        fontSize: 11.5,
-                        fontWeight: 600,
-                        color: AC.mute,
-                        background: AC.bg,
-                        border: `1px solid ${AC.line}`,
-                        borderRadius: 99,
-                        padding: "2px 8px",
-                        verticalAlign: "middle",
-                      }}
-                    >
-                      {c.role_label}
-                    </span>
-                  )}
-                </div>
-                {c.notes && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontFamily: AC.font,
-                      fontSize: 12.5,
-                      color: AC.ink2,
-                      lineHeight: 1.45,
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
-                    {c.notes}
-                  </div>
-                )}
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                  textAlign: "right",
-                  fontFamily: AC.font,
-                  fontSize: 12.5,
-                }}
-              >
-                {c.phone && (
-                  <a
-                    href={`tel:${c.phone}`}
-                    style={{ color: AC.brandDeep, textDecoration: "none", fontWeight: 600 }}
-                  >
-                    {c.phone}
-                  </a>
-                )}
-                {c.email && (
-                  <a
-                    href={`mailto:${c.email}`}
-                    style={{ color: AC.brandDeep, textDecoration: "none" }}
-                  >
-                    {c.email}
-                  </a>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-
-function RepsTab({
-  allReps,
-  assignedRepIds,
-  saving,
-  onSave,
-}: {
-  allReps: Profile[];
-  assignedRepIds: string[];
-  saving: boolean;
-  onSave: (next: string[]) => void;
-}) {
-  return (
-    <Card padding={0}>
-      <div
-        style={{
-          padding: "14px 16px",
-          borderBottom: `1px solid ${AC.line}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <SectionTitle>Assigned reps</SectionTitle>
-        <span
-          style={{
-            padding: "2px 7px",
-            borderRadius: 99,
-            background: AC.bg,
-            color: AC.mute,
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          {assignedRepIds.length}
-        </span>
-        <div style={{ flex: 1 }} />
-        {saving && (
-          <span style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute }}>Saving…</span>
-        )}
-      </div>
-      <div style={{ padding: 16 }}>
-        {allReps.length === 0 ? (
-          <div
-            style={{
-              padding: 18,
-              background: AC.bg,
-              borderRadius: 10,
-              fontFamily: AC.font,
-              fontSize: 13,
-              color: AC.mute,
-              textAlign: "center",
-            }}
-          >
-            No reps yet. Reps appear here once they sign up via the mobile app.
-          </div>
-        ) : (
-          <RepMultiSelect reps={allReps} selectedIds={assignedRepIds} onChange={onSave} />
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function TasksTab({
-  customerId,
-  tasks,
-  taskBusyId,
-  onDeleteTask,
-}: {
-  customerId: string;
-  tasks: TaskRow[];
-  taskBusyId: string | null;
-  onDeleteTask: (t: TaskRow) => void;
-}) {
-  return (
-    <Card padding={0}>
-      <div
-        style={{
-          padding: "14px 16px",
-          borderBottom: `1px solid ${AC.line}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <SectionTitle>Tasks at this customer</SectionTitle>
-        <span
-          style={{
-            padding: "2px 7px",
-            borderRadius: 99,
-            background: AC.bg,
-            color: AC.mute,
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          {tasks.length}
-        </span>
-        <div style={{ flex: 1 }} />
-        <Link
-          href={`/tasks/new?customer=${customerId}`}
-          style={{ textDecoration: "none" }}
-        >
-          <Btn size="sm" icon="plus">
-            Add task
-          </Btn>
-        </Link>
-      </div>
-      <div>
-        {tasks.length === 0 ? (
-          <Empty
-            text="No tasks defined yet."
-            sub="Tasks tell the rep what to do during a shift here."
-          />
-        ) : (
-          tasks.map((t, i) => (
-            <div
-              key={t.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 100px 90px 60px",
-                gap: 14,
-                alignItems: "center",
-                padding: "12px 16px",
-                borderBottom: i < tasks.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-                background: "#fff",
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontFamily: AC.font,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: AC.ink,
-                  }}
-                >
-                  {t.name}
-                </div>
-                {t.description && (
-                  <div
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 11.5,
-                      color: AC.mute,
-                      marginTop: 2,
-                    }}
-                  >
-                    {t.description}
-                  </div>
-                )}
-              </div>
-              <div>
-                <span
-                  style={{
-                    padding: "2px 8px",
-                    borderRadius: 99,
-                    fontFamily: AC.font,
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    letterSpacing: 0.3,
-                    textTransform: "uppercase",
-                    background: t.compulsory ? AC.dangerTint : AC.brandSoft,
-                    color: t.compulsory ? AC.danger : AC.brandDeep,
-                  }}
-                >
-                  {t.compulsory ? "Compulsory" : "Optional"}
-                </span>
-              </div>
-              <div
-                style={{
-                  fontFamily: AC.fontMono,
-                  fontSize: 12,
-                  color: AC.ink2,
-                  fontWeight: 600,
-                }}
-              >
-                ~{t.duration_min}m
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
-                <Link href={`/tasks/${t.id}/edit`} title="Edit task" style={iconBtn}>
-                  <AGlyph name="edit" size={14} color={AC.mute} />
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => onDeleteTask(t)}
-                  disabled={taskBusyId === t.id}
-                  title="Delete task"
-                  style={{
-                    ...iconBtn,
-                    cursor: taskBusyId === t.id ? "not-allowed" : "pointer",
-                    opacity: taskBusyId === t.id ? 0.4 : 1,
-                  }}
-                >
-                  <AGlyph name="x" size={14} color={AC.mute} />
-                </button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function LibraryTab({
-  files,
-  onOpen,
-}: {
-  files: LibraryFile[];
-  onOpen: (f: LibraryFile) => void;
-}) {
-  return (
-    <Card padding={0}>
-      <div
-        style={{
-          padding: "14px 16px",
-          borderBottom: `1px solid ${AC.line}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <SectionTitle>Library files for this customer</SectionTitle>
-        <span
-          style={{
-            padding: "2px 7px",
-            borderRadius: 99,
-            background: AC.bg,
-            color: AC.mute,
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          {files.length}
-        </span>
-        <div style={{ flex: 1 }} />
-        <Link href="/library" style={{ textDecoration: "none" }}>
-          <Btn size="sm">Manage all</Btn>
-        </Link>
-      </div>
-      <div>
-        {files.length === 0 ? (
-          <Empty
-            text="No files for this customer."
-            sub="Upload from the Library page and pick this customer (or 'Shared with all') to attach."
-          />
-        ) : (
-          files.map((f, i) => (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => onOpen(f)}
-              style={{
-                width: "100%",
-                display: "grid",
-                gridTemplateColumns: "1fr 110px 80px 80px",
-                gap: 14,
-                alignItems: "center",
-                padding: "12px 16px",
-                borderBottom: i < files.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-                background: "#fff",
-                border: "none",
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: AC.ink,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {f.name}
-              </div>
-              <span
-                style={{
-                  padding: "2px 8px",
-                  borderRadius: 99,
-                  fontFamily: AC.font,
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  background: f.customerIds === null ? AC.brandSoft : AC.bg,
-                  color: f.customerIds === null ? AC.brandInk : AC.ink2,
-                  border: f.customerIds === null ? "none" : `1px solid ${AC.line}`,
-                  justifySelf: "start",
-                }}
-              >
-                {f.customerIds === null ? "All customers" : f.category || "—"}
-              </span>
-              <div
-                style={{
-                  fontFamily: AC.fontMono,
-                  fontSize: 11.5,
-                  color: AC.mute,
-                  fontWeight: 600,
-                }}
-              >
-                {formatFileSize(f.sizeBytes)}
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", color: AC.mute }}>
-                <AGlyph name="chev-r" size={14} color={AC.mute} />
-              </div>
-            </button>
-          ))
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function ShiftsTab({ shifts, customerId }: { shifts: ShiftRow[]; customerId: string }) {
-  return (
-    <Card padding={0}>
-      <div
-        style={{
-          padding: "14px 16px",
-          borderBottom: `1px solid ${AC.line}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <SectionTitle>Shifts at this customer (today)</SectionTitle>
-        <span
-          style={{
-            padding: "2px 7px",
-            borderRadius: 99,
-            background: AC.bg,
-            color: AC.mute,
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          {shifts.length}
-        </span>
-        <div style={{ flex: 1 }} />
-        <Link
-          href={`/schedule/new?customer=${customerId}`}
-          style={{ textDecoration: "none" }}
-        >
-          <Btn size="sm" icon="plus">
-            Schedule
-          </Btn>
-        </Link>
-      </div>
-      <div>
-        {shifts.length === 0 ? (
-          <Empty text="No shifts scheduled at this customer today." />
-        ) : (
-          shifts.map((s, i) => (
-            <Link
-              key={s.id}
-              href={shiftHref(s)}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "140px 1fr 110px",
-                gap: 14,
-                alignItems: "center",
-                padding: "10px 16px",
-                borderBottom: i < shifts.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-                background: "#fff",
-                textDecoration: "none",
-                color: "inherit",
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 12,
-                  color: AC.ink2,
-                  fontWeight: 600,
-                }}
-              >
-                {formatTimeRange(s.start_time, s.end_time)}
-              </div>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 12.5,
-                  color: AC.ink,
-                  fontWeight: 500,
-                }}
-              >
-                {s.rep_id ? (
-                  <Link
-                    href={`/reps/${s.rep_id}`}
-                    style={{ color: AC.brandDeep, textDecoration: "none" }}
-                  >
-                    Rep ↗
-                  </Link>
-                ) : (
-                  <span style={{ color: AC.mute }}>Unassigned · claimable</span>
-                )}
-              </div>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color:
-                    s.state === "complete"
-                      ? AC.ok
-                      : s.state === "in-progress"
-                      ? AC.brandDeep
-                      : AC.mute,
-                  textTransform: "capitalize",
-                  textAlign: "right",
-                }}
-              >
-                {s.state.replace("-", " ")}
-              </div>
-            </Link>
-          ))
-        )}
-      </div>
-    </Card>
-  );
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────
-
-function Pill({ label, bg, fg }: { label: string; bg: string; fg: string }) {
-  return (
-    <span
-      style={{
-        padding: "3px 9px",
-        borderRadius: 99,
-        background: bg,
-        color: fg,
-        fontFamily: AC.font,
-        fontSize: 11,
-        fontWeight: 700,
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div
-      style={{
-        padding: "12px 14px",
-        borderRadius: 10,
-        background: AC.bg,
-        border: `1px solid ${AC.line}`,
-      }}
-    >
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 11,
-          color: AC.mute,
-          fontWeight: 600,
-          letterSpacing: 0.3,
-          textTransform: "uppercase",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 22,
-          fontWeight: 700,
-          color: AC.ink,
-          letterSpacing: -0.6,
-          marginTop: 4,
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function Empty({ text, sub }: { text: string; sub?: string }) {
-  return (
-    <div
-      style={{
-        padding: 28,
-        fontFamily: AC.font,
-        fontSize: 13,
-        color: AC.mute,
-        textAlign: "center",
-        background: "#fff",
-      }}
-    >
-      <div style={{ color: AC.ink2, fontWeight: 600 }}>{text}</div>
-      {sub && <div style={{ fontSize: 11.5, marginTop: 4 }}>{sub}</div>}
-    </div>
-  );
-}
-
-function RepMultiSelect({
-  reps,
-  selectedIds,
-  onChange,
-}: {
-  reps: Profile[];
-  selectedIds: string[];
-  onChange: (next: string[]) => void;
-}) {
-  const set = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const toggle = (id: string) => {
-    const next = new Set(set);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    onChange(Array.from(next));
-  };
-  return (
-    <div
-      style={{
-        border: `1px solid ${AC.line}`,
-        borderRadius: 10,
-        background: "#fff",
-        maxHeight: 320,
-        overflowY: "auto",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "8px 12px",
-          borderBottom: `1px solid ${AC.lineDim}`,
-          background: AC.bg,
-        }}
-      >
-        <span style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, fontWeight: 600 }}>
-          {selectedIds.length} of {reps.length} selected
-        </span>
-        <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={() => onChange(reps.map((r) => r.id))}
-          style={linkBtn}
-        >
-          Select all
-        </button>
-        <span style={{ color: AC.faint }}>·</span>
-        <button type="button" onClick={() => onChange([])} style={linkBtn}>
-          Clear
-        </button>
-      </div>
-      {reps.map((r) => {
-        const checked = set.has(r.id);
-        const initials = deriveInitials(r);
-        return (
-          <label
-            key={r.id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "9px 12px",
-              borderBottom: `1px solid ${AC.lineDim}`,
-              cursor: "pointer",
-              background: checked ? AC.brandSoft : "#fff",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={() => toggle(r.id)}
-              style={{ width: 16, height: 16, accentColor: AC.brand }}
-            />
-            <div
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: 99,
-                background: AC.brandDeep,
-                color: "#fff",
-                fontFamily: AC.font,
-                fontSize: 10,
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {initials}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 13,
-                  color: AC.ink,
-                  fontWeight: 500,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {displayName(r)}
-              </div>
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 11,
-                  color: AC.mute,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {r.email}
-              </div>
-            </div>
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
-const linkBtn: React.CSSProperties = {
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  fontFamily: AC.font,
-  fontSize: 11,
-  color: AC.brandDeep,
-  fontWeight: 600,
-  padding: "2px 4px",
-};
-
-const iconBtn: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 6,
-  background: "transparent",
-  border: "none",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  textDecoration: "none",
-  cursor: "pointer",
-};

@@ -35,6 +35,7 @@ import {
   type ShiftRow,
 } from "@/lib/shifts-store";
 import { formatTimeRange } from "@/lib/format";
+import { RepConflictAvatar } from "@/components/ui/Avatars";
 import { listTasksForCustomer, type TaskRow } from "@/lib/tasks-store";
 import {
   getProfileById,
@@ -496,6 +497,7 @@ export default function ShiftDetailPage({
                           triggerIcon="reps"
                           placeholder="Pick a rep…"
                           clearable={false}
+                          searchable
                           options={reps
                             .filter((r) => r.id !== shift.rep_id)
                             .map((r) => {
@@ -506,7 +508,9 @@ export default function ShiftDetailPage({
                                 sublabel: conflict
                                   ? `⚠ Conflict · already booked at this time`
                                   : r.email,
-                                color: conflict ? AC.danger : undefined,
+                                renderLeading: () => (
+                                  <RepConflictAvatar rep={r} conflict={conflict} />
+                                ),
                               };
                             })}
                         />

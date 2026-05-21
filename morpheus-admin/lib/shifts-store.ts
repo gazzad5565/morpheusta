@@ -120,6 +120,48 @@ export async function listShiftsInRange(
   return data as ShiftRow[];
 }
 
+/**
+ * Past Shifts list — completed (and optionally cancelled) shifts whose
+ * shift_date falls in [startISO, endISO]. Powers /past-shifts.
+ *
+ * Ordered newest first (shift_date desc, then start_time desc) so the
+ * archive reads as a reverse-chronological log. Joined exactly like
+ * listShifts / listShiftsInRange so the returned shape is ShiftRow and
+ * the page can reuse the same cell renderers as Live Ops.
+ */
+export const PAST_SHIFTS_DEFAULT_LIMIT = 2000;
+
+export async function listPastShifts(opts: {
+  startISO: string;
+  endISO: string;
+  includeCancelled?: boolean;
+  /** Hard cap on rows returned. Defaults to PAST_SHIFTS_DEFAULT_LIMIT
+   *  so the "all-time" window can't return a 100k-row payload on a
+   *  long-lived org. Callers that need to page further must set this
+   *  explicitly. */
+  limit?: number;
+}): Promise<ShiftRow[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const states = opts.includeCancelled ? ["complete", "cancelled"] : ["complete"];
+  const { data, error } = await supabase
+    .from("shifts")
+    .select(
+      "*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)"
+    )
+    .in("state", states)
+    .gte("shift_date", opts.startISO)
+    .lte("shift_date", opts.endISO)
+    .order("shift_date", { ascending: false })
+    .order("start_time", { ascending: false })
+    .limit(opts.limit ?? PAST_SHIFTS_DEFAULT_LIMIT);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] listPast:", error.message);
+    return [];
+  }
+  return data as ShiftRow[];
+}
+
 export interface NewShift {
   customer_id: string;
   /**

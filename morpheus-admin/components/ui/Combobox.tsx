@@ -40,6 +40,11 @@ export interface ComboboxOption {
   icon?: string;
   /** Left-side color swatch — overrides icon when set */
   color?: string;
+  /** Custom left-side renderer (e.g. an avatar). Takes precedence over
+   *  `icon` and `color` when provided. Kept as a function so callers
+   *  can compute the node lazily and don't pay for ReactNode equality
+   *  checks during the option list re-renders. */
+  renderLeading?: () => ReactNode;
   /** Hide from search results when true (still rendered if explicitly selected) */
   disabled?: boolean;
 }
@@ -76,6 +81,14 @@ type Common = {
   id?: string;
   /** Extra className on the trigger (rare). */
   className?: string;
+  /**
+   * Optional footer rendered inside the panel below the options list.
+   * Receives a `close` callback so the footer's actions (Apply / Cancel)
+   * can dismiss the panel programmatically. The footer lives inside
+   * the panel's clickable region, so outside-click handlers ignore it
+   * — no flicker from the panel collapsing before the click resolves.
+   */
+  footer?: (ctx: { close: () => void }) => ReactNode;
 };
 
 export type ComboboxProps = Common & (SingleProps | MultiProps);
@@ -92,6 +105,7 @@ export function Combobox(props: ComboboxProps) {
     disabled,
     id,
     className,
+    footer,
   } = props;
 
   const [open, setOpen] = useState(false);
@@ -102,6 +116,12 @@ export function Combobox(props: ComboboxProps) {
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [panelStyle, setPanelStyle] = useState<CSSProperties>({});
+  // Stays false from open=true until reposition has run at least once.
+  // Without this the panel briefly paints at the viewport's top-left
+  // on the first open cycle — the panelStyle is still {} (initial
+  // state) when the panel first lands in the DOM, before
+  // useLayoutEffect computes real coords.
+  const [positioned, setPositioned] = useState(false);
 
   const isMulti = props.multi === true;
   const showSearch = props.searchable ?? options.length > 8;
@@ -131,25 +151,55 @@ export function Combobox(props: ComboboxProps) {
     );
   }, [options, query]);
 
-  // Position the portal panel below the trigger.
+  // Position the portal panel below the trigger, clamped to the
+  // viewport so triggers near the right edge (e.g. the customer
+  // filter on /tasks) don't render the panel off-screen. Flips
+  // above the trigger when there isn't enough room below.
   const reposition = useCallback(() => {
     const t = triggerRef.current;
     if (!t) return;
     const r = t.getBoundingClientRect();
-    const top = r.bottom + 6;
     const minWidth = Math.max(r.width, 220);
+    const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // If the panel has already mounted, measure it; otherwise fall
+    // back to the minWidth / maxHeight we render with so the first
+    // pass still avoids the worst overflow.
+    const p = panelRef.current?.getBoundingClientRect();
+    const panelW = p?.width ?? minWidth;
+    const panelH = p?.height ?? 360;
+
+    let left = r.left;
+    if (left + panelW > vw - margin) left = vw - panelW - margin;
+    if (left < margin) left = margin;
+
+    let top = r.bottom + 6;
+    if (top + panelH > vh - margin && r.top - 6 - panelH > margin) {
+      top = r.top - 6 - panelH;
+    }
+
     setPanelStyle({
       position: "fixed",
       top,
-      left: r.left,
+      left,
       minWidth,
+      maxWidth: vw - margin * 2,
       zIndex: 1000,
     });
+    setPositioned(true);
   }, []);
 
   useLayoutEffect(() => {
-    if (open) reposition();
-  }, [open, reposition]);
+    if (open) {
+      reposition();
+    } else if (positioned) {
+      // Reset so the next open cycle starts hidden until repositioned.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPositioned(false);
+    }
+  }, [open, reposition, positioned]);
 
   // Click outside closes.
   useEffect(() => {
@@ -180,9 +230,12 @@ export function Combobox(props: ComboboxProps) {
     }
   }, [open, showSearch]);
 
-  // Reset query/index when reopening.
+  // Reset query/index when reopening. Intentional reset-on-toggle
+  // pattern — the panel should always open fresh, not remember the
+  // last search or cursor position.
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuery("");
       setActiveIndex(0);
     }
@@ -214,6 +267,9 @@ export function Combobox(props: ComboboxProps) {
       if (v != null) selectedIdx = filtered.findIndex((o) => o.value === v);
     }
     if (selectedIdx < 0) return;
+    // Jumping the cursor to the selected row on open — the whole point
+    // of this effect is to sync the panel's UI state with the prop.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveIndex(selectedIdx);
     queueMicrotask(() => {
       const list = listRef.current;
@@ -402,6 +458,9 @@ export function Combobox(props: ComboboxProps) {
               maxHeight: 360,
               display: "flex",
               flexDirection: "column",
+              // Hidden until reposition runs so the panel never paints
+              // at the viewport's top-left during the initial render.
+              visibility: positioned ? "visible" : "hidden",
             }}
             onKeyDown={onKeyDown}
           >
@@ -516,6 +575,23 @@ export function Combobox(props: ComboboxProps) {
                 })
               )}
             </div>
+
+            {footer && (
+              <div
+                style={{
+                  borderTop: `1px solid ${AC.lineDim}`,
+                  padding: "8px 10px",
+                  background: AC.bg,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-end",
+                  gap: 8,
+                  flexShrink: 0,
+                }}
+              >
+                {footer({ close: () => setOpen(false) })}
+              </div>
+            )}
           </div>,
           document.body
         )}
@@ -596,7 +672,11 @@ function ComboOption({
         </span>
       )}
 
-      {opt.color ? (
+      {opt.renderLeading ? (
+        <span style={{ display: "inline-flex", flex: "0 0 auto" }}>
+          {opt.renderLeading()}
+        </span>
+      ) : opt.color ? (
         <span
           aria-hidden
           style={{

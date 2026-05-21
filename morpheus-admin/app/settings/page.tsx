@@ -41,13 +41,14 @@ export default function SettingsHubPage() {
       >
         {SETTINGS_SECTIONS.map((s) => {
           const inner = (
-            <Card padding={16}>
+            <Card padding={16} style={{ height: "100%" }}>
               <div
                 style={{
                   display: "flex",
                   alignItems: "flex-start",
                   gap: 12,
                   opacity: s.available ? 1 : 0.6,
+                  height: "100%",
                 }}
               >
                 <div
@@ -112,12 +113,22 @@ export default function SettingsHubPage() {
               </div>
             </Card>
           );
-          if (!s.available) return <div key={s.id}>{inner}</div>;
+          if (!s.available) {
+            return (
+              <div key={s.id} style={{ display: "block" }}>
+                {inner}
+              </div>
+            );
+          }
           return (
             <Link
               key={s.id}
               href={s.href}
-              style={{ textDecoration: "none", color: "inherit" }}
+              style={{
+                textDecoration: "none",
+                color: "inherit",
+                display: "block",
+              }}
             >
               {inner}
             </Link>

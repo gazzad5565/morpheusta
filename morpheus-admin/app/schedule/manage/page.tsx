@@ -40,7 +40,8 @@ import {
 } from "@/lib/shifts-store";
 import { listCustomers } from "@/lib/customers-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
-import { todayLocalISO } from "@/lib/format";
+import { todayLocalISO, initialsFromNameOrEmail } from "@/lib/format";
+import { RepAvatar, CustomerSwatch } from "@/components/ui/Avatars";
 import type { Customer } from "@/lib/types";
 
 export default function ManageShiftsPage() {
@@ -601,10 +602,13 @@ function SeriesRow({
       <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
         {series.customerIds.length === 1 ? (
           <CustomerSwatch
-            color={customerById.get(series.customerIds[0])?.color || "#888"}
-            initials={
-              customerById.get(series.customerIds[0])?.initials || "?"
+            customer={
+              customerById.get(series.customerIds[0]) ?? {
+                color: "#888",
+                initials: "?",
+              }
             }
+            size={26}
           />
         ) : (
           <MultiSwatch />
@@ -932,35 +936,6 @@ function MenuItem({
   );
 }
 
-function CustomerSwatch({
-  color,
-  initials,
-}: {
-  color: string;
-  initials: string;
-}) {
-  return (
-    <div
-      style={{
-        width: 26,
-        height: 26,
-        borderRadius: 7,
-        background: color,
-        color: "#fff",
-        fontFamily: AC.font,
-        fontSize: 10.5,
-        fontWeight: 700,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-      }}
-    >
-      {initials}
-    </div>
-  );
-}
-
 function MultiSwatch() {
   return (
     <div
@@ -1192,11 +1167,12 @@ function EditFutureModal({
                 ? "(unchanged — same customer)"
                 : "(unchanged — multiple customers)"
             }
+            searchable
             options={customers.map((c) => ({
               value: c.id,
               label: c.name,
               sublabel: `#${c.code}`,
-              color: c.color || undefined,
+              renderLeading: () => <CustomerSwatch customer={c} size={22} />,
             }))}
           />
         </FormField>
@@ -1211,11 +1187,26 @@ function EditFutureModal({
                 ? "(unchanged — same rep)"
                 : "(unchanged — multiple reps)"
             }
+            searchable
             options={[
               { value: "__unassigned__", label: "Unassigned", sublabel: "Claimable" },
               ...reps
                 .filter((r) => r.role === "rep")
-                .map((r) => ({ value: r.id, label: displayName(r) })),
+                .map((r) => ({
+                  value: r.id,
+                  label: displayName(r),
+                  sublabel: r.email,
+                  renderLeading: () => (
+                    <RepAvatar
+                      rep={{
+                        initials: initialsFromNameOrEmail(r.name, r.email),
+                        avatarUrl: r.avatar_url,
+                      }}
+                      size={22}
+                      seed={r.id}
+                    />
+                  ),
+                })),
             ]}
           />
         </FormField>

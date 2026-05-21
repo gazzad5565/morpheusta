@@ -14,9 +14,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui/Btn";
-import { Card, SectionTitle } from "@/components/ui/Card";
+import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
+import { EmptyState, TabLoading } from "@/components/ui/EmptyState";
+import { TabHeader } from "@/components/ui/TabHeader";
 import { inputStyle } from "@/components/ui/Filters";
 import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
@@ -36,6 +39,7 @@ export function CustomFieldsCard({
   entity: FieldEntity;
   entityId: string;
 }) {
+  const router = useRouter();
   const [fields, setFields] = useState<CustomField[]>([]);
   const [values, setValues] = useState<Record<string, CustomFieldValue>>({});
   const [loaded, setLoaded] = useState(false);
@@ -92,10 +96,9 @@ export function CustomFieldsCard({
 
   if (!loaded) {
     return (
-      <Card padding={20}>
-        <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.mute }}>
-          Loading custom fields…
-        </div>
+      <Card padding={0}>
+        <TabHeader title="Custom fields" />
+        <TabLoading label="Loading custom fields…" />
       </Card>
     );
   }
@@ -103,81 +106,34 @@ export function CustomFieldsCard({
   if (fields.length === 0) {
     return (
       <Card padding={0}>
-        <div
-          style={{
-            padding: "14px 16px",
-            borderBottom: `1px solid ${AC.line}`,
-          }}
-        >
-          <SectionTitle>Custom fields</SectionTitle>
-        </div>
-        <div
-          style={{
-            padding: 24,
-            textAlign: "center",
-            fontFamily: AC.font,
-            fontSize: 12.5,
-            color: AC.mute,
-          }}
-        >
-          No custom fields defined for this entity type yet.
-          <div style={{ marginTop: 8 }}>
-            <Link
-              href={`/settings/fields/new?entity=${entity}`}
-              style={{
-                color: AC.brandDeep,
-                fontWeight: 600,
-                fontSize: 12,
-                textDecoration: "none",
-              }}
-            >
-              + Define one in Settings
-            </Link>
-          </div>
-        </div>
+        <TabHeader title="Custom fields" />
+        <EmptyState
+          icon="settings"
+          title="No custom fields defined"
+          hint="Custom fields capture extra info you want to track per entity. Define them in Settings."
+          actionLabel="Define a field"
+          onAction={() => router.push(`/settings/fields/new?entity=${entity}`)}
+        />
       </Card>
     );
   }
 
   return (
     <Card padding={0}>
-      <div
-        style={{
-          padding: "14px 16px",
-          borderBottom: `1px solid ${AC.line}`,
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        <SectionTitle>Custom fields</SectionTitle>
-        <span
-          style={{
-            padding: "2px 7px",
-            borderRadius: 99,
-            background: AC.bg,
-            color: AC.mute,
-            fontFamily: AC.font,
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          {fields.length}
-        </span>
-        <div style={{ flex: 1 }} />
-        <Link
-          href={`/settings/fields/new?entity=${entity}`}
-          style={{
-            color: AC.brandDeep,
-            fontWeight: 600,
-            fontSize: 11.5,
-            textDecoration: "none",
-            fontFamily: AC.font,
-          }}
-        >
-          + Add field
-        </Link>
-      </div>
+      <TabHeader
+        title="Custom fields"
+        count={fields.length}
+        action={
+          <Link
+            href={`/settings/fields/new?entity=${entity}`}
+            style={{ textDecoration: "none" }}
+          >
+            <Btn size="sm" icon="plus">
+              Add field
+            </Btn>
+          </Link>
+        }
+      />
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
         {fields.map((f) => (
           <FieldRow

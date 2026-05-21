@@ -50,6 +50,7 @@ import {
   displayName,
   type Profile,
 } from "@/lib/profiles-store";
+import { RepConflictAvatar } from "@/components/ui/Avatars";
 
 /**
  * Map the rep-supplied `attention_reason` enum to a human label.
@@ -1348,6 +1349,7 @@ function AttentionRow({
               triggerIcon="reps"
               placeholder="Pick a rep…"
               clearable={false}
+              searchable
               options={reps
                 .filter((r) => r.id !== shift.rep_id)
                 .map((r) => {
@@ -1358,7 +1360,9 @@ function AttentionRow({
                     sublabel: hasConflict
                       ? `⚠ Conflict · already booked at this time`
                       : r.email,
-                    color: hasConflict ? AC.danger : undefined,
+                    renderLeading: () => (
+                      <RepConflictAvatar rep={r} conflict={hasConflict} />
+                    ),
                   };
                 })}
             />
