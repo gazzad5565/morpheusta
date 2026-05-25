@@ -74,6 +74,30 @@ For multi-step tasks, state a brief plan:
 Strong success criteria let you loop independently. Weak criteria
 ("make it work") require constant clarification.
 
+**When something goes sideways:** stop and re-plan. If a verification
+step fails or a mid-task discovery invalidates the original plan,
+surface the divergence to the user before continuing. Don't accumulate
+hacks to keep the original path alive.
+
+## 5. Root cause, not the symptom
+
+**Fix the cause. If you can't, name the trade-off out loud.**
+
+When a build / test / check fails, fix the cause. Don't:
+- Wrap an error in try-catch to suppress it.
+- Silence TypeScript with `as any`.
+- Comment out the failing line.
+- Add a special-case branch to skip the broken path.
+- Drop a `TODO: fix properly` and move on silently.
+
+If you genuinely need a temporary fix because the real one is out of
+scope, do BOTH:
+1. Leave a one-line `TODO:` comment at the patch site explaining
+   what's deferred and what triggers the proper fix.
+2. Flag it in your response to the user so they can accept or reject
+   the trade-off. A silent shortcut is undetectable; a surfaced
+   trade-off is reviewable.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in
