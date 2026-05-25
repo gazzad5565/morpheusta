@@ -17,6 +17,7 @@ import { Btn } from "@/components/ui/Btn";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { ExpandableRow, ExpandChevron } from "@/components/ui/ExpandableRow";
 import { Pill } from "@/components/ui/Pill";
+import { GeocodeBadge } from "@/components/ui/GeocodeBadge";
 import { iconBtn } from "./tabStyles";
 import { DEFAULT_GEOFENCE_M } from "./SiteEditor";
 import { AC } from "@/lib/tokens";
@@ -318,18 +319,28 @@ export function SiteRow({
       </div>
       <div
         style={{
-          fontFamily: AC.font,
-          fontSize: 12.5,
-          color: site.address ? AC.ink2 : AC.faint,
-          fontStyle: site.address ? "normal" : "italic",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
           minWidth: 0,
         }}
         title={site.address ?? undefined}
       >
-        {site.address || "No address yet"}
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            color: site.address ? AC.ink2 : AC.faint,
+            fontStyle: site.address ? "normal" : "italic",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            minWidth: 0,
+          }}
+        >
+          {site.address || "No address yet"}
+        </div>
+        <GeocodeBadge status={site.geocode_status} />
       </div>
       <div
         style={{

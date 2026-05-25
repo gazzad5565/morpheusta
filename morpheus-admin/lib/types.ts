@@ -47,6 +47,12 @@ export interface Customer {
    *  by listCustomers + getCustomer so the admin list can sort and
    *  filter by "recently added" without a separate query. */
   createdAt?: string;
+  /** Background-geocoder status from the Phase A migration. 'pending'
+   *  = waiting in the cron's queue; 'done' = has lat/lng; 'failed' =
+   *  Nominatim couldn't resolve the address; 'skipped' = no address
+   *  to geocode. The Phase E cron drains 'pending' rows once per
+   *  minute. Manual address edits flip the row back to 'pending'. */
+  geocodeStatus?: "pending" | "done" | "failed" | "skipped" | null;
 }
 
 /**

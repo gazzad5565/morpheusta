@@ -3,6 +3,7 @@
   "crons": [
     { "path": "/api/cron/shift-reminders", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/auto-checkout",   "schedule": "*/15 * * * *" },
-    { "path": "/api/cron/messages",        "schedule": "* * * * *" }
+    { "path": "/api/cron/messages",        "schedule": "* * * * *" },
+    { "path": "/api/cron/geocode-queue",   "schedule": "* * * * *" }
   ]
 }

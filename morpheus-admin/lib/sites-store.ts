@@ -33,6 +33,10 @@ export interface CustomerSite {
   active: boolean;
   created_at: string;
   updated_at: string;
+  /** Background-geocoder status from the Phase A migration — same
+   *  semantics as customers.geocode_status. The Phase E cron pulls
+   *  'pending' rows from both tables once per minute. */
+  geocode_status?: "pending" | "done" | "failed" | "skipped" | null;
 }
 
 export async function listSitesForCustomer(
@@ -163,7 +167,24 @@ export async function updateSite(
     .select("name, customer_id")
     .eq("id", id)
     .maybeSingle();
-  const { error } = await supabase.from("customer_sites").update(patch).eq("id", id);
+  // Phase E: if the manager changed address WITHOUT also supplying
+  // lat/lng, flip geocode_status back to 'pending' so the every-
+  // minute cron re-resolves the new address. Without this, a row
+  // that landed as 'failed' would stay failed forever even after
+  // the manager fixed the address.
+  const cleanPatch: Record<string, unknown> = { ...patch };
+  if (
+    patch.address !== undefined &&
+    patch.latitude === undefined &&
+    patch.longitude === undefined
+  ) {
+    cleanPatch.geocode_status = "pending";
+    cleanPatch.geocode_attempted_at = null;
+  }
+  const { error } = await supabase
+    .from("customer_sites")
+    .update(cleanPatch)
+    .eq("id", id);
   if (error) {
     notifySaveError(error.message, "site");
     return { ok: false, error: error.message };

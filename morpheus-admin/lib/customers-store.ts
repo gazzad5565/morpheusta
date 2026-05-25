@@ -40,6 +40,8 @@ interface DbRow {
    *  list to surface recently-added customers + power the "New"
    *  filter chip. */
   created_at?: string | null;
+  /** Background-geocoder status from the Phase A migration. */
+  geocode_status?: "pending" | "done" | "failed" | "skipped" | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -63,6 +65,7 @@ function rowToCustomer(row: DbRow): Customer {
     logoUrl: row.logo_url ?? null,
     createdByRepId: row.created_by_rep_id ?? null,
     createdAt: row.created_at ?? undefined,
+    geocodeStatus: row.geocode_status ?? null,
   };
 }
 
@@ -328,6 +331,18 @@ export async function updateCustomer(
     } else {
       cleanPatch.code = normalised;
     }
+  }
+  // Phase E: if the manager changed the address, flip the row back to
+  // geocode_status='pending' so the every-minute cron re-resolves it.
+  // Without this a row that landed as 'failed' would stay failed
+  // forever even after the manager fixed the address.
+  if (
+    patch.address !== undefined &&
+    patch.latitude === undefined &&
+    patch.longitude === undefined
+  ) {
+    cleanPatch.geocode_status = "pending";
+    cleanPatch.geocode_attempted_at = null;
   }
   const { error } = await supabase.from("customers").update(cleanPatch).eq("id", id);
   if (error) {
