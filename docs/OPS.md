@@ -24,12 +24,14 @@
 - May 21 and earlier — all applied.
 - **Pending — run before next test pass:**
   - `db/migrations/2026_05_25_import_runs_and_geocode_status.sql` (Phase A — Import hub foundation: new `import_runs` table, `geocode_status` + `geocode_attempted_at` on customers + customer_sites with backfill, partial indexes for the cron work queue, `app_settings` seed for the two import defaults)
+  - `db/migrations/2026_05_25_profiles_last_credentials_sent_at.sql` (Phase B — adds `profiles.last_credentials_sent_at timestamptz NULL` so the "Email this user" modal can show "Last sent: X ago")
 
 Each file is idempotent — safe to re-run.
 
 May 25 (pending):
 
 - `2026_05_25_import_runs_and_geocode_status.sql` — Import hub foundation. Creates `import_runs` (manager-only via `is_manager()`, on `supabase_realtime`), adds `geocode_status text DEFAULT 'pending'` + `geocode_attempted_at timestamptz` to `customers` and `customer_sites`, backfills (rows with coords → `done`, no-address → `skipped`), adds partial indexes on `WHERE geocode_status = 'pending'` for the every-minute geocoder cron landing in Phase E, and seeds `app_settings` keys `import.default_duplicate_mode = 'skip'` + `import.send_welcome_email_default = true`. Smoke-test checklist at the bottom of the file.
+- `2026_05_25_profiles_last_credentials_sent_at.sql` — Phase B. Single `ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS last_credentials_sent_at timestamptz NULL`. No RLS change (manager UPDATE already allowed under the Phase 4 `is_manager()` policy).
 
 May 14 (applied):
 

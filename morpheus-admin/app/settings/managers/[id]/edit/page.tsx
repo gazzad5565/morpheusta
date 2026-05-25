@@ -20,6 +20,8 @@ import { supabase } from "@/lib/supabase";
 import { getUser } from "@/lib/auth";
 import { displayName, type Profile } from "@/lib/profiles-store";
 import { updateUser, deleteUser, randomPassword } from "@/lib/users-admin";
+import { EmailUserModal } from "@/components/users/EmailUserModal";
+import { formatRelative } from "@/lib/format";
 
 function formatJoined(iso: string | undefined): string {
   if (!iso) return "—";
@@ -52,6 +54,7 @@ export default function EditManagerPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -339,6 +342,50 @@ export default function EditManagerPage({
           </div>
         </div>
 
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Email this user — Phase B (May 25). Opens a modal with
+            two send options: invite link (regenerate=false) or
+            fresh password (regenerate=true). Last-sent line uses
+            the new profiles.last_credentials_sent_at column. */}
+        <Card padding={16}>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              fontWeight: 600,
+              color: AC.mute,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              marginBottom: 8,
+            }}
+          >
+            Email this user
+          </div>
+          <Btn
+            size="sm"
+            icon="mail"
+            onClick={() => setEmailModalOpen(true)}
+            disabled={busy}
+          >
+            Send credentials
+          </Btn>
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11.5,
+              color: AC.mute,
+              marginTop: 8,
+              lineHeight: 1.5,
+            }}
+          >
+            {profile.last_credentials_sent_at ? (
+              <>Last sent {formatRelative(profile.last_credentials_sent_at, " ago")}.</>
+            ) : (
+              <>No credentials email has been sent to this user yet.</>
+            )}
+          </div>
+        </Card>
+
         <Card padding={16}>
           <div
             style={{
@@ -399,7 +446,26 @@ export default function EditManagerPage({
             </Link>
           </div>
         </Card>
+        </div>
       </div>
+
+      {emailModalOpen && (
+        <EmailUserModal
+          userId={profile.id}
+          userName={displayName(profile)}
+          userEmail={profile.email}
+          lastSentAt={profile.last_credentials_sent_at ?? null}
+          onClose={() => setEmailModalOpen(false)}
+          onSent={() => {
+            // Bump the timestamp locally so the "Last sent" line
+            // updates without a round-trip to Supabase. The DB write
+            // already happened on the server inside send-credentials.
+            setProfile((p) =>
+              p ? { ...p, last_credentials_sent_at: new Date().toISOString() } : p
+            );
+          }}
+        />
+      )}
     </AdminShell>
   );
 }

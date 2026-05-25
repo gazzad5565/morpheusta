@@ -15,12 +15,13 @@
 
 Top of the queue (in priority order):
 
-0. **Import hub + email welcome — Phase A landed May 25, B–E to ship.** Foundation in: `import_runs` table, `geocode_status` on customers + sites, Resend wiring (`lib/email.ts`, `emails/WelcomeEmail.tsx`, `POST /api/email/test`), `/settings/import` page with two defaults. Two operator actions still owed before Phase A is end-to-end testable:
-   - Run `db/migrations/2026_05_25_import_runs_and_geocode_status.sql` in Supabase SQL Editor.
+0. **Import hub + email welcome — Phases A + B landed May 25, C–E to ship.** Foundation in (Phase A): `import_runs` table, `geocode_status` on customers + sites, Resend wiring (`lib/email.ts`, `emails/WelcomeEmail.tsx`, `POST /api/email/test`), `/settings/import` page. First user-visible feature in (Phase B): "Email this user" button on `/settings/managers/[id]/edit` + `/reps/[id]` actions slot, opens a shared `EmailUserModal` with two send options (invite link via Supabase recovery flow, or fresh password via `auth.admin.updateUserById`). Three operator actions still owed before Phases A + B are end-to-end testable:
+   - Run both migrations in Supabase SQL Editor: `db/migrations/2026_05_25_import_runs_and_geocode_status.sql` and `db/migrations/2026_05_25_profiles_last_credentials_sent_at.sql`.
    - Add `RESEND_API_KEY` to the morpheus-admin Vercel project (Production + Preview + Development); verify `gazzad@mac.com` as a recipient in Resend (free tier `onboarding@resend.dev` only delivers to verified recipients until a sending domain is added).
-   - Then smoke-test `/api/email/test` to confirm transport.
+   - Confirm `NEXT_PUBLIC_ADMIN_URL` + `NEXT_PUBLIC_MOBILE_URL` are in the Supabase Auth Redirect URLs allowlist (Authentication → URL Configuration) so the recovery-link path lands users in the right app rather than the Supabase default redirect. Both URLs are likely already there from existing login flows.
+   - Then smoke-test `/api/email/test` (transport), and `/settings/managers/<uid>/edit` → "Send credentials" → "Send invite link" (full Phase B loop).
 
-   **Next phases (ship one at a time):** B — "Email this user" button on `/settings/managers/[id]/edit` + `/reps/[id]` (independently shippable, gives Gary immediate value). C — `/import` hub UI shell. D — entity adapters (D1 customers, D2 sites, D3/D4 reps + managers, D5 shifts with recurring expansion). E — every-minute geocoder cron consuming the new `geocode_status = 'pending'` queue.
+   **Next phases (ship one at a time):** C — `/import` hub UI shell (entity picker, stepper, parsing via Papa Parse + SheetJS, synonyms-driven auto-map). D — entity adapters (D1 customers, D2 sites, D3/D4 reps + managers, D5 shifts with recurring expansion). E — every-minute geocoder cron consuming the new `geocode_status = 'pending'` queue.
 
 1. **Set `NEXT_PUBLIC_MOBILE_URL` on the morpheus-admin Vercel project** (belt-and-braces). Today's fix made push URLs relative so they can't ship to the wrong host even if the env var is missing, but the var is still used by the CORS check in `/api/push/notify`. Set it to `https://morpheusta-khaki-omega.vercel.app` on **Production + Preview + Development** so the fallback never fires.
 2. **One-time SQL cleanup for any check_in_at > check_out_at rows** (Mariska-style bad data from before today's fix). The data-integrity guard in `checkInToShift` prevents NEW bad rows but doesn't retroactively repair existing ones:

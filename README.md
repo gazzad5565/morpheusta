@@ -8,23 +8,20 @@ signatures on tasks, message reps individually or in bulk, and prove
 every customer visit with a timestamped audit trail. Built on Next.js
 16 + Supabase + Vercel.
 
-> Latest: **May 25, 2026 — Import Hub + Email Welcome, Phase A.**
-> Foundation for the new bulk-import workstream. New migration
-> `2026_05_25_import_runs_and_geocode_status.sql` (PENDING — run
-> in Supabase SQL Editor): adds `import_runs` table (manager-only
-> via `is_manager()`, on `supabase_realtime`), `geocode_status` +
-> `geocode_attempted_at` columns on `customers` and `customer_sites`
-> with backfill + partial pending-only indexes, and seeds two
-> `app_settings` keys for the import-hub defaults. New
-> `/settings/import` settings section (duplicate behaviour picker +
-> welcome-email toggle). Resend wiring: `npm install resend
-> @react-email/components`, `lib/email.ts` (loud no-op when
-> `RESEND_API_KEY` missing), `emails/WelcomeEmail.tsx` (branded
-> credentials template), `POST /api/email/test` (manager-gated
-> transport smoke test). No user-visible feature yet — Phase B
-> (Email-this-user button on edit pages) is the first shippable
-> deliverable on top of this. See `docs/SESSIONS.md` for the full
-> Phase A entry and `docs/ROADMAP.md` item 0 for next steps.
+> Latest: **May 25, 2026 — Import Hub + Email Welcome, Phases A + B.**
+> Phase A — foundation (`import_runs` table, `geocode_status` on
+> customers + sites, Resend wiring, `/settings/import` page). Phase B —
+> "Email this user" button on `/settings/managers/[id]/edit` and
+> `/reps/[id]` actions slot, opens a shared `EmailUserModal` with two
+> send options: "Send invite link" (Supabase `auth.admin.generateLink`
+> recovery flow, doesn't change the password) or "Regenerate password
+> and email" (server-generated fresh password via
+> `auth.admin.updateUserById` + WelcomeEmail with the new credentials).
+> Two new migrations (PENDING): `2026_05_25_import_runs_and_geocode_status.sql`
+> and `2026_05_25_profiles_last_credentials_sent_at.sql`. New
+> `emails/InviteEmail.tsx` template + `POST /api/users/[id]/send-credentials`
+> dynamic route. See `docs/SESSIONS.md` for the full Phase A + B entries
+> and `docs/ROADMAP.md` item 0 for next steps (Phase C — `/import` hub UI shell).
 
 ---
 

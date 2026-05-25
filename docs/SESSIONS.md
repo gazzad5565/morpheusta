@@ -14,7 +14,7 @@
 
 ## Quick TOC
 
-- [May 25, 2026 — Import hub Phase A (DB foundation + settings page + Resend wiring)](#todays-session--what-shipped-may-25-2026)
+- [May 25, 2026 — Import hub Phase A (foundation) + Phase B (Email-this-user button on edit pages)](#todays-session--what-shipped-may-25-2026)
 - [May 21, 2026 — photo viewer + customer detail refactor + past shifts archive](#todays-session--what-shipped-may-21-2026)
 - [May 15, 2026 — overnight sidebar polish](#todays-session--what-shipped-may-15-2026--overnight)
 - [May 14, 2026 — Phase 4 RLS + photo capture root cause + polish day](#todays-session--what-shipped-may-14-2026)
@@ -76,6 +76,63 @@ work this phase.
 
 - Phase A is intentionally NOT a user-visible feature on its own — it's the foundation Phases B (email-this-user button), C (hub UI shell), D (entity adapters), and E (background geocoder cron) hang off. The first user-visible deliverable is Phase B's "Email this user" button on the manager + rep edit pages, which can be shipped independently of the import hub.
 - The customer-facing branding choice ("Morpheus Ops" wordmark + cyan brand button) is intentionally minimal-style for the welcome email so future template changes don't have to redesign every screen.
+
+### Phase B (same day) — Email-this-user button on edit pages
+
+First user-visible feature on top of Phase A. Gives Gary a one-click way
+to re-send a user their login from the existing manager + rep detail
+surfaces, without having to manually generate a password and copy it out.
+
+**Cross-platform considered:** admin-only feature, no mobile changes.
+The recovery-link path (`regenerate=false`) sends the user a link that
+lands them in the right app — admin for managers (`NEXT_PUBLIC_ADMIN_URL`),
+mobile PWA for reps (`NEXT_PUBLIC_MOBILE_URL`). The link itself is a
+Supabase auth verify URL; the user's session is established server-side
+when they tap it, regardless of which browser they're in (iOS Safari
+PWA, Android Chrome, desktop all work the same way — same auth flow as
+existing login).
+
+#### What shipped
+
+- **Migration `2026_05_25_profiles_last_credentials_sent_at.sql`** (PENDING — Gary to run). Single nullable `timestamptz` column on `profiles`. No RLS change.
+
+- **POST `/api/users/[id]/send-credentials`** — new dynamic route. Uses Next.js 16's `ctx: { params: Promise<{ id: string }> }` shape. Manager-gated via the same `requireManager` pattern as `/api/users/route.ts`. Body `{regenerate: boolean}`.
+  - `regenerate=true` path: generates a fresh 12-char password server-side (same charset as `randomPassword()` in `lib/users-admin.ts`, duplicated server-side so the route doesn't import client-only code), calls `sb.auth.admin.updateUserById(id, {password})`, then sends `WelcomeEmail` with the fresh password as the credentials. If the email fails AFTER the password change, returns a partial-success response (`{ok: false, passwordReset: true, newPassword}`) so the manager can copy the password manually.
+  - `regenerate=false` path: calls `sb.auth.admin.generateLink({type: 'recovery', email, options: {redirectTo: appUrl}})`, sends `InviteEmail` with the action link as the CTA. Clicking the link signs the user in (no password entry required); they can then set a permanent password from Profile → Change password.
+  - Both paths bump `profiles.last_credentials_sent_at = now()` on successful email delivery.
+  - Returns include `messageId` (Resend id) for diagnostics + `note`-style copy where useful.
+
+- **`emails/InviteEmail.tsx`** — second React Email template. Mirrors WelcomeEmail's brand chrome but doesn't show a password — just an "Account: <email>" line + a primary "Sign in to Morpheus Ops" CTA pointing at the Supabase recovery link. Copy explicitly says "single-use; ask your manager to resend if expired" so a user who lets the link expire knows what to do.
+
+- **`components/users/EmailUserModal.tsx`** — shared portal-based modal. Used by both the manager edit page (`/settings/managers/[id]/edit`) and the rep detail page (`/reps/[id]`). Two action rows:
+  - **Send invite link** (primary, non-destructive — keeps current password). Default-first because it's safer; covers the "user lost the password we generated three weeks ago" case.
+  - **Regenerate password and email** (warn-tinted destructive — invalidates the user's prior password). Covers the "user is fully locked out and we need to nuke their password" case.
+  - "Last sent: X ago" line via `formatRelative` from `lib/format.ts`.
+  - Result panel renders three states: full success, partial (password reset but email failed — surfaces a copy-fallback for the new password), hard failure (with an actionable hint if `RESEND_API_KEY` is missing).
+  - Escape + backdrop click both close; body scroll locked while open; `createPortal` to `document.body` so the modal escapes any stacking context.
+
+- **`/settings/managers/[id]/edit`** — adds a small new "Email this user" card in the right column above the existing "Account" card. One button + a "Last sent" / "No credentials email sent yet" line. Right column wrapped in `flex column` to stack the two cards cleanly. Modal renders at page root via the new shared component.
+
+- **`/reps/[id]`** — adds an "Email" button (`mail` glyph, neutral kind) to the actions slot beside the existing "Edit" primary button. Same modal as the manager edit page.
+
+- **`lib/profiles-store.ts`** — adds `last_credentials_sent_at?: string | null` to `Profile` and includes it in every `SELECT` (uses `replace_all` so listProfiles + getProfileById both pick it up). Modal reads from the parent's profile state.
+
+- **`lib/users-admin.ts`** — adds `sendCredentials(id, regenerate): Promise<SendCredentialsResponse>`. Returns the full server JSON so the modal can render the partial-success state with the new password.
+
+- **Docs**: OPS.md migrations list updated; this entry; ROADMAP.md item 0 updated to mark Phase B ✅; README.md "Latest" bumped.
+
+#### Acceptance for Phase B
+
+- ✅ `next build` in `morpheus-admin/` clean — 39 routes including the new `/api/users/[id]/send-credentials` dynamic route. Zero warnings, zero TS errors.
+- ⏳ Gary to apply the migration in Supabase SQL Editor (Phase A's migration too if not already done).
+- ⏳ Gary to verify `NEXT_PUBLIC_ADMIN_URL` + `NEXT_PUBLIC_MOBILE_URL` are in the Supabase Auth Redirect URLs allowlist (Authentication → URL Configuration). If not, the recovery link will sign the user in but bounce them to the Supabase default redirect. Both URLs are likely already there from existing login flows; verify before the smoke test.
+- ⏳ Smoke test: open `/settings/managers/<gary's-uid>/edit` → click "Send credentials" → modal opens with the rep card → click "Send invite link" → check inbox. Click the link → confirm it lands you in the admin (or in the mobile PWA if you used a rep account). `last_credentials_sent_at` updates and the modal's "Last sent: 5s ago" line picks it up after re-open.
+
+#### Notes — Phase B
+
+- Phase B is **independently shippable** as the brief calls out. The two manager-facing surfaces (edit page + rep detail page) are now self-service for "I need to give this user their login" without ever opening Resend's dashboard or running a manual password reset.
+- The `regenerate=true` path is destructive (invalidates the prior password) but the modal copy makes this explicit. Partial-success state is handled — if the email fails after the password is already changed, the manager sees the new password in the result panel and can copy it.
+- Recovery links expire in 1 hour by Supabase default. Anyone who clicks too late gets Supabase's standard "link expired" page; the modal copy hints at this ("This link is good for a single sign-in").
 
 ---
 

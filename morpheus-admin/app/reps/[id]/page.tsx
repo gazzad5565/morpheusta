@@ -20,6 +20,7 @@ import {
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import { initialsFromNameOrEmail, formatTimeRange } from "@/lib/format";
 import type { Customer } from "@/lib/types";
+import { EmailUserModal } from "@/components/users/EmailUserModal";
 
 const deriveInitials = (name: string, email: string) =>
   initialsFromNameOrEmail(name, email);
@@ -44,6 +45,7 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
   const [assignError, setAssignError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,14 +128,23 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
     <AdminShell
       breadcrumbs={["Home", "Reps", name]}
       actions={
-        <Btn
-          icon="edit"
-          kind="primary"
-          size="sm"
-          onClick={() => router.push(`/settings/managers/${id}/edit`)}
-        >
-          Edit
-        </Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn
+            icon="mail"
+            size="sm"
+            onClick={() => setEmailModalOpen(true)}
+          >
+            Email
+          </Btn>
+          <Btn
+            icon="edit"
+            kind="primary"
+            size="sm"
+            onClick={() => router.push(`/settings/managers/${id}/edit`)}
+          >
+            Edit
+          </Btn>
+        </div>
       }
     >
       <div
@@ -459,6 +470,21 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
           </div>
         </div>
       </div>
+
+      {emailModalOpen && (
+        <EmailUserModal
+          userId={profile.id}
+          userName={name}
+          userEmail={profile.email}
+          lastSentAt={profile.last_credentials_sent_at ?? null}
+          onClose={() => setEmailModalOpen(false)}
+          onSent={() => {
+            setProfile((p) =>
+              p ? { ...p, last_credentials_sent_at: new Date().toISOString() } : p
+            );
+          }}
+        />
+      )}
     </AdminShell>
   );
 }
