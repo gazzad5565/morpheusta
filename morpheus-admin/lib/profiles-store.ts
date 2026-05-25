@@ -16,6 +16,12 @@ export interface Profile {
    *  live-ops map. Null = generic face glyph fallback. */
   avatar_url: string | null;
   created_at?: string;
+  /** When the "Email this user" button was last used to send the
+   *  user their credentials. Null = never. Bumped by the
+   *  /api/users/[id]/send-credentials route on successful send.
+   *  Surfaced as "Last sent: X ago" in the modal so the manager
+   *  doesn't re-spam. */
+  last_credentials_sent_at?: string | null;
 }
 
 /** All profiles, optionally filtered by role. */
@@ -23,7 +29,7 @@ export async function listProfiles(opts?: { role?: string }): Promise<Profile[]>
   if (!isSupabaseConfigured() || !supabase) return [];
   let q = supabase
     .from("profiles")
-    .select("id, email, name, role, avatar_url, created_at")
+    .select("id, email, name, role, avatar_url, created_at, last_credentials_sent_at")
     .order("name", { ascending: true, nullsFirst: false });
   if (opts?.role) q = q.eq("role", opts.role);
   const { data, error } = await q;
@@ -51,7 +57,7 @@ export async function getProfileById(id: string): Promise<Profile | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, name, role, avatar_url, created_at")
+    .select("id, email, name, role, avatar_url, created_at, last_credentials_sent_at")
     .eq("id", id)
     .maybeSingle();
   if (error) {

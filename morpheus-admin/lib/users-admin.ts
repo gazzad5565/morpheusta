@@ -90,6 +90,72 @@ export async function deleteUser(
   }
 }
 
+/** Email this user their credentials (Phase B — May 25).
+ *
+ *  regenerate=true → server generates a fresh password, updates auth,
+ *    emails the user via WelcomeEmail with the new password as the
+ *    credentials. Response includes newPassword so the modal can echo
+ *    it back as a "copy as fallback if email is slow" affordance.
+ *  regenerate=false → server mints a one-time recovery link via
+ *    Supabase admin API and emails it via InviteEmail. The user's
+ *    existing password (if any) is untouched.
+ *
+ *  On success, profiles.last_credentials_sent_at is bumped by the
+ *  server so the caller can refresh the profile row to update the
+ *  "Last sent: X ago" line.
+ */
+export interface SendCredentialsResponse {
+  ok: boolean;
+  error?: string;
+  /** True when the server changed the password (regenerate=true path). */
+  regenerated?: boolean;
+  /** True when the email was skipped because RESEND_API_KEY isn't set. */
+  skipped?: boolean;
+  sentTo?: string;
+  messageId?: string | null;
+  /** Echoed back ONLY for the regenerate=true path so the modal can
+   *  show it as a copy-fallback. Null/undefined for the invite path. */
+  newPassword?: string;
+  /** True when regenerate=true changed the password BUT the email
+   *  delivery then failed — partial success, manager needs to share
+   *  newPassword by another channel. */
+  passwordReset?: boolean;
+  message?: string;
+}
+
+export async function sendCredentials(
+  id: string,
+  regenerate: boolean
+): Promise<SendCredentialsResponse> {
+  try {
+    const r = await fetch(
+      `/api/users/${encodeURIComponent(id)}/send-credentials`,
+      {
+        method: "POST",
+        headers: await authHeaders(),
+        body: JSON.stringify({ regenerate }),
+      }
+    );
+    const json = (await r.json()) as SendCredentialsResponse;
+    if (!r.ok && !json.passwordReset) {
+      return {
+        ok: false,
+        error: json.error || `HTTP ${r.status}`,
+        skipped: json.skipped,
+      };
+    }
+    // passwordReset=true is a partial-success: HTTP error code, but
+    // the password DID change. Surface to the modal so it can show
+    // both the new password (so it isn't lost) AND the email error.
+    return json;
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /** Generate a random password the admin can share with a new user.
  *  12 chars, mixed alphanumeric + a couple of symbols. */
 export function randomPassword(length = 12): string {
