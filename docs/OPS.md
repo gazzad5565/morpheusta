@@ -128,8 +128,9 @@ Development.
 |---|---|---|
 | `RESEND_API_KEY` | `lib/email.ts` (any code path that sends email — `/api/email/test`, the Phase B "Email this user" button, Phase D rep/manager imports with the welcome-email flag on) | Loud `console.warn("[email] RESEND_API_KEY not set, skipping send")`. Routes return `503` with a "configure email" message. Imports still create the user; the credentials still appear in the success CSV — only the email send is skipped. |
 | `RESEND_FROM` | `lib/email.ts` — overrides the from-address | Defaults to `Morpheus Ops <onboarding@resend.dev>`. Resend's `onboarding@` sender only delivers to your verified Resend account email until a sending domain is verified in Resend. Set this once you've added a real sending domain. |
-| `NEXT_PUBLIC_ADMIN_URL` | `/api/email/test` — CTA button in the welcome email | Falls back to `https://morpheus-admin.vercel.app`. |
-| `NEXT_PUBLIC_MOBILE_URL` | `/api/push/notify` CORS check | Falls back to the hardcoded prod URL (`*-khaki-omega.vercel.app`). |
+| `NEXT_PUBLIC_ADMIN_URL` | `/api/email/test` + `/api/users/[id]/send-credentials` + `/api/import/users` — CTA button in the welcome email | Falls back to `https://morpheus-admin.vercel.app`. |
+| `NEXT_PUBLIC_MOBILE_URL` | `/api/push/notify` CORS check + same routes above for rep welcome-email CTA | Falls back to the hardcoded prod URL (`*-khaki-omega.vercel.app`). |
+| `CRON_SECRET` | All `/api/cron/*` routes including the new Phase E `/api/cron/geocode-queue` — bearer-token auth | Routes return `401` unauthorised. Geocoder doesn't drain the queue; manual `/api/geocode` route is unaffected. |
 | `GOOGLE_ROUTES_API_KEY` | `/route` page on mobile (real ETAs) | Falls back to mock-data ETAs. |
 
 ### Rollback

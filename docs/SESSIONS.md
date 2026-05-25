@@ -14,7 +14,7 @@
 
 ## Quick TOC
 
-- [May 25, 2026 — Import hub Phase A (foundation) + Phase B (Email-this-user button) + Phase C (Import hub UI shell + consolidation) + reorg: Import lives under Settings only](#todays-session--what-shipped-may-25-2026)
+- [May 25, 2026 — Import hub Phases A → E shipped end-to-end (foundation + email-this-user + hub UI + relocate-under-Settings + real entity adapters + background geocoder cron)](#todays-session--what-shipped-may-25-2026)
 - [May 21, 2026 — photo viewer + customer detail refactor + past shifts archive](#todays-session--what-shipped-may-21-2026)
 - [May 15, 2026 — overnight sidebar polish](#todays-session--what-shipped-may-15-2026--overnight)
 - [May 14, 2026 — Phase 4 RLS + photo capture root cause + polish day](#todays-session--what-shipped-may-14-2026)
@@ -364,6 +364,187 @@ behind two tabs.
 - The wizard's behaviour didn't change. Phase D's adapter wiring
   drops into the same `lib/import-adapter-registry.ts` regardless
   of where the wizard's URL lives.
+
+### Phase D (same day) — real entity adapters + per-row error handling + audit log
+
+The wizard's Commit button does something useful now. Each adapter
+in `lib/import-adapters/<entity>.ts` exports a real `upsert(row,
+mode) → 'created' | 'updated' | 'skipped' | 'failed'`; the stub
+`upsert: notImplemented()` from Phase C is gone.
+
+**Cross-platform considered:** admin-only feature. Mobile reps see
+no UI change at import time. Imported customers / sites / shifts
+propagate to mobile via the existing Realtime subscriptions on
+those tables (all on `supabase_realtime` since earlier phases).
+
+#### What shipped
+
+- **D1 — customer adapter** (`lib/import-adapters/customer.ts`).
+  Dedup by integer `code`. Slug-style `id` from name (matches the
+  pattern in `createCustomer`). Auto-creates the "Head office" site
+  on every new customer so single-site customers never need the
+  Sites tab. Validates hex colour format. Initials auto-derive from
+  name if blank; colour defaults to brand cyan if blank.
+
+- **D2 — site adapter** (`lib/import-adapters/site.ts`). Dedup by
+  `(customer_code, site_name)`. Customer lookup by `code → id`;
+  throws a clear "customer with code=X not found" error if missing.
+  Skip / update modes as expected. Lat/lng left NULL — Phase E cron
+  resolves.
+
+- **D3/D4 — user adapter** (`lib/import-adapters/user.ts`). One
+  file, two exports (`REP_ADAPTER` + `MANAGER_ADAPTER`) via a
+  `userAdapter(role)` factory. Dedup by lowercased email. Per-row
+  `send_welcome_email` column overrides the run default; default-
+  on if blank. Calls the new POST `/api/import/users` per row.
+
+- **POST `/api/import/users`** (new manager-gated route). Looks up
+  existing user by email via `auth.admin.listUsers` (paged to 1000
+  — sufficient for bulk-onboarding scenarios). On miss: generates
+  12-char password, calls `auth.admin.createUser`, upserts profile,
+  optionally sends `WelcomeEmail` via `lib/email.ts`. Welcome-email
+  failures don't fail the user creation — they return as warnings
+  so the run's `errors_json` gets the context.
+
+- **D5 — shift adapter** (`lib/import-adapters/shift.ts`). Per-row
+  dedup by `(customer_code, rep_email, start_date, start_time)`.
+  Lookup customer by code + rep by email. Recurrence expansion:
+  `once` → 1 shift; `weekly` → expands `[start_date, end_date]` ∩
+  `days_of_week` into N shifts. Each expanded instance dedup-checks
+  against `shifts` on `(customer_id, rep_id, shift_date, start_time)`.
+  Per-instance failures tracked: all-fail → throws row failure;
+  partial → throws a summary so failures land in `errors_json`.
+  Day-of-week parser tolerates pipes / commas / slashes / spaces
+  as separators and full / short / 3-letter day names.
+
+- **Wizard onCommit rewritten** (`app/settings/import/[entity]/page.tsx`).
+  Creates an `import_runs` row at start (status=running, total_rows,
+  settings_json carrying duplicateMode + sendWelcomeEmail for user
+  imports). Iterates with per-row try/catch — no more bail-on-first.
+  Tracks failures in an `ImportRunFailure[]` array (row_index,
+  original_row, error_code, error_message). Finalises via
+  `finishImportRun(id, {counts, failures, finalStatus})`. Writes
+  ONE `shift_events` row of type `'import.run'` so the Live Feed
+  surfaces it as "Gary imported 234 customers (12 updated, 3 failed)".
+
+- **`lib/import-runs-store.ts`** gains `createImportRun` +
+  `finishImportRun` + the `ImportRunFailure` interface for the
+  wizard.
+
+- **`lib/events-store.ts`** EventType + EVENT_LABEL get the new
+  `"import.run"` entry. `Record<EventType, string>` forced the
+  label addition — "ran a bulk import" is the feed copy.
+
+- **Sample CSV templates** updated: `customers.csv`, `sites.csv`,
+  `shifts.csv` now use integer customer codes (DB column is `int`
+  per the multi-site schema). `reps.csv` + `managers.csv` unchanged.
+
+### Phase E (same day) — background geocoder cron + retry-on-edit + badge
+
+Closes the import loop: customers + sites imported without coords
+land in the map within ~1 minute via a Vercel cron draining the
+`geocode_status='pending'` queue from the Phase A migration.
+
+**Cross-platform considered:** admin-only feature. The map (mobile
++ admin) reads lat/lng from `customers`/`customer_sites` directly;
+once the cron resolves a row, both surfaces pick it up via the
+existing Realtime subscriptions on those tables. No mobile work.
+
+#### What shipped
+
+- **`lib/geocode-server.ts`** (new). Shared `geocodeAddress(query) →
+  GeocodeHit | null` extracted from `/api/geocode/route.ts`. Same
+  Nominatim User-Agent + Accept-Language headers. Both the manual
+  search route and the cron worker now hit the same Nominatim
+  contract.
+
+- **`app/api/geocode/route.ts`** slimmed to a thin wrapper around
+  the shared helper. Same response shape; no behaviour change for
+  the existing manual-edit flow.
+
+- **`/api/cron/geocode-queue` route** (new). Drains up to 50 rows
+  per tick (25 customers + 25 sites — split keeps neither table
+  starving the other on a backlog). Pulls rows ordered by
+  `geocode_attempted_at NULLS FIRST` so fresh rows beat retry
+  rows. Sleeps 1.1s between Nominatim calls (1 req/sec ToS + a
+  100ms safety buffer). Outcomes:
+    - hit       → lat/lng + status='done' + attempted_at=now
+    - no hit    → status='failed' + attempted_at=now
+    - exception → attempted_at=now (status stays 'pending' for
+                  retry; updated attempted_at pushes the row
+                  behind newer pending rows in the queue order)
+  Auth: `CRON_SECRET` bearer pattern matching `/api/cron/messages`.
+  Runtime: nodejs; `dynamic: force-dynamic` so caching never
+  serves a stale 200.
+
+- **`morpheus-admin/vercel.json`** — new cron entry
+  `{"path": "/api/cron/geocode-queue", "schedule": "* * * * *"}`.
+
+- **Type extensions** — `Customer` (lib/types.ts) gains
+  `geocodeStatus?` and `CustomerSite` (lib/sites-store.ts) gains
+  `geocode_status?`. The `customers` DbRow mapper +
+  `rowToCustomer` pull the new column.
+
+- **Retry-on-edit** — `updateCustomer` (lib/customers-store.ts) and
+  `updateSite` (lib/sites-store.ts) both flip
+  `geocode_status='pending'` + `geocode_attempted_at=null` when
+  `patch.address` changes WITHOUT also supplying `lat/lng`. The
+  "with lat/lng" path is the manual map-pin flow where the user
+  already supplied coords — left alone there. Without this, a
+  row that landed as 'failed' would stay failed forever even
+  after the manager fixed the address.
+
+- **`components/ui/GeocodeBadge.tsx`** (new). Small pill renders
+  nothing for `done` / `skipped` (boring states). Shows brand-
+  tinted "📍 Geocoding…" for `pending` and warn-tinted
+  "📍 Couldn't find — edit to retry" for `failed`. Tooltip explains
+  the retry mechanism.
+
+- **`components/customers/SiteRow.tsx`** drops the badge next to
+  each site's address line in the SitesTab. Address container
+  becomes a flex row so the badge sits inline without breaking
+  the address truncation.
+
+#### Acceptance — Phases D + E
+
+- ✅ `next build` clean — 39 routes including
+  `/api/cron/geocode-queue`, `/api/import/users`, `/settings/import`,
+  `/settings/import/[entity]`. Zero warnings, zero TS errors.
+- ⏳ Real test (operator): apply Phase A's + B's migrations, set
+  `RESEND_API_KEY` + `CRON_SECRET` env vars on the morpheus-admin
+  Vercel project, then:
+    - Drop `customers.csv` (the 3-row template) in the wizard.
+      Commit → 3 customers should land in `/customers` list,
+      `shift_events` should show an `import.run` row.
+    - Wait ~60s. Customers without coords should show "📍 Geocoding…"
+      and within another tick should have lat/lng + appear on the
+      Live Ops map.
+    - Drop a `reps.csv` with one row pointing at your verified
+      Resend recipient. Commit with welcome-email=on. Email
+      should land within seconds; password should work in the
+      mobile PWA.
+
+#### Notes — Phases D + E
+
+- Phase D's adapter shape stays exactly the same as the Phase C
+  stubs (same `upsert(row, mode)` signature). Future entity adds
+  drop a new file in `lib/import-adapters/` + a registry entry —
+  no wizard changes needed.
+- Recovery-link CTA URLs in `WelcomeEmail.tsx` already respect the
+  per-role split (admin URL for managers, mobile URL for reps) so
+  bulk-imported reps land in the right app.
+- Resend free tier (100 / day) is the bottleneck for bulk rep
+  imports >100. Once `morpheusops.app` is verified as a sending
+  domain in Resend, the tier ceiling becomes 3000/month (Resend's
+  free domain-verified ceiling); the wizard's settings step still
+  warns about the daily cap so a 200-rep import is expected to
+  spread across two days.
+- The geocoder cron honours Nominatim's 1 req/sec. At 50 rows per
+  tick × 60 ticks per hour = up to 3000 geocodes/hour, which is
+  well within Nominatim's usage cap for hobby/small-org loads.
+  Bigger orgs should move to a paid geocoding provider — wrap
+  `geocodeAddress` in `lib/geocode-server.ts` is the single swap
+  point.
 
 ---
 

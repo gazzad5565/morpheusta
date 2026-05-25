@@ -8,7 +8,7 @@ signatures on tasks, message reps individually or in bulk, and prove
 every customer visit with a timestamped audit trail. Built on Next.js
 16 + Supabase + Vercel.
 
-> Latest: **May 25, 2026 — Import Hub + Email Welcome, Phases A + B + C (+ same-day reorg: Import lives under Settings only — hub at `/settings/import` is tabbed "Run an import" + "Defaults", no top-level `/import` route, no sidebar nav entry, list-page Import buttons repointed).**
+> Latest: **May 25, 2026 — Import Hub + Email Welcome, Phases A → E all landed same day.** Foundation (Phase A) → "Email this user" button (Phase B) → tabbed `/settings/import` hub + 5-step entity wizard with consolidated CTAs (Phase C) → real entity adapters with per-row error handling + `import_runs` + audit log (Phase D) → background geocoder cron + retry-on-edit + status badge (Phase E). End-to-end pipeline: import a CSV → customers/sites/reps/managers/shifts land in their tables → Phase E cron resolves addresses within 60s → everything propagates to mobile via existing Realtime subscriptions. Operator setup still owed: apply the two `2026_05_25_*.sql` migrations + add `RESEND_API_KEY` to Vercel.
 > Phase A — foundation (`import_runs` table, `geocode_status` on
 > customers + sites, Resend wiring, `/settings/import` page). Phase B —
 > "Email this user" button on `/settings/managers/[id]/edit` and
