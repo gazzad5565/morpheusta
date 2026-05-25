@@ -20,12 +20,13 @@ export const ENTITY_LABEL: Record<EntityType, string> = {
 
 export const ENTITY_DESCRIPTION: Record<EntityType, string> = {
   customer:
-    "Bulk-add customers with code, name, and optional address. Sites for each customer are imported separately.",
-  site: "Bulk-add sites (multiple locations per customer). The customer must already exist OR be in a customer import first.",
-  rep: "Bulk-invite reps. Auto-generated passwords; the optional welcome email puts the credentials in their inbox.",
-  manager: "Bulk-invite managers. Same shape as reps but with admin console access.",
+    "Unique key: code (integer). Matching code = duplicate. No dependencies — customers can be imported standalone.",
+  site: "Unique key: customer_code + site_name. Depends on customer (must already exist OR be in a customer import first).",
+  rep: "Unique key: email. Auto-generated password; optional welcome email delivers credentials.",
+  manager:
+    "Unique key: email. Same as reps but with admin console access.",
   shift:
-    "Bulk-schedule shifts. One-off + weekly recurring patterns supported; server expands recurrences into N rows.",
+    "Unique key: customer_code + rep_email + date + start_time. Depends on customer AND rep (both must already exist). Weekly recurrence expands into N shifts.",
 };
 
 /** A row from the parsed file. Keys are the original column headers
@@ -53,6 +54,11 @@ export type UpsertOutcome = "created" | "updated" | "skipped" | "failed";
 /** Behaviour when a row's dedup key matches an existing record. */
 export type DuplicateMode = "skip" | "update";
 
+/** Per-field semantic role. Drives the badges in the Map step so the
+ *  user can see at a glance which columns identify the row, which
+ *  link it to other entities, and which are plain data. */
+export type FieldKind = "id" | "link" | "data";
+
 /** Per-entity adapter interface. Every adapter lives in
  *  lib/import-adapters/<entity>.ts and self-registers via the
  *  adapter registry. */
@@ -64,6 +70,19 @@ export interface ImportAdapter {
   optionalFields: string[];
   /** Human label per field for the column-mapping UI. */
   fieldLabels: Record<string, string>;
+  /** Semantic role per field — id (unique identifier for this
+   *  entity), link (references another entity that must already
+   *  exist), or data (plain attribute). Drives the Map step badges
+   *  + the "How matching works" callout. Fields not listed default
+   *  to "data". */
+  fieldKinds?: Record<string, FieldKind>;
+  /** For fields with kind="link", which entity they link to. The
+   *  Map step uses this to render "LINK → Customer" instead of just
+   *  "LINK", so the user knows what must exist first. */
+  linksTo?: Record<string, EntityType>;
+  /** Plain-English summary of how dedup works for this entity. One
+   *  sentence. Rendered in the Map step's matching-rules callout. */
+  matchRule?: string;
   /** Compute the dedup key for a normalized row. Two rows with the
    *  same key are treated as the "same" record for duplicate detection. */
   dedupKey: (normalized: RawRow) => string;

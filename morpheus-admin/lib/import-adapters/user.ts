@@ -74,6 +74,10 @@ function userAdapter(role: "rep" | "manager"): ImportAdapter {
       send_welcome_email:
         "Send welcome email (true/false — overrides the import-run default)",
     },
+    fieldKinds: {
+      email: "id",
+    },
+    matchRule: `Each row is one ${role}. Two rows with the same email (case-insensitive) = duplicate. Existing users are matched by email.`,
     dedupKey: (row) => {
       const email = (row.email || "").trim().toLowerCase();
       return email ? `email:${email}` : "";

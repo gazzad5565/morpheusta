@@ -29,6 +29,15 @@ export const SITE_ADAPTER: ImportAdapter = {
     city: "City",
     region: "Region",
   },
+  fieldKinds: {
+    customer_code: "link",
+    site_name: "id",
+  },
+  linksTo: {
+    customer_code: "customer",
+  },
+  matchRule:
+    "Each row is one site. customer_code links to an existing customer (import customers first if needed). Two rows with the same customer_code + site_name = duplicate.",
   dedupKey: (row) => {
     const code = (row.customer_code || "").trim();
     const name = (row.site_name || "").trim().toLowerCase();

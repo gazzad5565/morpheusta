@@ -105,6 +105,18 @@ export const SHIFT_ADAPTER: ImportAdapter = {
     end_time: "End time (HH:MM, 24h)",
     recurrence: "Recurrence (once | weekly)",
   },
+  fieldKinds: {
+    customer_code: "link",
+    rep_email: "link",
+    start_date: "id",
+    start_time: "id",
+  },
+  linksTo: {
+    customer_code: "customer",
+    rep_email: "rep",
+  },
+  matchRule:
+    "Each row is one shift (or one weekly pattern that expands into N shifts). customer_code links to an existing customer and rep_email links to an existing rep — import both first if needed. Two rows with the same customer_code + rep_email + start_date + start_time = duplicate.",
   dedupKey: (row) => {
     const code = (row.customer_code || "").trim();
     const email = (row.rep_email || "").trim().toLowerCase();

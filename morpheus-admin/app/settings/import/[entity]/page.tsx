@@ -24,10 +24,12 @@ import { AGlyph } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
 import { getImportSettings, type ImportDuplicateMode } from "@/lib/settings-store";
 import {
+  ENTITY_DESCRIPTION,
   ENTITY_LABEL,
   STEP_LABEL,
   STEP_ORDER,
   type EntityType,
+  type FieldKind,
   type PreviewRow,
   type RawRow,
   type StepId,
@@ -559,6 +561,25 @@ function SourceStep({
     <Card padding={20}>
       <SectionLabel>Pick a CSV or XLSX file</SectionLabel>
 
+      {/* Uniqueness + dependency story up-front, before the user
+          even uploads. Mirrors the entity-card description on the
+          hub so the user knows what to put in each row. */}
+      <div
+        style={{
+          padding: "10px 12px",
+          borderRadius: 10,
+          background: AC.bg,
+          marginBottom: 14,
+          fontFamily: AC.font,
+          fontSize: 12,
+          color: AC.ink2,
+          lineHeight: 1.55,
+        }}
+      >
+        {ENTITY_DESCRIPTION[entity]}
+      </div>
+
+
       {parsed ? (
         <div
           style={{
@@ -767,11 +788,50 @@ function MapStep({
         an optional one as <i>Ignore</i>.
       </div>
 
+      {/* How matching works — explains the dedup key + dependencies
+          in plain English so the user knows WHICH fields make a row
+          unique and which fields link to other entities. */}
+      {adapter.matchRule && (
+        <div
+          style={{
+            padding: "10px 12px",
+            borderRadius: 10,
+            background: AC.brandSoft,
+            border: `1px solid ${AC.line}`,
+            marginBottom: 14,
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-start",
+          }}
+        >
+          <div
+            style={{
+              fontFamily: AC.font,
+              fontSize: 12,
+              color: AC.brandInk,
+              lineHeight: 1.55,
+              flex: 1,
+            }}
+          >
+            <b style={{ fontWeight: 800 }}>How matching works:</b>{" "}
+            {adapter.matchRule}
+          </div>
+        </div>
+      )}
+
+      {/* Legend strip — explains the badges that appear next to each
+          field row below. ID = identifies the row uniquely. LINK =
+          references another entity that must already exist. Plain
+          data fields get no badge. */}
+      <FieldKindLegend adapter={adapter} />
+
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {allFields.map((field) => {
           const required = adapter.requiredFields.includes(field);
           const current = mapping[field] || "";
           const label = adapter.fieldLabels[field] || field;
+          const kind = adapter.fieldKinds?.[field] || "data";
+          const linksTo = adapter.linksTo?.[field];
           return (
             <div
               key={field}
@@ -793,12 +853,19 @@ function MapStep({
                     fontSize: 13,
                     fontWeight: 600,
                     color: AC.ink,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    flexWrap: "wrap",
                   }}
                 >
-                  {label}
-                  {required && (
-                    <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>
-                  )}
+                  <FieldKindBadge kind={kind} linksTo={linksTo} />
+                  <span>
+                    {label}
+                    {required && (
+                      <span style={{ color: AC.danger, marginLeft: 4 }}>*</span>
+                    )}
+                  </span>
                 </div>
                 <div
                   style={{
@@ -1291,6 +1358,105 @@ function ResultStep({
 }
 
 // ─── Shared bits ────────────────────────────────────────────────────
+
+/** Pill rendered next to a field name in the Map step. ID = the
+ *  field that identifies the row uniquely (dedup key). LINK = the
+ *  field references another entity that must already exist (e.g.
+ *  shifts.customer_code links to customers.code). Data fields get
+ *  no badge (most fields are data — pills only on the special ones). */
+function FieldKindBadge({
+  kind,
+  linksTo,
+}: {
+  kind: FieldKind;
+  linksTo?: EntityType;
+}) {
+  if (kind === "data") return null;
+  if (kind === "id") {
+    return (
+      <span
+        title="Identifier — this field (or the combination of all ID fields) is what makes a row unique. Two rows with the same ID = duplicate."
+        style={{
+          padding: "1px 7px",
+          borderRadius: 99,
+          background: "#EFE4FE",
+          color: "#5B21B6",
+          fontFamily: AC.font,
+          fontSize: 9.5,
+          fontWeight: 800,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+        }}
+      >
+        ID
+      </span>
+    );
+  }
+  // kind === "link"
+  return (
+    <span
+      title={`Link — this row references an existing ${linksTo ?? "record"}. Import ${linksTo ?? "the linked entity"} first if it doesn't exist yet.`}
+      style={{
+        padding: "1px 7px",
+        borderRadius: 99,
+        background: AC.brandSoft,
+        color: AC.brandInk,
+        fontFamily: AC.font,
+        fontSize: 9.5,
+        fontWeight: 800,
+        letterSpacing: 0.4,
+        textTransform: "uppercase",
+        whiteSpace: "nowrap",
+      }}
+    >
+      LINK → {linksTo ? ENTITY_LABEL[linksTo].replace(/s$/, "") : "?"}
+    </span>
+  );
+}
+
+/** Small inline legend at the top of the Map step's field list,
+ *  explaining what the ID + LINK badges mean. Renders only if the
+ *  adapter actually uses any non-data fieldKinds. */
+function FieldKindLegend({
+  adapter,
+}: {
+  adapter: ReturnType<typeof getAdapter>;
+}) {
+  const kinds = Object.values(adapter.fieldKinds || {});
+  const hasId = kinds.includes("id");
+  const hasLink = kinds.includes("link");
+  if (!hasId && !hasLink) return null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        flexWrap: "wrap",
+        padding: "6px 12px",
+        marginBottom: 10,
+        fontFamily: AC.font,
+        fontSize: 11,
+        color: AC.mute,
+      }}
+    >
+      <span style={{ fontWeight: 600 }}>Legend:</span>
+      {hasId && (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <FieldKindBadge kind="id" />
+          <span>identifies the row uniquely</span>
+        </span>
+      )}
+      {hasLink && (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <FieldKindBadge kind="link" linksTo="customer" />
+          <span>references an existing record (must exist first)</span>
+        </span>
+      )}
+    </div>
+  );
+}
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (

@@ -54,6 +54,11 @@ export const CUSTOMER_ADAPTER: ImportAdapter = {
     city: "City",
     address: "Address (text — geocoded asynchronously)",
   },
+  fieldKinds: {
+    code: "id",
+  },
+  matchRule:
+    "Each row is one customer. Two rows with the same code = duplicate. Existing customers are matched by code.",
   dedupKey: (row) => {
     const code = (row.code || "").trim();
     return code ? `code:${code}` : "";

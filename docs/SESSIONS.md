@@ -14,7 +14,7 @@
 
 ## Quick TOC
 
-- [May 25, 2026 — Import hub Phases A → E shipped end-to-end (foundation + email-this-user + hub UI + relocate-under-Settings + real entity adapters + background geocoder cron)](#todays-session--what-shipped-may-25-2026)
+- [May 25, 2026 — Import hub Phases A → E shipped end-to-end + uniqueness/link clarity pass](#todays-session--what-shipped-may-25-2026)
 - [May 21, 2026 — photo viewer + customer detail refactor + past shifts archive](#todays-session--what-shipped-may-21-2026)
 - [May 15, 2026 — overnight sidebar polish](#todays-session--what-shipped-may-15-2026--overnight)
 - [May 14, 2026 — Phase 4 RLS + photo capture root cause + polish day](#todays-session--what-shipped-may-14-2026)
@@ -523,6 +523,65 @@ existing Realtime subscriptions on those tables. No mobile work.
       Resend recipient. Commit with welcome-email=on. Email
       should land within seconds; password should work in the
       mobile PWA.
+
+#### Late-evening tweak — uniqueness/link clarity pass
+
+Gary's feedback after Phases D + E shipped: *"make sure it's clear
+wherever you are which is the linking code… what needs to be unique
+when you're putting in your customer or updating."* The wizard
+buried the uniqueness + dependency story in the field labels;
+this pass surfaces it visually + in plain English.
+
+- **`ImportAdapter` extended** with three optional fields:
+  - `fieldKinds?: Record<string, "id" | "link" | "data">` — per-
+    field semantic role.
+  - `linksTo?: Record<string, EntityType>` — for link fields, the
+    entity they reference.
+  - `matchRule?: string` — one-sentence plain-English description
+    of how dedup works for this entity.
+
+- **Every adapter declares the metadata**:
+  - customer: `code` = `id`; matchRule = "Each row is one customer.
+    Two rows with the same code = duplicate."
+  - site: `customer_code` = `link → customer`; `site_name` = `id`;
+    matchRule = "Each row is one site. customer_code links to an
+    existing customer (import customers first if needed). Two rows
+    with the same customer_code + site_name = duplicate."
+  - rep / manager: `email` = `id`; matchRule = "Each row is one
+    rep/manager. Two rows with the same email (case-insensitive)
+    = duplicate."
+  - shift: `customer_code` = `link → customer`; `rep_email` =
+    `link → rep`; `start_date` + `start_time` = `id`; matchRule
+    spells out the four-part composite key and the
+    customer-must-exist + rep-must-exist requirement.
+
+- **Wizard Map step gains** a brand-tinted "How matching works"
+  callout at the top displaying `adapter.matchRule`, a small
+  legend strip explaining the ID / LINK badges, and per-field
+  badges:
+  - **Purple "ID"** pill next to identifier fields.
+  - **Cyan "LINK → Customer"** (or "LINK → Rep") pill next to
+    fields that reference another entity. Tooltip explains that
+    the linked entity must already exist.
+
+- **Wizard Source step gains** an `ENTITY_DESCRIPTION` callout at
+  the top — same one shown on the hub entity cards — so the user
+  sees "Unique key: code (integer). Matching code = duplicate. No
+  dependencies" BEFORE they upload, not after.
+
+- **`ENTITY_DESCRIPTION` rewritten** for all 5 entities to lead
+  with the unique-key story + dependencies (e.g. "Unique key:
+  customer_code + rep_email + date + start_time. Depends on
+  customer AND rep (both must already exist)").
+
+The render order on the Map step is now: SectionLabel → "How
+matching works" callout → legend strip → field rows (with badges).
+A user looking at the shifts import sees at a glance: customer_code
+LINK → Customer, rep_email LINK → Rep, start_date + start_time
+both ID, everything else data.
+
+No DB changes, no migrations, no behaviour changes — pure clarity
+pass. `next build` clean.
 
 #### Notes — Phases D + E
 
