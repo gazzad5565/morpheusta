@@ -46,3 +46,11 @@ Supabase project.
 
 Read `docs/SESSIONS.md`'s top entry — it's the most current
 description of what's in the codebase right now.
+
+## Behavioural baseline
+
+The four-section behavioural baseline (Think Before Coding, Simplicity
+First, Surgical Changes, Goal-Driven Execution) is imported below and
+loaded with every session.
+
+@docs/CLAUDE_BEHAVIOR.md
