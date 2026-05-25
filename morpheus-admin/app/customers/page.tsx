@@ -222,6 +222,11 @@ export default function CustomersPage() {
       breadcrumbs={["Home", "Customers"]}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
+          <Link href="/import/customer" style={{ textDecoration: "none" }}>
+            <Btn icon="upload" size="sm">
+              Import
+            </Btn>
+          </Link>
           <Link href="/customers/new" style={{ textDecoration: "none" }}>
             <Btn icon="plus" kind="primary" size="sm">
               Add customer

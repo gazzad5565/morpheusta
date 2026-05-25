@@ -132,11 +132,18 @@ export default function RepsPage() {
     <AdminShell
       breadcrumbs={["Home", "Reps"]}
       actions={
-        <Link href="/schedule/manage" style={{ textDecoration: "none" }}>
-          <Btn icon="settings" size="sm">
-            Manage shifts
-          </Btn>
-        </Link>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link href="/import/rep" style={{ textDecoration: "none" }}>
+            <Btn icon="upload" size="sm">
+              Import
+            </Btn>
+          </Link>
+          <Link href="/schedule/manage" style={{ textDecoration: "none" }}>
+            <Btn icon="settings" size="sm">
+              Manage shifts
+            </Btn>
+          </Link>
+        </div>
       }
     >
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>

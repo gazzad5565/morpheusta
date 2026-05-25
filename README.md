@@ -8,20 +8,26 @@ signatures on tasks, message reps individually or in bulk, and prove
 every customer visit with a timestamped audit trail. Built on Next.js
 16 + Supabase + Vercel.
 
-> Latest: **May 25, 2026 — Import Hub + Email Welcome, Phases A + B.**
+> Latest: **May 25, 2026 — Import Hub + Email Welcome, Phases A + B + C.**
 > Phase A — foundation (`import_runs` table, `geocode_status` on
 > customers + sites, Resend wiring, `/settings/import` page). Phase B —
 > "Email this user" button on `/settings/managers/[id]/edit` and
-> `/reps/[id]` actions slot, opens a shared `EmailUserModal` with two
-> send options: "Send invite link" (Supabase `auth.admin.generateLink`
-> recovery flow, doesn't change the password) or "Regenerate password
-> and email" (server-generated fresh password via
-> `auth.admin.updateUserById` + WelcomeEmail with the new credentials).
-> Two new migrations (PENDING): `2026_05_25_import_runs_and_geocode_status.sql`
-> and `2026_05_25_profiles_last_credentials_sent_at.sql`. New
-> `emails/InviteEmail.tsx` template + `POST /api/users/[id]/send-credentials`
-> dynamic route. See `docs/SESSIONS.md` for the full Phase A + B entries
-> and `docs/ROADMAP.md` item 0 for next steps (Phase C — `/import` hub UI shell).
+> `/reps/[id]` opens a shared `EmailUserModal` (invite link via
+> Supabase recovery flow, or fresh password via `auth.admin.updateUserById`).
+> Phase C — new `/import` hub (entity picker for customers / sites /
+> reps / managers / shifts + Recent Imports panel from `import_runs`)
+> and `/import/[entity]` 5-step stepper (Source → Map → Settings →
+> Preview → Result). Drag-drop CSV/XLSX via Papa Parse + SheetJS,
+> synonyms-driven column auto-map, per-row validation. Phase-C stub
+> adapters mean Commit fails clearly with "Phase D will wire this up"
+> — the wizard works end-to-end up to that point. Consolidation
+> (per Gary's directive): new "Import" sidebar nav + Import CTAs on
+> `/customers`, `/reps`, `/settings/managers`, `/schedule`, and the
+> customer-detail `SitesTab` — `/import` is the single entry point
+> for every bulk operation. Two new migrations still PENDING
+> (`2026_05_25_*.sql`). See `docs/SESSIONS.md` for the full Phase
+> A + B + C entries and `docs/ROADMAP.md` item 0 for next steps
+> (Phase D — replace stub adapters with real upsert paths).
 
 ---
 

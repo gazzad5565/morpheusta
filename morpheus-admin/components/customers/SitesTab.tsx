@@ -24,6 +24,7 @@
  */
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { EmptyState, TabLoading } from "@/components/ui/EmptyState";
@@ -72,17 +73,24 @@ export function SitesTab({
         count={count}
         action={
           !adding && count > 0 ? (
-            <Btn
-              size="sm"
-              kind="primary"
-              icon="plus"
-              onClick={() => {
-                setEditingId(null);
-                setAdding(true);
-              }}
-            >
-              Add site
-            </Btn>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Link href="/import/site" style={{ textDecoration: "none" }}>
+                <Btn size="sm" icon="upload">
+                  Import
+                </Btn>
+              </Link>
+              <Btn
+                size="sm"
+                kind="primary"
+                icon="plus"
+                onClick={() => {
+                  setEditingId(null);
+                  setAdding(true);
+                }}
+              >
+                Add site
+              </Btn>
+            </div>
           ) : null
         }
       />

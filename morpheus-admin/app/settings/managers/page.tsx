@@ -104,14 +104,21 @@ export default function ManagersPage() {
     <SettingsShell
       section="managers"
       actions={
-        <Btn
-          size="sm"
-          kind="primary"
-          icon="plus"
-          onClick={() => setAddOpen(true)}
-        >
-          Add user
-        </Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link href="/import" style={{ textDecoration: "none" }}>
+            <Btn icon="upload" size="sm">
+              Import
+            </Btn>
+          </Link>
+          <Btn
+            size="sm"
+            kind="primary"
+            icon="plus"
+            onClick={() => setAddOpen(true)}
+          >
+            Add user
+          </Btn>
+        </div>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>

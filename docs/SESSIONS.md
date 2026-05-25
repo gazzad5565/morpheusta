@@ -14,7 +14,7 @@
 
 ## Quick TOC
 
-- [May 25, 2026 — Import hub Phase A (foundation) + Phase B (Email-this-user button on edit pages)](#todays-session--what-shipped-may-25-2026)
+- [May 25, 2026 — Import hub Phase A (foundation) + Phase B (Email-this-user button) + Phase C (Import hub UI shell + consolidation)](#todays-session--what-shipped-may-25-2026)
 - [May 21, 2026 — photo viewer + customer detail refactor + past shifts archive](#todays-session--what-shipped-may-21-2026)
 - [May 15, 2026 — overnight sidebar polish](#todays-session--what-shipped-may-15-2026--overnight)
 - [May 14, 2026 — Phase 4 RLS + photo capture root cause + polish day](#todays-session--what-shipped-may-14-2026)
@@ -133,6 +133,178 @@ existing login).
 - Phase B is **independently shippable** as the brief calls out. The two manager-facing surfaces (edit page + rep detail page) are now self-service for "I need to give this user their login" without ever opening Resend's dashboard or running a manual password reset.
 - The `regenerate=true` path is destructive (invalidates the prior password) but the modal copy makes this explicit. Partial-success state is handled — if the email fails after the password is already changed, the manager sees the new password in the result panel and can copy it.
 - Recovery links expire in 1 hour by Supabase default. Anyone who clicks too late gets Supabase's standard "link expired" page; the modal copy hints at this ("This link is good for a single sign-in").
+
+### Phase C (same day) — Import hub UI shell + consolidation
+
+The user-visible "place to do bulk imports". Hub at `/import`, 5-step
+wizard at `/import/[entity]`, Import nav entry in the sidebar, plus
+Import CTAs added to every list page so the consolidation rule
+("one hub, all imports") is enforced from every surface a manager
+might think "I want to bulk add these" from.
+
+**Gary's directive (May 25):** every import affordance MUST funnel
+through `/import` — no per-page upload widgets. Phase C honours that
+across customers / sites / reps / managers / shifts.
+
+**Cross-platform considered:** admin-only feature. Mobile reps see
+no UI change. Once Phase D's adapters ship, bulk-inserted customers /
+sites / shifts will surface on a mobile app already open via the
+existing Realtime postgres_changes subscriptions on those tables
+(verified: `customer_sites` and `customers` are both on the
+`supabase_realtime` publication; `shifts` was already there from
+Phase 3).
+
+#### What shipped
+
+- **`lib/import-types.ts`** — shared types: `EntityType`,
+  `ImportAdapter`, `RawRow`, `ColumnMapping`, `PreviewRow`, `StepId`,
+  + entity label / description maps. One source of truth so the hub,
+  the stepper, and the adapter registry all agree on the shape.
+
+- **`lib/import-synonyms.ts`** — header-synonym registry per entity.
+  Drives the column auto-mapper in the Map step. `normalizeHeader()`
+  collapses whitespace, punctuation, and case so "Customer Code" /
+  "customer_code" / "Customer#" all hit the same key. Adding a
+  synonym for a new client's quirky header is a one-line append.
+
+- **`lib/import-parsers.ts`** — Papa Parse + SheetJS-backed file
+  parser. Handles the real-world quirks the brief calls out: UTF-8
+  BOM strip (Excel-saved CSVs prepend one and otherwise corrupt
+  the first column name), junk header row auto-detection (Excel
+  users sometimes put a sheet title in row 0 — we scan for the
+  first row with ≥2 non-empty cells), duplicate / blank header
+  disambiguation (so "code" appearing twice doesn't collapse two
+  columns into one). XLSX path uses `XLSX.read` + `sheet_to_json
+  ({header: 1})` so both formats run through the same
+  `tableToParsed()` pipeline. Pasted text is treated as CSV.
+
+- **`lib/import-adapter-registry.ts`** — `getAdapter(entity)` returns
+  an `ImportAdapter` with real `requiredFields` + `optionalFields` +
+  `fieldLabels` + `dedupKey` + `validate` for all five entities, so
+  the column-mapping + preview UI works end-to-end. Each adapter's
+  `upsert` is a Phase-D stub that throws "Import for X isn't wired
+  up yet (Phase D)." — the wizard surfaces that on the Result step.
+  Adapter shapes ready for Phase D:
+    - **customer** — dedup by `code`. Required: code, name. Validates
+      hex colour format if provided.
+    - **site** — dedup by `customer_code::site_name`. Required:
+      customer_code, site_name. Customer-must-exist check is the
+      Phase D adapter's job.
+    - **rep / manager** — dedup by email (lowercased). Required:
+      email, name. Validates email format.
+    - **shift** — dedup by `customer_code::rep_email::start_date::start_time`.
+      Required: customer_code, rep_email, start_date, start_time,
+      end_time, recurrence. Validates ISO date, HH:MM time, end >
+      start, and (for `recurrence=weekly`) requires end_date +
+      days_of_week. Phase D will expand weekly patterns into N rows.
+  `normalizeRow(raw, mapping)` lives here too — applies the user's
+  Map-step choices to convert a raw {header → value} row into a
+  {fieldKey → value} normalized row the adapter operates on.
+
+- **`lib/import-runs-store.ts`** — `listRecentImports()` +
+  `subscribeImportRuns()`. Powers the Recent Imports panel on the
+  hub. Realtime subscription so Phase D commits update the panel
+  in-place without a refresh.
+
+- **Sample CSV templates** under `public/import-templates/`:
+  `customers.csv`, `sites.csv`, `reps.csv`, `managers.csv`,
+  `shifts.csv`. Each has 2–3 realistic example rows with the exact
+  column headers we expect. The Source step's hint links each
+  entity's stepper to its own template via `/import-templates/<entity>s.csv`
+  with `download` attribute so right-click-save isn't needed.
+
+- **`/import`** (new hub page) — entity picker grid (5 cards) + the
+  Recent Imports panel. Empty state explains "Once Phase D adapters
+  land, every commit will surface here with live counts." Subscribes
+  to `import_runs` realtime so it ticks live as commits happen.
+
+- **`/import/[entity]`** (new stepper page) — five horizontal steps:
+    - **Source** — drag-drop dropzone + click-to-browse fallback +
+      "Or paste rows below" textarea. Sample template download link
+      below. Dropzone changes border + bg on dragover for visual
+      feedback. Parser errors surface inline. Successful parse shows
+      a "✓ Parsed filename — N rows, M columns" panel with a "Pick a
+      different file" reset.
+    - **Map columns** — every adapter field gets a row with a
+      dropdown picker of file headers + "(ignore)". Required-field
+      rows that are still unmapped show with a red border + danger
+      tint. Required-fields-missing banner at the bottom prevents
+      Next.
+    - **Settings** — duplicate-behaviour segmented picker (pre-filled
+      from `/settings/import`'s defaults, overridable per-run). For
+      `rep` / `manager` imports, an extra "Send welcome email"
+      checkbox (also pre-filled from the org default).
+    - **Preview** — four CountPills (Create / Update / Skip / Fail)
+      computed from running the adapter's `validate` on every row +
+      tracking in-file duplicates. Table shows first 10 rows with a
+      per-row state pill, inline error messages for failed rows
+      (red-tinted background), and the normalized field values
+      across columns. Commit button disabled when 100% of rows would
+      fail.
+    - **Result** — counts summary + "Download failures CSV" button
+      (CSV builder lives inline; produces `row_index,<fields>,_errors`
+      shape). When `commitError` is set (i.e. Phase C's stub adapter
+      threw), shows the error message cleanly with a "Back to import
+      hub" affordance — so the wizard fails gracefully without
+      pretending Phase D is done.
+  Stepper bar at top shows progress (number → checkmark on done
+  steps, brand pill on active step, joining lines coloured by
+  completion state).
+
+- **Consolidation (Gary's directive — `/import` is the ONE place):**
+  - **Sidebar**: new "Import" entry in `NAV_ITEMS` (`lib/mock-data.ts`)
+    between Reports and Settings. Glyph: `upload`. Findable from
+    every page of the admin.
+  - **`/customers`**: new "Import" button in the actions slot next
+    to "Add customer". Links to `/import/customer`.
+  - **`/reps`**: new "Import" button next to "Manage shifts". Links
+    to `/import/rep`.
+  - **`/settings/managers`** (Users page — handles both reps and
+    managers): new "Import" button next to "Add user". Links to
+    `/import` (hub root, not a specific entity, because the page
+    covers both rep and manager imports).
+  - **`/schedule`**: new "Import" button next to "Manage shifts" and
+    "New shift". Links to `/import/shift`.
+  - **`SitesTab` on `/customers/[id]`**: new "Import" button next to
+    "Add site". Links to `/import/site` — the only entry point for
+    sites since there's no dedicated `/sites` list page.
+
+- **npm**: `npm install papaparse@^5.5.3 xlsx@^0.18.5 @types/papaparse@^5.5.2`
+  in `morpheus-admin/`.
+
+- **Docs**:
+  - This entry (Phase C subsection under May 25).
+  - `docs/ROADMAP.md` — item 0 updated to mark Phase A + B + C
+    landed, leaving D and E as the remaining workstream.
+  - `README.md` — "Latest" pointer bumped to Phases A + B + C.
+
+#### Acceptance for Phase C
+
+- ✅ `next build` in `morpheus-admin/` clean — 39 routes (no static-page
+  delta because `/import` is static, `/import/[entity]` is dynamic; net
+  +2 routes). Zero warnings, zero TS errors.
+- ✅ Pick an entity → drop a CSV → reach Preview screen with mock
+  validation (no real writes — Commit fails clearly via the stub
+  adapter's "Phase D not wired up" message).
+- ✅ Every list page has an "Import" button next to its existing
+  "Add" CTA.
+- ✅ Sidebar has an "Import" nav entry.
+
+#### Notes — Phase C
+
+- No new migration in Phase C — Phase A's `import_runs` table is
+  already there to receive Phase D commits.
+- The stepper is intentionally one big file (~700 LOC) — every step
+  shares state, splitting them out would either drag state up
+  through props or require a context. Kept colocated so reading the
+  flow top-to-bottom matches the user's path through the wizard.
+  Phase D won't need to edit this file; it just replaces the stub
+  adapters.
+- The Sites import doesn't have a dedicated `/sites` list page (sites
+  are managed inside `/customers/[id]`'s Sites tab) so the "Import
+  sites" CTA lives there. Hub picker still shows the Sites card so
+  bulk-importing dozens of sites at once doesn't require visiting a
+  specific customer first.
 
 ---
 
