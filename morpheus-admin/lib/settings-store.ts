@@ -601,3 +601,72 @@ export async function uploadOrgLogo(
   return { ok: true, url: pub.publicUrl };
 }
 
+// ─── Import hub defaults (May 25, 2026) ───────────────────────────
+//
+// Two org-wide knobs that pre-fill the new /import hub's Settings
+// step. Manager can still override per-upload — these are just the
+// defaults the picker lands on. Stored as discrete app_settings
+// rows (matches every other setting in this file) under the
+// `import.*` namespace.
+//
+// Seeded by db/migrations/2026_05_25_import_runs_and_geocode_status.sql
+// so a brand-new install reads sane values even before a manager
+// has visited /settings/import for the first time.
+
+export type ImportDuplicateMode = "skip" | "update";
+export const DEFAULT_IMPORT_DUPLICATE_MODE: ImportDuplicateMode = "skip";
+
+function isValidImportDuplicateMode(v: unknown): v is ImportDuplicateMode {
+  return v === "skip" || v === "update";
+}
+
+export async function getImportDefaultDuplicateMode(): Promise<ImportDuplicateMode> {
+  const v = await readSetting<string>(
+    "import.default_duplicate_mode",
+    DEFAULT_IMPORT_DUPLICATE_MODE
+  );
+  return isValidImportDuplicateMode(v) ? v : DEFAULT_IMPORT_DUPLICATE_MODE;
+}
+
+export async function setImportDefaultDuplicateMode(
+  mode: ImportDuplicateMode
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isValidImportDuplicateMode(mode)) {
+    return { ok: false, error: "Invalid duplicate mode" };
+  }
+  return writeSetting("import.default_duplicate_mode", mode, "import settings");
+}
+
+export async function getImportSendWelcomeEmailDefault(): Promise<boolean> {
+  const v = await readSetting<boolean>(
+    "import.send_welcome_email_default",
+    true
+  );
+  // Coerce undefined / non-boolean to default-ON so a brand-new
+  // install (or a hand-edited row) still sends the welcome email
+  // by default when a manager imports reps or managers.
+  return v === false ? false : true;
+}
+
+export async function setImportSendWelcomeEmailDefault(
+  on: boolean
+): Promise<{ ok: boolean; error?: string }> {
+  return writeSetting(
+    "import.send_welcome_email_default",
+    !!on,
+    "import settings"
+  );
+}
+
+/** One-shot fetch of both import defaults for the settings page. */
+export async function getImportSettings(): Promise<{
+  duplicateMode: ImportDuplicateMode;
+  sendWelcomeEmail: boolean;
+}> {
+  const [duplicateMode, sendWelcomeEmail] = await Promise.all([
+    getImportDefaultDuplicateMode(),
+    getImportSendWelcomeEmailDefault(),
+  ]);
+  return { duplicateMode, sendWelcomeEmail };
+}
+

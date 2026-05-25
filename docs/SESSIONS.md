@@ -14,6 +14,7 @@
 
 ## Quick TOC
 
+- [May 25, 2026 — Import hub Phase A (DB foundation + settings page + Resend wiring)](#todays-session--what-shipped-may-25-2026)
 - [May 21, 2026 — photo viewer + customer detail refactor + past shifts archive](#todays-session--what-shipped-may-21-2026)
 - [May 15, 2026 — overnight sidebar polish](#todays-session--what-shipped-may-15-2026--overnight)
 - [May 14, 2026 — Phase 4 RLS + photo capture root cause + polish day](#todays-session--what-shipped-may-14-2026)
@@ -23,6 +24,58 @@
 - [May 8, 2026 — multi-site customers schema + admin Sites tab](#todays-session--what-shipped-may-8-2026)
 - [May 7, 2026 — calendar, schedule rewrites, broad UX pass](#todays-session--what-shipped-may-7-2026)
 - [May 6, 2026 — auto-checkout, organisation settings, indexes](#todays-session--what-shipped-may-6-2026)
+
+---
+
+### Today's session — what shipped (May 25, 2026)
+
+Phase A of the new Import Hub + Email Welcome workstream — the
+foundation everything else hangs off. Code only, no UI flows
+behind it yet (those land in Phases C / D). One new migration
++ Resend wiring + a new /settings/import section.
+
+**Cross-platform considered:** admin-only feature. Mobile reps see
+no UI change; once Phase D ships, bulk-imported customers / sites /
+shifts will surface via the existing Realtime postgres_changes
+subscriptions a mobile app already has on those tables. No mobile
+work this phase.
+
+#### What shipped
+
+- **Migration `2026_05_25_import_runs_and_geocode_status.sql`** (PENDING — Gary to run in Supabase SQL Editor).
+  - New `import_runs` table — manager-only via `is_manager()`, on `supabase_realtime` so the import hub can show live progress. Columns: `id`, `started_by → auth.users`, `started_at`, `finished_at`, `entity_type` (customer|site|rep|manager|shift), `status` (pending|running|complete|failed), four count columns (`total_rows` / `created_count` / `updated_count` / `failed_count`), `settings_json jsonb` (per-run options), `errors_json jsonb` (array of per-row failures: `{row_index, original_row, error_code, error_message}`), `source_filename`. Two indexes: by `started_at DESC` and by `(entity_type, started_at DESC)` for the Recent Imports panel.
+  - **`geocode_status` + `geocode_attempted_at` columns** added to `customers` and `customer_sites`. Backfilled in three buckets so the Phase E cron doesn't blow up on its first tick: rows with coords → `'done'`, rows with no address → `'skipped'`, everything else stays on the column default `'pending'`. Partial indexes `WHERE geocode_status = 'pending'` (sorted by `geocode_attempted_at NULLS FIRST`) on both tables — keeps the cron's work-queue scan cheap as most rows quickly settle into `done` / `skipped` and drop out of the index.
+  - **`app_settings` seed** for `import.default_duplicate_mode = 'skip'` and `import.send_welcome_email_default = true`. `ON CONFLICT DO NOTHING` so a re-run after a manager has tuned the values doesn't reset their choice.
+  - Smoke-test checklist at the bottom of the file.
+
+- **`/settings/import`** — new settings section (added to `SETTINGS_SECTIONS` in `components/shell/SettingsShell.tsx` with the `upload` glyph between Messaging and Billing). Two controls:
+  - Segmented "Default duplicate behaviour" picker (Skip / Update existing) — matches the photo-quality tier picker on `/settings/check-in-rules`.
+  - "Send a welcome email by default" toggle — same `<ToggleRow>` shape used on Check-in rules. Hints explain dedup keys per entity + flag Resend's 100/day free-tier rate.
+  - Backed by new accessors in `lib/settings-store.ts`: `getImportDefaultDuplicateMode` / `setImportDefaultDuplicateMode`, `getImportSendWelcomeEmailDefault` / `setImportSendWelcomeEmailDefault`, plus a one-shot `getImportSettings()` (matches the `getOrganisationDetails()` pattern).
+  - Optimistic UI on both controls — flip first, revert on save failure.
+
+- **Resend wiring**:
+  - `npm install resend @react-email/components` in `morpheus-admin/` (Resend `^6.12.3`, React Email components `^1.0.12`).
+  - **`lib/email.ts`** — single `sendEmail({to, subject, react})` wrapper. Loud no-op when `RESEND_API_KEY` is absent (logs `[email] RESEND_API_KEY not set, skipping send` + returns `{ok: false, skipped: true}`), so local dev and missing-env-var prod deploys never crash on email-bearing code paths. Centralised from-address (`Morpheus Ops <onboarding@resend.dev>` default, overridable via `RESEND_FROM` once a sending domain is verified in Resend). Exports `isEmailConfigured()` for routes that want a clean 503 instead of the silent skip.
+  - **`emails/WelcomeEmail.tsx`** — React Email template using `@react-email/components`. Props: `{name, email, password, appUrl, role}`. Branded "Morpheus Ops" header + tagline, role-specific intro copy (manager → admin console; rep → mobile app), monospace credentials block, primary CTA button with the right URL per role, footer. All styles inline literals (no `AC` token import — keeps the email module free of client-only deps).
+  - **`POST /api/email/test`** — manager-gated transport smoke test. Body `{to: string}`. Returns 503 with a clear "configure email" message when `RESEND_API_KEY` is missing, 400 on a malformed email, 502 on a Resend send failure, 200 otherwise with the Resend message id + a note about onboarding@resend.dev only delivering to verified Resend account emails. Mirrors the `requireManager` pattern from `/api/users/route.ts`. Uses `React.createElement` (file is `.ts`, not `.tsx`) to construct the WelcomeEmail element with placeholder credentials so the smoke test exercises both the transport + the React Email render in one shot. Forced to Node runtime via `export const runtime = "nodejs"` to keep `react-dom/server` available for the email render.
+
+- **Docs**:
+  - `docs/OPS.md` — added `2026_05_25_import_runs_and_geocode_status.sql` to the pending list, added a new "Optional env vars" subsection covering `RESEND_API_KEY` + `RESEND_FROM` + `NEXT_PUBLIC_ADMIN_URL` + `NEXT_PUBLIC_MOBILE_URL` + `GOOGLE_ROUTES_API_KEY` (the last two already used elsewhere; consolidated for discoverability).
+  - `docs/ROADMAP.md` — added an "Import Hub + Email Welcome (in progress)" entry to the top with Phase A marked ✅ and Phases B–E listed as the next chunks.
+  - `docs/SESSIONS.md` — this entry.
+
+#### Acceptance for Phase A
+
+- ✅ `next build` in `morpheus-admin/` is clean (0 warnings, 0 errors, 38 routes including the new `/settings/import` static page + the new `/api/email/test` dynamic route).
+- ⏳ Gary to apply the migration in Supabase SQL Editor (then the page actually saves to the seeded `app_settings` rows + the `import_runs` table is ready for Phase C).
+- ⏳ Gary to add `RESEND_API_KEY` to the morpheus-admin Vercel project (Production + Preview + Development) and verify `gazzad@mac.com` as a recipient in Resend (free-tier `onboarding@resend.dev` only delivers to verified addresses until a sending domain is added).
+- ⏳ Smoke test: `curl -X POST https://morpheus-admin.vercel.app/api/email/test -H "authorization: Bearer <manager-token>" -H "content-type: application/json" -d '{"to":"gazzad@mac.com"}'` → email lands in Gary's inbox.
+
+#### Notes
+
+- Phase A is intentionally NOT a user-visible feature on its own — it's the foundation Phases B (email-this-user button), C (hub UI shell), D (entity adapters), and E (background geocoder cron) hang off. The first user-visible deliverable is Phase B's "Email this user" button on the manager + rep edit pages, which can be shipped independently of the import hub.
+- The customer-facing branding choice ("Morpheus Ops" wordmark + cyan brand button) is intentionally minimal-style for the welcome email so future template changes don't have to redesign every screen.
 
 ---
 

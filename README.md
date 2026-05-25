@@ -8,19 +8,23 @@ signatures on tasks, message reps individually or in bulk, and prove
 every customer visit with a timestamped audit trail. Built on Next.js
 16 + Supabase + Vercel.
 
-> Latest commit: **`0ecb15d`** (May 21, 2026). Admin-side photo
-> viewer finally landed — mobile's been writing `shift_task_photos`
-> rows since May 13 (Feature C) but admin had no UI to read them.
-> New `morpheus-admin/lib/photos-store.ts`, inline 64×64 thumbnails
-> per task row on `/shifts/[id]`, full-screen `PhotoLightbox` that
-> flicks through every photo for the shift (backdrop / Esc / ← → /
-> × all close + nav), and a `📷 N` chip on each row in /past-shifts
-> + Live Ops Today's Shifts (omitted at 0 so rows stay clean).
-> Same day merged the `260519-UIFixes` branch — customer detail
-> page split out of its 1,293-line monolith into proper tab
-> components, /past-shifts archive page, new admin UI primitives
-> (EmptyState / ExpandableRow / Pill / TabHeader). See
-> `docs/SESSIONS.md` for the full chronology back to May 6.
+> Latest: **May 25, 2026 — Import Hub + Email Welcome, Phase A.**
+> Foundation for the new bulk-import workstream. New migration
+> `2026_05_25_import_runs_and_geocode_status.sql` (PENDING — run
+> in Supabase SQL Editor): adds `import_runs` table (manager-only
+> via `is_manager()`, on `supabase_realtime`), `geocode_status` +
+> `geocode_attempted_at` columns on `customers` and `customer_sites`
+> with backfill + partial pending-only indexes, and seeds two
+> `app_settings` keys for the import-hub defaults. New
+> `/settings/import` settings section (duplicate behaviour picker +
+> welcome-email toggle). Resend wiring: `npm install resend
+> @react-email/components`, `lib/email.ts` (loud no-op when
+> `RESEND_API_KEY` missing), `emails/WelcomeEmail.tsx` (branded
+> credentials template), `POST /api/email/test` (manager-gated
+> transport smoke test). No user-visible feature yet — Phase B
+> (Email-this-user button on edit pages) is the first shippable
+> deliverable on top of this. See `docs/SESSIONS.md` for the full
+> Phase A entry and `docs/ROADMAP.md` item 0 for next steps.
 
 ---
 

@@ -78,6 +78,15 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     available: true,
   },
   {
+    id: "import",
+    label: "Import",
+    href: "/settings/import",
+    glyph: "upload",
+    description:
+      "Defaults for the bulk import hub — duplicate behaviour and welcome email on user import.",
+    available: true,
+  },
+  {
     id: "billing",
     label: "Billing",
     href: "/settings/billing",

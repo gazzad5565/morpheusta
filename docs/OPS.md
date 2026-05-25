@@ -20,17 +20,16 @@
 
 ### Migrations applied today (cloud status)
 
-**Status as of end of May 13 session:**
-- May 12 and earlier — all applied.
-- May 13 — `2026_05_13_push_subscriptions.sql`,
-  `2026_05_13_customers_created_by_rep.sql`, and
-  `2026_05_13_task_photos.sql` applied during the session
-  (Gary confirmed "i did them").
+**Status as of end of May 25 session:**
+- May 21 and earlier — all applied.
 - **Pending — run before next test pass:**
-  - `db/migrations/2026_05_13_task_signatures.sql` (Feature D)
-  - `db/migrations/2026_05_13_messages.sql` (Feature E)
+  - `db/migrations/2026_05_25_import_runs_and_geocode_status.sql` (Phase A — Import hub foundation: new `import_runs` table, `geocode_status` + `geocode_attempted_at` on customers + customer_sites with backfill, partial indexes for the cron work queue, `app_settings` seed for the two import defaults)
 
 Each file is idempotent — safe to re-run.
+
+May 25 (pending):
+
+- `2026_05_25_import_runs_and_geocode_status.sql` — Import hub foundation. Creates `import_runs` (manager-only via `is_manager()`, on `supabase_realtime`), adds `geocode_status text DEFAULT 'pending'` + `geocode_attempted_at timestamptz` to `customers` and `customer_sites`, backfills (rows with coords → `done`, no-address → `skipped`), adds partial indexes on `WHERE geocode_status = 'pending'` for the every-minute geocoder cron landing in Phase E, and seeds `app_settings` keys `import.default_duplicate_mode = 'skip'` + `import.send_welcome_email_default = true`. Smoke-test checklist at the bottom of the file.
 
 May 14 (applied):
 
@@ -115,6 +114,21 @@ npx vercel --prod
 | Vercel project Settings → Environment Variables | Live deploys | Vercel dashboard, OR `npx vercel env add NAME production --value "..."` |
 
 > ⚠️ Vercel UI silently saves empty strings if paste doesn't register. If a deploy says "Database not configured", check Vercel env vars by running `npx vercel env pull --environment production .tmp.env` from the project folder and inspecting the file. Note: `pull` redacts values for security — to be sure the values are non-empty, use the CLI's `--value` flag when adding rather than relying on the UI.
+
+### Optional env vars
+
+These don't block a deploy if missing, but each feature that depends on
+them silently degrades to a "not configured" no-op until set. Add them
+to the `morpheus-admin` Vercel project in Production + Preview +
+Development.
+
+| Env var | Used by | What happens when absent |
+|---|---|---|
+| `RESEND_API_KEY` | `lib/email.ts` (any code path that sends email — `/api/email/test`, the Phase B "Email this user" button, Phase D rep/manager imports with the welcome-email flag on) | Loud `console.warn("[email] RESEND_API_KEY not set, skipping send")`. Routes return `503` with a "configure email" message. Imports still create the user; the credentials still appear in the success CSV — only the email send is skipped. |
+| `RESEND_FROM` | `lib/email.ts` — overrides the from-address | Defaults to `Morpheus Ops <onboarding@resend.dev>`. Resend's `onboarding@` sender only delivers to your verified Resend account email until a sending domain is verified in Resend. Set this once you've added a real sending domain. |
+| `NEXT_PUBLIC_ADMIN_URL` | `/api/email/test` — CTA button in the welcome email | Falls back to `https://morpheus-admin.vercel.app`. |
+| `NEXT_PUBLIC_MOBILE_URL` | `/api/push/notify` CORS check | Falls back to the hardcoded prod URL (`*-khaki-omega.vercel.app`). |
+| `GOOGLE_ROUTES_API_KEY` | `/route` page on mobile (real ETAs) | Falls back to mock-data ETAs. |
 
 ### Rollback
 
