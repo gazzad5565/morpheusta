@@ -59,7 +59,10 @@ export type EventType =
   | "library.deleted"
   // Tasks (admin-defined templates, not per-shift completions)
   | "task.created"
-  | "task.deleted";
+  | "task.deleted"
+  // Bulk imports — one row per run (Phase D). meta carries
+  // {entity, run_id, created, updated, skipped, failed, source_filename}.
+  | "import.run";
 
 export interface ShiftEvent {
   id: string;
@@ -236,6 +239,7 @@ export const EVENT_LABEL: Record<EventType, string> = {
   "library.deleted": "deleted a file",
   "task.created": "added a task",
   "task.deleted": "removed a task",
+  "import.run": "ran a bulk import",
 };
 
 /** Tone hint for the feed UI — colours the left-edge accent. */

@@ -1,4 +1,4 @@
 code,name,initials,color,region,city,address
-acme-001,Acme Cosmetics,AC,#15B4D6,Western Cape,Cape Town,12 Main Street Cape Town 8001
-brava-002,Brava Foods,BF,#E0563A,Gauteng,Johannesburg,45 Long Avenue Sandton 2196
-crown-003,Crown Hardware,CH,#7C3AED,Western Cape,Cape Town,
+1001,Acme Cosmetics,AC,#15B4D6,Western Cape,Cape Town,12 Main Street Cape Town 8001
+1002,Brava Foods,BF,#E0563A,Gauteng,Johannesburg,45 Long Avenue Sandton 2196
+1003,Crown Hardware,CH,#7C3AED,Western Cape,Cape Town,

@@ -1,4 +1,4 @@
 customer_code,site_name,address,city,region
-acme-001,Head office,12 Main Street Cape Town 8001,Cape Town,Western Cape
-acme-001,Warehouse,7 Industrial Road Epping 7460,Cape Town,Western Cape
-brava-002,Sandton store,45 Long Avenue Sandton 2196,Johannesburg,Gauteng
+1001,Head office,12 Main Street Cape Town 8001,Cape Town,Western Cape
+1001,Warehouse,7 Industrial Road Epping 7460,Cape Town,Western Cape
+1002,Sandton store,45 Long Avenue Sandton 2196,Johannesburg,Gauteng

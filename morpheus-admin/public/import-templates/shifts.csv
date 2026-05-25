@@ -1,4 +1,4 @@
 customer_code,rep_email,start_date,end_date,days_of_week,start_time,end_time,recurrence
-acme-001,ayanda.mthembu@example.com,2026-06-01,,,08:00,12:00,once
-brava-002,jordan.smith@example.com,2026-06-01,2026-06-30,Mon|Wed|Fri,09:00,13:00,weekly
-crown-003,priya.naidoo@example.com,2026-06-02,,,14:00,17:00,once
+1001,ayanda.mthembu@example.com,2026-06-01,,,08:00,12:00,once
+1002,jordan.smith@example.com,2026-06-01,2026-06-30,Mon|Wed|Fri,09:00,13:00,weekly
+1003,priya.naidoo@example.com,2026-06-02,,,14:00,17:00,once

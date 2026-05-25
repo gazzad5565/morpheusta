@@ -35,6 +35,12 @@ import {
 import { parseCsvText, parseFile, type ParsedFile } from "@/lib/import-parsers";
 import { autoMap } from "@/lib/import-synonyms";
 import { getAdapter, normalizeRow } from "@/lib/import-adapter-registry";
+import {
+  createImportRun,
+  finishImportRun,
+  type ImportRunFailure,
+} from "@/lib/import-runs-store";
+import { logEvent } from "@/lib/events-store";
 
 const VALID_ENTITIES: EntityType[] = [
   "customer",
@@ -219,40 +225,111 @@ function Wizard({ entity }: { entity: EntityType }) {
   }, [duplicateMode, step]);
 
   // ── Commit ──────────────────────────────────────────────────────
+  // Phase D: per-row error handling (no bail-on-first), creates +
+  // finalises an import_runs row, logs one shift_events audit row.
   const onCommit = async () => {
     if (committing) return;
     setCommitting(true);
     setCommitError(null);
+
+    // 1. Create the import_runs row (status=running). If this fails
+    //    we surface it as a hard commit error — we don't want to run
+    //    the import without an audit trail row.
+    const runResult = await createImportRun({
+      entity,
+      totalRows: preview.length,
+      sourceFilename: filename,
+      settings: {
+        duplicateMode,
+        ...(entity === "rep" || entity === "manager"
+          ? { sendWelcomeEmail }
+          : {}),
+      },
+    });
+    if (!runResult.ok || !runResult.id) {
+      setCommitError(
+        `Couldn't create import run record: ${runResult.error || "unknown error"}. No rows were written.`
+      );
+      setCommitting(false);
+      setStep("result");
+      return;
+    }
+    const runId = runResult.id;
+
+    // 2. Iterate rows with per-row error handling.
     let created = 0;
     let updated = 0;
     let skipped = 0;
     let failed = 0;
-    try {
-      for (const row of preview) {
-        if (row.predicted === "fail") {
-          failed += 1;
-          continue;
-        }
-        try {
-          const outcome = await adapter.upsert(row.normalized, duplicateMode);
-          if (outcome === "created") created += 1;
-          else if (outcome === "updated") updated += 1;
-          else if (outcome === "skipped") skipped += 1;
-          else failed += 1;
-        } catch (e) {
-          // Phase C: every adapter.upsert throws — surface that error
-          // up to the page-level commitError so we don't pretend the
-          // import succeeded.
-          throw e;
-        }
+    const failures: ImportRunFailure[] = [];
+
+    for (const row of preview) {
+      if (row.predicted === "fail") {
+        failed += 1;
+        failures.push({
+          row_index: row.rowIndex + 1,
+          original_row: row.raw,
+          error_code: "validation",
+          error_message: row.errors.join("; "),
+        });
+        continue;
       }
-      setResult({ created, updated, skipped, failed });
-    } catch (e) {
-      setCommitError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCommitting(false);
-      setStep("result");
+      try {
+        const outcome = await adapter.upsert(row.normalized, duplicateMode);
+        if (outcome === "created") created += 1;
+        else if (outcome === "updated") updated += 1;
+        else if (outcome === "skipped") skipped += 1;
+        else {
+          failed += 1;
+          failures.push({
+            row_index: row.rowIndex + 1,
+            original_row: row.raw,
+            error_code: "adapter",
+            error_message: `adapter returned unexpected outcome: ${outcome}`,
+          });
+        }
+      } catch (e) {
+        failed += 1;
+        failures.push({
+          row_index: row.rowIndex + 1,
+          original_row: row.raw,
+          error_code: "upsert",
+          error_message: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
+
+    // 3. Finalise the import_runs row.
+    const finalStatus: "complete" | "failed" =
+      failed === preview.length && failed > 0 ? "failed" : "complete";
+    await finishImportRun(runId, {
+      created,
+      updated,
+      failed,
+      failures,
+      finalStatus,
+    });
+
+    // 4. Audit log — one shift_events row of type 'import.run' so the
+    //    Live Feed surfaces it as "Gary imported 234 customers (12
+    //    updated, 3 failed)".
+    await logEvent({
+      event_type: "import.run",
+      message: `Imported ${preview.length} ${entity}${preview.length === 1 ? "" : "s"} — ${created} created, ${updated} updated, ${failed} failed`,
+      meta: {
+        entity,
+        run_id: runId,
+        created,
+        updated,
+        skipped,
+        failed,
+        source_filename: filename,
+      },
+    });
+
+    setResult({ created, updated, skipped, failed });
+    setCommitting(false);
+    setStep("result");
   };
 
   // ── Counts shown on Preview ─────────────────────────────────────
