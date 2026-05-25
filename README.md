@@ -8,7 +8,7 @@ signatures on tasks, message reps individually or in bulk, and prove
 every customer visit with a timestamped audit trail. Built on Next.js
 16 + Supabase + Vercel.
 
-> Latest: **May 25, 2026 — Import Hub + Email Welcome, Phases A + B + C.**
+> Latest: **May 25, 2026 — Import Hub + Email Welcome, Phases A + B + C (+ same-day reorg: Import lives under Settings only — hub at `/settings/import` is tabbed "Run an import" + "Defaults", no top-level `/import` route, no sidebar nav entry, list-page Import buttons repointed).**
 > Phase A — foundation (`import_runs` table, `geocode_status` on
 > customers + sites, Resend wiring, `/settings/import` page). Phase B —
 > "Email this user" button on `/settings/managers/[id]/edit` and

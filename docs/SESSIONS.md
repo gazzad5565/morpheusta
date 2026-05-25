@@ -14,7 +14,7 @@
 
 ## Quick TOC
 
-- [May 25, 2026 — Import hub Phase A (foundation) + Phase B (Email-this-user button) + Phase C (Import hub UI shell + consolidation)](#todays-session--what-shipped-may-25-2026)
+- [May 25, 2026 — Import hub Phase A (foundation) + Phase B (Email-this-user button) + Phase C (Import hub UI shell + consolidation) + reorg: Import lives under Settings only](#todays-session--what-shipped-may-25-2026)
 - [May 21, 2026 — photo viewer + customer detail refactor + past shifts archive](#todays-session--what-shipped-may-21-2026)
 - [May 15, 2026 — overnight sidebar polish](#todays-session--what-shipped-may-15-2026--overnight)
 - [May 14, 2026 — Phase 4 RLS + photo capture root cause + polish day](#todays-session--what-shipped-may-14-2026)
@@ -305,6 +305,65 @@ Phase 3).
   sites" CTA lives there. Hub picker still shows the Sites card so
   bulk-importing dozens of sites at once doesn't require visiting a
   specific customer first.
+
+### Same-day reorg — Import lives under Settings only
+
+Gary's call right after Phase C shipped: the import hub should be
+under `/settings/import`, not a top-level route + sidebar nav entry.
+The `/settings/import` page already existed for the defaults; the
+reorg merges the hub UI + the defaults onto that single page,
+behind two tabs.
+
+#### What changed
+
+- **Tabbed page at `/settings/import`** — "Run an import" tab (entity
+  picker grid + Recent Imports panel — content lifted from the
+  deleted `/app/import/page.tsx`) and "Defaults" tab (existing
+  duplicate-mode picker + welcome-email toggle). Tab state is local
+  React state, no URL param — both tabs are cheap and the user
+  typically picks once per session. Wrapped in `SettingsShell` so
+  the standard 240px settings rail is visible.
+- **Stepper moved**: `/app/import/[entity]/page.tsx` →
+  `/app/settings/import/[entity]/page.tsx`. Internal `/import` href
+  references (4 of them: the "← All entities" back button, the
+  "Back to import hub" affordance on the parse-failed state, etc)
+  swapped to `/settings/import` via `sed`. Breadcrumbs updated to
+  `["Home", "Settings", "Import", <entity>]`. Still wraps in
+  `AdminShell` (not `SettingsShell`) because the wizard's Preview
+  step needs full horizontal width for the row table — the rail
+  would compete with the stepper bar. Matches the pattern of
+  `/settings/managers/[id]/edit` which is also a settings-area
+  drill-down using `AdminShell`.
+- **`/app/import/` directory deleted entirely** — no top-level
+  routes. `next build` now lists `/settings/import` (static) and
+  `/settings/import/[entity]` (dynamic) — total 38 routes (down
+  from 39; the dupe is gone).
+- **Sidebar nav entry removed**: the "Import" entry between Reports
+  and Settings in `lib/mock-data.ts` NAV_ITEMS is gone. Settings is
+  the single nav surface for import.
+- **List-page Import buttons repointed**: the 5 surfaces added in
+  Phase C (`/customers`, `/reps`, `/settings/managers`, `/schedule`,
+  and the customer-detail `SitesTab`) now link to
+  `/settings/import/<entity>` (or `/settings/import` for the Users
+  page since it covers both rep + manager imports). Buttons stay —
+  they're shortcuts to the hub, not duplicate locations.
+
+#### Acceptance for the reorg
+
+- ✅ `next build` clean — 38 routes (zero `/import/*` top-level).
+- ✅ Sidebar no longer has an Import entry between Reports and Settings.
+- ✅ `/settings/import` renders the tabbed hub (Run an import default).
+- ✅ Every list-page Import button lands in the right entity wizard.
+
+#### Notes — reorg
+
+- The "consolidation rule" from Phase C still holds (one hub, all
+  imports). Only the hub's URL + sidebar discoverability changed —
+  it's findable from Sidebar → Settings → Import, plus from every
+  list-page shortcut.
+- The wizard's behaviour didn't change. Phase D's adapter wiring
+  drops into the same `lib/import-adapter-registry.ts` regardless
+  of where the wizard's URL lives.
 
 ---
 

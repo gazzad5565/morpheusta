@@ -28,10 +28,5 @@ export const NAV_ITEMS = [
   // tools (Tasks / Library / Messaging) before analytics (Reports).
   { id: "notify", label: "Messaging", glyph: "send", href: "/notify" },
   { id: "reports", label: "Reports", glyph: "chart", href: "/reports" },
-  // Import — added May 25 as the single entry point for every bulk
-  // upload (customers / sites / reps / managers / shifts). Sits just
-  // above Settings because it's operations-y org-admin work that
-  // touches every other section, not analytics.
-  { id: "import", label: "Import", glyph: "upload", href: "/import" },
   { id: "settings", label: "Settings", glyph: "settings", href: "/settings" },
 ] as const;

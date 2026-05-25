@@ -133,7 +133,7 @@ export default function RepsPage() {
       breadcrumbs={["Home", "Reps"]}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/import/rep" style={{ textDecoration: "none" }}>
+          <Link href="/settings/import/rep" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
               Import
             </Btn>

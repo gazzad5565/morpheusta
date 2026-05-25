@@ -105,7 +105,7 @@ export default function ManagersPage() {
       section="managers"
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/import" style={{ textDecoration: "none" }}>
+          <Link href="/settings/import" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
               Import
             </Btn>

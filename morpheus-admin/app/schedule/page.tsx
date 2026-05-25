@@ -713,7 +713,7 @@ export default function SchedulePage() {
           {/* Manage shifts → /schedule/manage. Lives next to "New
               shift" so a manager can flip from "what's happening"
               to "edit the patterns" in one click. */}
-          <Link href="/import/shift" style={{ textDecoration: "none" }}>
+          <Link href="/settings/import/shift" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
               Import
             </Btn>

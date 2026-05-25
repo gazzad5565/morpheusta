@@ -74,7 +74,7 @@ export function SitesTab({
         action={
           !adding && count > 0 ? (
             <div style={{ display: "flex", gap: 8 }}>
-              <Link href="/import/site" style={{ textDecoration: "none" }}>
+              <Link href="/settings/import/site" style={{ textDecoration: "none" }}>
                 <Btn size="sm" icon="upload">
                   Import
                 </Btn>

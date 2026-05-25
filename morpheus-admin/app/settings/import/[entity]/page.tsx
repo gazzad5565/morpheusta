@@ -56,7 +56,7 @@ export default function EntityImportPage({
   const { entity: entityParam } = use(params);
   if (!isEntity(entityParam)) {
     return (
-      <AdminShell breadcrumbs={["Home", "Import", "Not found"]}>
+      <AdminShell breadcrumbs={["Home", "Settings", "Import", "Not found"]}>
         <div style={{ padding: 32 }}>
           <Card padding={24}>
             <div
@@ -70,7 +70,7 @@ export default function EntityImportPage({
               No importable entity called <code>{entityParam}</code>. Pick one
               from the hub.
             </div>
-            <Link href="/import" style={{ textDecoration: "none" }}>
+            <Link href="/settings/import" style={{ textDecoration: "none" }}>
               <Btn>← Back to import hub</Btn>
             </Link>
           </Card>
@@ -265,9 +265,9 @@ function Wizard({ entity }: { entity: EntityType }) {
   // ── Render ──────────────────────────────────────────────────────
   return (
     <AdminShell
-      breadcrumbs={["Home", "Import", ENTITY_LABEL[entity]]}
+      breadcrumbs={["Home", "Settings", "Import", ENTITY_LABEL[entity]]}
       actions={
-        <Link href="/import" style={{ textDecoration: "none" }}>
+        <Link href="/settings/import" style={{ textDecoration: "none" }}>
           <Btn size="sm">← All entities</Btn>
         </Link>
       }
@@ -1148,7 +1148,7 @@ function ResultStep({
         >
           {commitError}
         </div>
-        <Link href="/import" style={{ textDecoration: "none" }}>
+        <Link href="/settings/import" style={{ textDecoration: "none" }}>
           <Btn>← Back to import hub</Btn>
         </Link>
       </Card>
@@ -1204,7 +1204,7 @@ function ResultStep({
               Download failures CSV ({failures.length})
             </Btn>
           )}
-          <Link href="/import" style={{ textDecoration: "none" }}>
+          <Link href="/settings/import" style={{ textDecoration: "none" }}>
             <Btn kind="primary">Start another import</Btn>
           </Link>
         </div>

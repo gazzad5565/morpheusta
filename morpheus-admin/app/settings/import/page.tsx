@@ -1,27 +1,44 @@
 "use client";
 
 /**
- * /settings/import — defaults for the bulk import hub.
+ * /settings/import — the single Morpheus Ops import hub.
  *
- * Two controls, both org-wide:
- *   1. Duplicate behaviour — Skip (don't touch an existing matching
- *      row) vs Update (overwrite with the imported fields). Pre-fills
- *      the Settings step on every upload, overridable per-upload from
- *      the hub itself.
- *   2. Send welcome email by default on user import — when on, rep /
- *      manager imports email each created user their credentials via
- *      Resend the moment the row is created. Manager can flip this
- *      off per-upload too.
+ * Two tabs in one page (Gary's directive, May 25 — Import only lives
+ * under Settings, not as a top-level nav entry):
  *
- * Lives at /settings/import (added to SETTINGS_SECTIONS in
- * SettingsShell). The hub at /import (Phase C) reads both via
- * getImportSettings() to pre-fill its own Settings step.
+ *   1. "Run an import" — entity picker grid (5 cards) + Recent
+ *      Imports panel reading from import_runs. Tapping a card opens
+ *      /settings/import/[entity] for the 5-step wizard.
+ *   2. "Defaults" — org-wide duplicate behaviour + welcome-email
+ *      defaults. Pre-fills the wizard's Settings step.
+ *
+ * Tab state is local (no URL param) because both tabs are cheap to
+ * render and the user typically flips once at the start of a session.
+ *
+ * Lives at /settings/import (entry in SETTINGS_SECTIONS). List-page
+ * Import buttons across /customers, /reps, /settings/managers,
+ * /schedule, and the customer-detail SitesTab link directly to
+ * /settings/import/<entity> for a one-tap-to-wizard shortcut, but
+ * the hub IS the only home.
  */
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/Card";
+import { AGlyph } from "@/components/ui/AGlyph";
 import { SettingsShell } from "@/components/shell/SettingsShell";
 import { AC } from "@/lib/tokens";
+import { formatRelative } from "@/lib/format";
+import {
+  listRecentImports,
+  subscribeImportRuns,
+  type ImportRunRow,
+} from "@/lib/import-runs-store";
+import {
+  ENTITY_DESCRIPTION,
+  ENTITY_LABEL,
+  type EntityType,
+} from "@/lib/import-types";
 import {
   getImportSettings,
   setImportDefaultDuplicateMode,
@@ -29,7 +46,352 @@ import {
   type ImportDuplicateMode,
 } from "@/lib/settings-store";
 
-export default function ImportSettingsPage() {
+const ENTITIES: EntityType[] = ["customer", "site", "rep", "manager", "shift"];
+
+type TabId = "run" | "defaults";
+
+export default function ImportHubPage() {
+  const [tab, setTab] = useState<TabId>("run");
+
+  return (
+    <SettingsShell
+      section="import"
+      description="One place for every bulk upload. Pick the entity, drop a CSV or XLSX, map columns, preview, commit. Switch to Defaults to set the org-wide duplicate behaviour and welcome-email policy."
+    >
+      <TabBar tab={tab} setTab={setTab} />
+
+      {tab === "run" ? <RunPane /> : <DefaultsPane />}
+    </SettingsShell>
+  );
+}
+
+// ─── Tab bar ────────────────────────────────────────────────────────
+
+function TabBar({
+  tab,
+  setTab,
+}: {
+  tab: TabId;
+  setTab: (t: TabId) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 4,
+        marginBottom: 14,
+        padding: 4,
+        background: AC.bg,
+        borderRadius: 10,
+        border: `1px solid ${AC.line}`,
+        width: "fit-content",
+      }}
+    >
+      <TabButton active={tab === "run"} onClick={() => setTab("run")}>
+        Run an import
+      </TabButton>
+      <TabButton
+        active={tab === "defaults"}
+        onClick={() => setTab("defaults")}
+      >
+        Defaults
+      </TabButton>
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "8px 16px",
+        borderRadius: 8,
+        border: "none",
+        background: active ? "#fff" : "transparent",
+        color: active ? AC.brandInk : AC.mute,
+        fontFamily: AC.font,
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: "pointer",
+        boxShadow: active
+          ? "0 1px 2px rgba(15, 23, 42, 0.06), 0 0 0 1px rgba(15, 23, 42, 0.04)"
+          : "none",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ─── "Run an import" tab ────────────────────────────────────────────
+
+function RunPane() {
+  const [recent, setRecent] = useState<ImportRunRow[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const rows = await listRecentImports(20);
+      if (cancelled) return;
+      setRecent(rows);
+      setLoaded(true);
+    };
+    refresh();
+    const unsub = subscribeImportRuns(() => refresh());
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Entity picker */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+          gap: 12,
+        }}
+      >
+        {ENTITIES.map((entity) => (
+          <EntityCard key={entity} entity={entity} />
+        ))}
+      </div>
+
+      {/* Recent imports */}
+      <div>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 14,
+            fontWeight: 700,
+            color: AC.ink,
+            letterSpacing: -0.2,
+            marginBottom: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          Recent imports
+          <span
+            style={{
+              fontFamily: AC.font,
+              fontSize: 11,
+              color: AC.mute,
+              fontWeight: 500,
+            }}
+          >
+            · {recent.length}
+          </span>
+        </div>
+
+        {!loaded ? (
+          <Card padding={20}>
+            <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
+              Loading…
+            </div>
+          </Card>
+        ) : recent.length === 0 ? (
+          <Card padding={20}>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 13,
+                color: AC.mute,
+                lineHeight: 1.6,
+                textAlign: "center",
+                padding: "8px 0",
+              }}
+            >
+              No imports yet. Pick an entity above to start your first one.
+              <br />
+              Once the Phase D adapters land, every commit will surface here
+              with live counts.
+            </div>
+          </Card>
+        ) : (
+          <Card padding={0}>
+            {recent.map((r, i) => (
+              <RunRow key={r.id} run={r} isLast={i === recent.length - 1} />
+            ))}
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EntityCard({ entity }: { entity: EntityType }) {
+  return (
+    <Link
+      href={`/settings/import/${entity}`}
+      style={{ textDecoration: "none", color: "inherit" }}
+    >
+      <Card padding={16} style={{ height: "100%" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <div
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              background: AC.brandSoft,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <AGlyph name={glyphForEntity(entity)} size={18} color={AC.brandDeep} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 14,
+                fontWeight: 700,
+                color: AC.ink,
+                letterSpacing: -0.2,
+              }}
+            >
+              {ENTITY_LABEL[entity]}
+            </div>
+            <div
+              style={{
+                fontFamily: AC.font,
+                fontSize: 11.5,
+                color: AC.mute,
+                marginTop: 4,
+                lineHeight: 1.45,
+              }}
+            >
+              {ENTITY_DESCRIPTION[entity]}
+            </div>
+          </div>
+          <AGlyph name="chev-r" size={14} color={AC.mute} />
+        </div>
+      </Card>
+    </Link>
+  );
+}
+
+function RunRow({ run, isLast }: { run: ImportRunRow; isLast: boolean }) {
+  const statusTint = STATUS_TINT[run.status];
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "160px 1fr 110px 90px",
+        gap: 12,
+        alignItems: "center",
+        padding: "12px 16px",
+        borderBottom: isLast ? "none" : `1px solid ${AC.lineDim}`,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span
+          style={{
+            padding: "2px 8px",
+            borderRadius: 99,
+            background: statusTint.bg,
+            color: statusTint.fg,
+            fontFamily: AC.font,
+            fontSize: 10.5,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+          }}
+        >
+          {run.status}
+        </span>
+        <span
+          style={{
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            color: AC.ink,
+            fontWeight: 600,
+            textTransform: "capitalize",
+          }}
+        >
+          {run.entity_type}s
+        </span>
+      </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 12,
+          color: AC.mute,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {run.source_filename || "(pasted rows)"}
+      </div>
+      <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.ink2 }}>
+        ✓ {run.created_count} · ↻ {run.updated_count} · ✕ {run.failed_count}
+      </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          color: AC.mute,
+          textAlign: "right",
+        }}
+      >
+        {formatRelative(run.started_at, " ago")}
+      </div>
+    </div>
+  );
+}
+
+const STATUS_TINT: Record<
+  ImportRunRow["status"],
+  { bg: string; fg: string }
+> = {
+  pending: { bg: AC.bg, fg: AC.mute },
+  running: { bg: AC.brandSoft, fg: AC.brandInk },
+  complete: { bg: AC.okTint, fg: "#0F5A38" },
+  failed: { bg: AC.dangerTint, fg: "#9c1a3c" },
+};
+
+function glyphForEntity(
+  entity: EntityType
+): "customer" | "building" | "reps" | "cal" {
+  switch (entity) {
+    case "customer":
+      return "customer";
+    case "site":
+      return "building";
+    case "rep":
+    case "manager":
+      return "reps";
+    case "shift":
+      return "cal";
+  }
+}
+
+// ─── "Defaults" tab ─────────────────────────────────────────────────
+
+function DefaultsPane() {
   const [duplicateMode, setDuplicateMode] = useState<ImportDuplicateMode>("skip");
   const [sendWelcome, setSendWelcome] = useState<boolean>(true);
   const [loaded, setLoaded] = useState(false);
@@ -44,8 +406,6 @@ export default function ImportSettingsPage() {
     });
   }, []);
 
-  // Optimistic flip — segmented picker. Revert on failure so the
-  // UI stays truthful about what's stored.
   const changeDuplicateMode = async (next: ImportDuplicateMode) => {
     const prev = duplicateMode;
     setDuplicateMode(next);
@@ -82,13 +442,7 @@ export default function ImportSettingsPage() {
   };
 
   return (
-    <SettingsShell
-      section="import"
-      description="Defaults for the bulk import hub at /import. Both settings can be overridden per-upload on the import's Settings step."
-    >
-      {/* Duplicate behaviour picker. Segmented to mirror the photo-
-          quality tier picker on /settings/check-in-rules so the two
-          settings feel related. */}
+    <>
       <Card padding={20} style={{ marginBottom: 14 }}>
         <SectionLabel>Default duplicate behaviour</SectionLabel>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -141,8 +495,6 @@ export default function ImportSettingsPage() {
         </Hint>
       </Card>
 
-      {/* Welcome email toggle. Only governs rep / manager imports —
-          the customer / site / shift adapters don't send mail. */}
       <Card padding={20}>
         <SectionLabel>Welcome email on user import</SectionLabel>
         <ToggleRow
@@ -154,10 +506,10 @@ export default function ImportSettingsPage() {
           onChange={toggleSendWelcome}
         />
         <Hint>
-          Resend's free tier delivers 100 emails / day. A bulk import of
+          Resend&apos;s free tier delivers 100 emails / day. A bulk import of
           200 reps with this on will deliver across two days; the import
           itself completes immediately and the failed-delivery rows are
-          surfaced on the run's result screen.
+          surfaced on the run&apos;s result screen.
         </Hint>
       </Card>
 
@@ -177,7 +529,7 @@ export default function ImportSettingsPage() {
           {message}
         </div>
       )}
-    </SettingsShell>
+    </>
   );
 }
 
