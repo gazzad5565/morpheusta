@@ -55,6 +55,7 @@ file that matches your question:
 | [`docs/OPS.md`](docs/OPS.md) | "How do I deploy / which migrations to run / what's broken in Vercel / how does push work?" — migrations log, deployment ops, ⚠ Vercel traps, full Web Push deep dive, auto-checkout vs reminders timing. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | "How does X work?" — stack, repo layout, schema, RLS, auth flow, routing model. |
 | [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) | "How do I add a new page / table / env var?" — day-to-day reference + files-of-note map. |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | "What should this new page look like?" — design system: tokens, primitives, page patterns, voice, iOS PWA landmines, plus a per-page checklist. |
 | [`docs/ENGINEERING_REVIEW.md`](docs/ENGINEERING_REVIEW.md) | The May 11, 2026 senior-engineer handoff — preserved verbatim as the closest thing we have to a code-quality backlog. |
 
 If you're a fresh chat and the user just dropped you into the repo

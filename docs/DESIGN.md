@@ -1,0 +1,754 @@
+# Design system — Morpheus Ops
+
+> The rules every new page should follow. Read this BEFORE building a new
+> page; reference it WHEN reviewing a page that looks "a bit off".
+>
+> Two apps, one product: this doc covers both `morpheus-admin` (manager
+> console, desktop browsers) and `morpheus-mobile` (rep PWA, phones).
+> Where rules differ, the admin column is on the left and mobile on
+> the right. Where they agree (which is most places), it's stated once.
+
+---
+
+## Sections
+
+1. [The two-app philosophy](#1-the-two-app-philosophy)
+2. [Brand identity](#2-brand-identity)
+3. [Colour tokens](#3-colour-tokens)
+4. [Typography](#4-typography)
+5. [Shape & spacing](#5-shape--spacing)
+6. [Component primitives — admin](#6-component-primitives--admin)
+7. [Component primitives — mobile](#7-component-primitives--mobile)
+8. [Page-level patterns](#8-page-level-patterns)
+9. [Status pills grammar](#9-status-pills-grammar)
+10. [Customer + rep visual identity](#10-customer--rep-visual-identity)
+11. [Microcopy & voice](#11-microcopy--voice)
+12. [Interaction patterns](#12-interaction-patterns)
+13. [iOS PWA landmines](#13-ios-pwa-landmines)
+14. [Accessibility baseline](#14-accessibility-baseline)
+15. [Checklist — adding a new page](#15-checklist--adding-a-new-page)
+
+---
+
+## 1. The two-app philosophy
+
+The admin is a **workstation console**. It assumes a 1280px+ screen, a
+mouse / trackpad, multiple shifts visible at once, and a manager who's
+looking up something specific in a table or grid. Dense by design.
+
+The mobile is a **single-task field tool**. It assumes a phone in a
+moving van, gloves off but cold fingers, intermittent reception, and
+one job at a time on screen. Big tap targets, short copy, generous
+breathing room.
+
+Same brand, same data, same Supabase backend — but the two apps look
+different on purpose. **Do not port admin patterns into mobile or vice
+versa without thinking.** A table view that's fine in admin will be
+unusable on mobile; a celebratory animation that delights in mobile
+will feel toy-like in admin.
+
+When in doubt, look at the existing surface: admin pages live in
+`morpheus-admin/app/`, mobile pages in `morpheus-mobile/app/`.
+
+---
+
+## 2. Brand identity
+
+**Name:** Morpheus Ops. (NOT "Morpheus", NOT "Morpheus Ta", NOT "Morpheus
+Operations" in a body label — only the wordmark capitalises "OPS".)
+
+**Tagline:** "Workforce Operations. In real time."
+- The full sentence appears in the admin sidebar.
+- "Workforce Operations." is muted ink + 7s shimmer animation.
+- "In real time" is a brand-cyan rounded pill — same chip the wordmark
+  uses for "Ops".
+
+**Wordmark:** `MorpheusMark` (mobile, in `components/Glyph.tsx`) and the
+admin sidebar header render the wordmark as:
+- "Morpheus" — bold dark text (uppercase, letter-spacing ~2)
+- "Ops" — same weight, but in a **brand-cyan rounded chip** with 18% alpha
+  background (`rgba(21, 180, 214, 0.18)`)
+- Small brand-cyan square dot to the left of "Morpheus"
+
+The chip is the brand's visual hook. It repeats: in the wordmark, in the
+"In real time" tagline, in sidebar nav badges. **If you're tempted to
+build a custom badge for something, use a Pill with the brand chip
+palette first.**
+
+**Org accent override:** managers can set a per-org accent colour at
+`/settings/organisation` that repaints the sidebar wordmark. Don't
+hardcode `AC.brand` into anything that should be brandable —
+read `getOrganisationNameColor()` instead.
+
+---
+
+## 3. Colour tokens
+
+Every colour goes through tokens. **Never hardcode a hex** in a new
+component — if a colour isn't in `AC` (admin) or `MC` (mobile),
+add it to the token file with a name that says what it's for.
+
+### Admin — `AC` from `morpheus-admin/lib/tokens.ts`
+
+```ts
+brand: "#15B4D6"        // Primary cyan. Buttons, links, focus rings.
+brandDeep: "#0E8FAD"    // Hover / pressed primary. Map markers.
+brandInk: "#073B47"     // Brand text on tint backgrounds.
+brandTint: "#E3F6FB"    // Brand chip background, info-tinted cards.
+brandSoft: "#F0FAFD"    // Subtler tint, e.g. selected-row stripe.
+
+ink: "#0F1216"          // Body text on white.
+ink2: "#22272E"         // Secondary text.
+ink3: "#3D4651"         // Tertiary text, helper copy.
+mute: "#5C6571"         // Muted labels, table column headers.
+hint: "#8B939E"         // Placeholders, very-low-emphasis text.
+faint: "#B6BCC5"        // Disabled-control ink.
+
+line: "#E4E7EB"         // Card borders, table row dividers.
+lineDim: "#EEF0F3"      // Even subtler dividers within a card.
+card: "#FFFFFF"         // Card background.
+bg: "#F7F8FA"           // Page background.
+bgDeep: "#EEF1F4"       // Section background inside a busy page.
+
+side: "#0E1116"         // Sidebar background (dark).
+sideInk: "#E6E9EE"      // Sidebar text.
+sideMute: "#8C95A2"     // Sidebar muted labels.
+sideHover: "#1B2027"    // Sidebar hover state.
+
+ok: "#1FA971"           // Success state ink.
+okTint: "#DEF6EB"       // Success-tinted backgrounds.
+warn: "#E5A017"         // Warn state ink (amber).
+warnTint: "#FDF1D5"     // Warn-tinted backgrounds.
+danger: "#D9365F"       // Danger state ink (pink-red).
+dangerTint: "#FDE4EC"   // Danger-tinted backgrounds.
+info: "#15B4D6"         // Alias of brand — info-tinted cards.
+infoTint: "#E3F6FB"     // Alias of brandTint.
+```
+
+Plus `AC.status[…]` (status pill palettes, see §9) and `AC.swatch[…]`
+(customer-brand swatches, see §10).
+
+**Shape:** `radiusCard: 14` · `radiusInput: 10` · `radiusChip: 999`
+**Layout:** `sideW: 240` · `sideWMini: 64` · `topH: 56`
+**Font:** Inter (system fallback)
+
+### Mobile — `MC` from `morpheus-mobile/lib/tokens.ts`
+
+Mostly the same palette, with a few deliberate differences:
+- Bigger card radius: `radiusCard: 18` (vs admin's 14) — phones are touch
+  surfaces, rounder reads softer.
+- Bigger input radius: `radiusInput: 12` (vs admin's 10).
+- Dark header bar (`header: "#171A1F"`, `headerInk: "#FFFFFF"`) for the
+  top of the mobile screen — admin uses a light topbar.
+- Smaller customer swatch palette: 5 codes (GW/NG/OS/SB/PR) vs admin's 7.
+  Mobile doesn't currently render the AC + HM swatches anywhere.
+
+**Don't import `AC` into mobile code or `MC` into admin code.** Each
+app has its own token file; they happen to share most values but are
+free to diverge.
+
+---
+
+## 4. Typography
+
+- **Font:** Inter, with system fallback. One typeface across both apps.
+- **Letter-spacing:** ~-0.1 on titles (Card SectionTitle uses this);
+  letter-spacing 2 on the wordmark.
+- **Weights:** 400 body, 600 emphasis, 700 titles, 800 wordmark.
+- **Sizes — admin:**
+  - Card section title: 13px / 700
+  - Body: 13-14px
+  - Sidebar nav link: 14px
+  - Sidebar glyph: 18px
+  - Sidebar tagline: 11-12.5px (force single-line via flexWrap nowrap)
+  - Pill solid: 11px · Pill outline: 10.5px
+- **Sizes — mobile:**
+  - Header: 16-18px
+  - Body: 15-16px (bigger than admin — touch readability)
+  - Glyph: 22px (Glyph component default)
+  - Wordmark: 14px
+
+If a new component needs a non-standard size, write a one-line code
+comment explaining why ("matches the screenshot Gary attached").
+
+---
+
+## 5. Shape & spacing
+
+**Card radius:** 14 admin / 18 mobile. Cards are the workhorse — most
+content sits in one.
+
+**Chip radius:** 999 (full pill) — Pills, FilterChips, status badges,
+brand chip.
+
+**Input radius:** 10 admin / 12 mobile. Combobox, text inputs, the
+duplicate-mode segmented picker.
+
+**Card padding:** `Card` defaults to 16. Override only when the card is
+hosting a table (use 0, then the table fills edge-to-edge) or when the
+card is a hero on a list-page header (use 18-20 for breathing room).
+
+**Section spacing inside a card:** 10-12px between `SectionTitle` and the
+first row. 12-14px between row groups.
+
+**Page gutter:**
+- Admin: `AdminShell` provides the gutter. Pages just stack cards inside
+  it; don't add page-level padding.
+- Mobile: `MenuShell` / `Chrome` provides the gutter. Pages render their
+  hero strip + cards inside.
+
+**Stack rhythm (mobile):** 12-16px gap between vertically stacked cards.
+Use `gap` on a flex column container; don't hand-tune margins.
+
+---
+
+## 6. Component primitives — admin
+
+All admin primitives live in `morpheus-admin/components/ui/`. **Use these
+before reaching for a raw div.** If you need something new, add it here
+so the next page can reuse it.
+
+### Layout & containers
+
+- **`Card`** — white background, 1px line border, radiusCard 14, padding
+  16. The default container. Almost every section on every page is in
+  one.
+- **`SectionTitle`** — 13px / 700, optional `action` slot on the right
+  (for "Add" buttons or filter chips).
+- **`AdminShell`** — top-level page wrapper. Includes the sidebar, the
+  topbar, page gutter. Every admin page renders inside this.
+- **`SettingsShell`** — secondary shell for `/settings/*` pages with the
+  settings-sidebar. Each settings sub-page also wraps in `AdminShell`.
+
+### Inputs
+
+- **`Btn`** — kinds: `"primary" | "secondary" | "ghost" | "danger"`.
+  Default `secondary`. Primary = brand-cyan fill. Danger = red fill.
+  Ghost = transparent. Use `primary` sparingly (one per screen — the
+  primary action).
+- **`Combobox`** — typeahead picker for entities (customer, rep, site).
+  Got an uplift on May 19 (`2351d1d`); use the new shape, not whatever
+  ad-hoc dropdown logic an older page might still have.
+- **`TimeCombobox`** — same shape, time-of-day picker (08:00, 08:30…).
+- **`AddressAutocomplete`** — Nominatim-backed address picker. Both
+  admin and mobile have one of these; use the app-local copy.
+- **`SegTabs`** — segmented control for 2-4 mutually-exclusive view
+  modes. Used for "Grid | Table" view toggles, "Skip | Update existing"
+  duplicate-mode picker.
+- **`FilterChip`** (from `Filters.tsx`) — the round pill that says "All"
+  / "With shifts today" / "Managers" on list pages. Click to toggle.
+- **`SortableHeader`** — clickable table header cell that toggles
+  asc / desc / unsorted via `SortState<T>`. Comes with `compareBy`.
+
+### Display
+
+- **`Pill`** — `solid` (filled, status chips, KPI counts) or `outline`
+  (hairline border, role labels, "Inactive" markers). Pass `bg` + `fg`
+  explicitly. Don't build a bespoke pill — use this.
+- **`StatusPill`** — Pill pre-wired to the `AC.status[…]` palettes.
+  Use this for the rep-state pills (offline / travelling / onsite /
+  onbreak / late / offsite). Don't construct status colours by hand.
+- **`AGlyph`** — admin icon registry. Named cases: see the file for the
+  full list. Adding a new icon = add a `case` line. **Don't import an
+  icon library** — every glyph in this app is an inline SVG in AGlyph
+  (or Glyph on mobile).
+- **`Avatars`** — `RepAvatar`, `RepConflictAvatar`, etc. Round avatar
+  with either a photo or initials fallback. Customer avatars use
+  `CustomerSwatch` (square with the brand swatch + house glyph or
+  uploaded logo).
+- **`GeocodeBadge`** — shows the geocode_status of a customer/site
+  (pending / done / failed) inline. Added with Phase E (May 25); use
+  it anywhere a list row shows a site address that might not be
+  resolved yet.
+- **`LoadingBar`** — top-of-page progress bar for slow loads.
+- **`SaveIndicator`** — bottom-right toast that fires from
+  `notifySaved()` / `notifySaveError()`. Don't show your own toast.
+
+### Content composers
+
+- **`EmptyState`** — the "no data" panel with an icon, a one-line
+  title, a sentence of helper copy, and an optional CTA. **Every list
+  page that can be empty must use this** — never raw "No results"
+  text.
+- **`ExpandableRow`** — accordion-style row that toggles open to reveal
+  detail. Used in the customers list and elsewhere.
+- **`TabHeader`** — strip of tabs sitting above a Card. Shared by the
+  tabbed customer detail page (Overview / Contacts / Reps / etc).
+- **`CustomFieldsCard`** + **`CustomFieldForm`** — render the
+  per-entity custom-field block. If a new entity needs custom fields,
+  thread it through `entity` prop.
+- **`CustomerScopePicker`** + **`RepScopePicker`** — multi-select
+  pickers for "which customers" / "which reps" this thing applies to.
+
+---
+
+## 7. Component primitives — mobile
+
+Mobile components live in `morpheus-mobile/components/`. Smaller set
+than admin (mobile is fewer surfaces, more focused).
+
+### Layout & chrome
+
+- **`MenuShell`** — top-level mobile page wrapper. Includes the dark
+  header, the side menu trigger, footer chrome via `Chrome`.
+- **`Chrome`** — bottom footer with the wordmark. Stays out of the way
+  of the iOS home indicator (May 14 fix: `viewport-fit: cover` on
+  `layout.tsx`).
+- **`SideMenu`** — slide-in menu from the right. Profile avatar at the
+  top, nav items, power glyph + logout above the footer.
+
+### Inputs & affordances
+
+- **`Glyph`** — mobile icon registry (similar shape to admin's
+  `AGlyph` but a different glyph set). Includes `route-alert` /
+  `route-done` (designed May 14 to read as a route shape), `pause` /
+  `play`, `power`, `camera`, etc.
+- **`SignaturePad`** — full-bleed signature capture with brand-tinted
+  border. Used in the customer-signature flow on `/active`.
+- **`AddressAutocomplete`** — mobile-tuned variant of the admin one.
+
+### Pills & state badges
+
+- **`PendingRequestPill`** — inline pill on `/shifts` rows that shows a
+  rep their request status (pending / approved / declined).
+- **State-aware route pill** (action vs calm) — pattern, not a single
+  component. Look at `app/page.tsx` (home) and `app/shifts/page.tsx`
+  for the canonical implementation. Calm = `route-done` glyph, no
+  background pulse. Action = `route-alert` glyph, amber fill, pulse
+  keyframe.
+
+### Overlays
+
+- **`CheckingInOverlay`** — full-screen "Wrapping up…" overlay on the
+  check-in / check-out transition. Branded skeleton; intentionally
+  slow so the rep sees something happened.
+- **`MessageBanner`** — top-of-page banner for transient feedback
+  (e.g. "Manager confirmed — you're still on this shift").
+- **`UnableToAttendSheet`** — bottom sheet for "Can't make this shift"
+  flow. 6 reasons + free-text note.
+- **`RouteOptimizedSheet`** — celebratory sheet when the user taps the
+  calm route pill. Reassurance copy ("Auto-checked every hour…").
+- **`LocationCard`** — `/profile`-only card explaining the iOS
+  "Allow Once" trap + how to fix.
+
+### Map components
+
+- **`DashboardMap`** — full home-page map. House glyph for sites,
+  face/photo for the rep.
+- **`MapPreview`** — small inline map for `/active` and elsewhere.
+- **`MiniRouteMap`** — even smaller map preview for `/route` route
+  cards.
+
+---
+
+## 8. Page-level patterns
+
+### Gold-standard list page — `/reps`
+
+When in doubt, copy `/reps`. It's the canonical list-page shape:
+
+1. **Hero card** (optional, for KPI rollups). Live Ops uses one for
+   the KPI strip; `/reps` skips it.
+2. **Filter card row** — a `Card` containing:
+   - `FilterChip`s for mutually-exclusive segments ("All / With shifts
+     today / No shifts today / Managers")
+   - A search input on the right
+   - A `SegTabs` view toggle ("Grid | Table") on the far right
+3. **Body card** — another `Card` containing either:
+   - **Table view** — `<table>` with `SortableHeader` cells, sortable
+     by `name | role | joined | shiftsToday`, click a row → drill in.
+   - **Grid view** — responsive grid of cards, one per item.
+4. **Empty state** — when the filter has no matches, the body card
+   renders an `EmptyState` (not raw "No results" text).
+
+The same pattern is followed on `/customers`, `/past-shifts`, `/tasks`,
+`/settings/managers`.
+
+### Detail page — header card + sectioned content
+
+1. **Header card** — entity title (customer name, rep name, shift
+   summary), a couple of `Pill`s for status/state, an actions slot on
+   the right with `Btn`s ("Edit" primary, "Email" secondary, etc.).
+2. **Sectioned content** below — one `Card` per logical section, each
+   with a `SectionTitle`.
+3. **Custom fields** — if the entity has custom fields, the last
+   section is a `CustomFieldsCard` with `entity="<entityType>"`.
+
+### Tabbed page — customer detail
+
+`/customers/[id]` uses `TabHeader` + an in-page tab router:
+
+- Overview / Contacts / Reps / Library / Tasks / Shifts (May 19 refactor;
+  see SESSIONS entry for `2351d1d`).
+- Each tab is its own component under
+  `morpheus-admin/components/customers/<Tab>Tab.tsx`.
+- Tabs share `tabStyles.ts` so they all read identically.
+- **Don't build a tabbed page without using `TabHeader`** — it owns
+  the visual grammar (active-tab underline, hover states).
+
+### Settings page — settings-shell pattern
+
+`/settings/*` uses `SettingsShell` which renders a left-rail of
+settings sections. To add a new settings section:
+
+1. Add an entry to `SETTINGS_SECTIONS` in
+   `components/shell/SettingsShell.tsx` (with the appropriate AGlyph).
+2. Create `app/settings/<your-section>/page.tsx` that wraps in both
+   `AdminShell` and `SettingsShell`.
+3. Use one `Card` per group of related toggles, each with a
+   `SectionTitle`.
+4. For each toggle, use the shared `<ToggleRow>` shape — see
+   `/settings/check-in-rules` for the canonical example.
+
+### Empty state
+
+Always `EmptyState`. Three slots: icon (`AGlyph`), title (short — 3-5
+words), helper text (one sentence explaining why it's empty + how to
+fix). Optional CTA `Btn` at the bottom.
+
+If the empty state is also "you haven't set this up yet", the CTA
+should be primary. If it's a transient empty state (filter matched
+nothing), the CTA should be secondary or absent.
+
+### Loading state
+
+- **Page-level slow load:** `LoadingBar` at the top of the page.
+- **Card-level pending:** show the card structure with skeleton text
+  blocks (grey bars). Don't blank the whole card.
+- **Inline pending:** an `AGlyph name="loading"` or a 1-line "Working…"
+  string. Not a spinner — we don't use raw spinners.
+
+### Forms
+
+- One `Card` per logical field group ("Identity", "Location",
+  "Check-in exceptions" — see `/customers/[id]/edit` for the
+  canonical example).
+- `<label>` above each input, 13px / 600, `AC.ink2`.
+- Validation errors render below the input in `AC.danger`.
+- Save button at the bottom, primary, plus an outline secondary
+  "Cancel" or "Discard changes".
+- **Optimistic UI by default** — flip the UI first, revert on save
+  failure. See May 25 Phase A for the canonical pattern (the import
+  defaults page does this).
+
+### Modals & sheets
+
+- **Modal** (admin) — `createPortal` to `document.body` to escape
+  stacking context. Backdrop click closes. Escape closes. Focus traps
+  to the primary action via `autoFocus`. `EmailUserModal` is the
+  canonical reference (May 25, `d164b29`).
+- **Sheet** (mobile, bottom-anchored) — slides up from below, dismisses
+  by tapping outside or swiping down. `UnableToAttendSheet` /
+  `RouteOptimizedSheet` are the references.
+- **Lightbox** (admin photo viewer) — full-screen dark backdrop
+  (`rgba(0,0,0,0.85)`), centred content max 90vw × 90vh,
+  prev/next/close all wired to keyboard + click. `PhotoLightbox` in
+  `/shifts/[id]/page.tsx` is the reference (May 21, `ed14a0a`).
+
+---
+
+## 9. Status pills grammar
+
+Rep state pills use `AC.status[…]` — pre-baked bg/dot/ink palettes
+keyed by state name. Use `StatusPill` not a hand-rolled `Pill`:
+
+| State | Used on | Visual |
+|---|---|---|
+| `offline` | Rep is off-shift | Grey |
+| `travelling` | Rep is en-route to a site | Amber |
+| `onsite` | Rep is checked in | Green |
+| `onbreak` | Rep tapped Pause | Indigo |
+| `late` | Rep is past their start time, not checked in | Red |
+| `offsite` | Rep is outside the geofence during a shift | Amber |
+
+Adding a new state means adding a new entry to `AC.status` AND adding
+the same colour-grammar in `MC` (mobile) so the rep sees the same
+colour for the same state across surfaces.
+
+**Tone of state colours is fixed:**
+- Green / `ok` = "this is the desired state, things are working"
+- Amber / `warn` = "this needs attention but isn't broken"
+- Red / `danger` = "this needs immediate action or has failed"
+- Indigo / on-break = "this is a deliberate paused state"
+- Grey / offline = "this is the off state, nothing to do"
+
+Don't repurpose a colour. Don't make "this customer has a lot of
+shifts" green — green means "operational" in this app.
+
+---
+
+## 10. Customer + rep visual identity
+
+The May 11 identity pass codified two glyphs:
+
+- **Customer = house glyph** (rounded-square avatar with the customer
+  swatch + a tiny house SVG, OR an uploaded customer logo if
+  `customers.logo_url` is set).
+  - Admin: `CustomerSwatch` component (in `Avatars.tsx`).
+  - Mobile: `CustomerTile` (in the mobile components folder).
+  - Both auto-branch on `logoUrl`.
+- **Rep = face glyph or photo** (round avatar with the rep's
+  uploaded photo OR a face SVG fallback, OR initials if neither).
+  - `RepAvatar` (admin), profile-photo flows on mobile.
+
+**Use these everywhere a customer or rep appears.** Don't render a
+raw initials block for a customer (it'll look like a rep).
+
+### Customer swatches
+
+7 swatches in admin (`AC.swatch.GW / NG / OS / SB / PR / AC / HM`),
+5 in mobile. Each customer gets one assigned at creation time. The
+swatch shows behind the house glyph + the logo (if uploaded, the
+swatch becomes a thin border).
+
+### Per-customer logos
+
+`customers.logo_url` stores a client-side compressed ~96×96 letterboxed
+JPEG (5-15KB base64, see May 11 SESSIONS entry). When uploaded, every
+surface that renders the customer auto-branches:
+- Shift rows, `/active` hero, `/check-in` / `/check-out`,
+  `/add-shift` picker, `/route` badges, map markers — all without
+  per-call-site changes.
+
+---
+
+## 11. Microcopy & voice
+
+**Voice:** friendly + crisp. Sound like a competent colleague briefing
+you in a hallway, not a tooltip and not a manual.
+
+**Examples (good):**
+- "Wrapping up…" (check-out transition overlay)
+- "Awesome!" (check-in success overlay)
+- "Pick your order" (calendar conflict warn-but-allow)
+- "Manager confirmed — you're still on this shift" (rep-feedback pill)
+- "No photos uploaded (expected 3)" (photo viewer per-task)
+
+**Anti-patterns (don't):**
+- "Saving" / "Loading…" / "Please wait" — too generic, no personality.
+- "Operation completed successfully" — never.
+- All-caps shouting unless it's the wordmark.
+- "404" / "Error" / "Forbidden" raw HTTP status text — translate to
+  human ("Couldn't find that shift", "You don't have access to
+  this").
+
+**Empty state copy formula:** one short title (3-5 words) + one
+sentence explaining why + one optional CTA.
+
+> "No shifts today" / "No reps are working today. New schedules will
+> appear here." / [Schedule a shift] (primary button)
+
+**Confirmation copy formula:** name the noun, name the action, name
+the consequence in one line.
+
+> "Cancel shift?" / "This will remove it from the rep's calendar and
+> the customer won't be visited today." / [Keep shift] [Cancel shift]
+
+**Error copy formula:** what failed + what they can do.
+
+> "Couldn't send the welcome email. Check `RESEND_API_KEY` in Vercel
+> settings, or copy the password from below."
+
+---
+
+## 12. Interaction patterns
+
+### Optimistic UI
+
+Flip the UI first, revert on failure. Used on settings toggles,
+filter chips, the Pause/Resume button, drag-drop calendar moves.
+Pattern: set local state immediately, kick the network call, on
+failure restore the previous state + show `notifySaveError`.
+
+### Toggle buttons (single button, state-aware)
+
+When an action and its inverse occupy the same conceptual slot,
+use ONE button that toggles between the two states. Don't show
+"Pause" and "Resume" as two buttons that swap visibility — show
+one button whose icon, label, and tone change.
+
+Canonical example: `/active` Pause↔Resume button (May 14, `4a23742`).
+Amber translucent when paused (Resume label, play glyph), white when
+running (Pause label, pause glyph).
+
+### Save notifier (`notifySaved` / `notifySaveError`)
+
+Don't build your own toast. Import from `lib/save-status.ts`:
+- `notifySaved("request approved")` — green tick toast bottom-right
+- `notifySaveError("couldn't send email", "user")` — red toast with
+  the resource name
+
+The `SaveIndicator` component (mounted in `AdminShell`) listens for
+these and renders the toast.
+
+### Realtime updates
+
+Subscribe via the shared store function (`subscribeRequests`,
+`subscribeProfiles`, `subscribeImportRuns`, etc) — not by writing
+your own `supabase.channel(…).on(…)` block on the page. The store
+function handles channel naming, cleanup, and event filtering.
+
+For cross-surface counts (e.g. "Needs action" appearing in three
+places at once), use a shared React context provider mounted in
+`AdminShell` — `NeedsActionContext` is the reference (May 14,
+`9e18116`). One subscription, all surfaces derive from it.
+
+### Forms — save status
+
+- "Saved" / "Saving" / "Couldn't save" state visible on the Save
+  button itself, not as a separate banner.
+- Disable the button during the request (avoid double-submits).
+- On success, the optimistic UI is already correct — just fire
+  `notifySaved` and re-enable.
+
+---
+
+## 13. iOS PWA landmines
+
+The mobile app is installed as an iOS standalone PWA (and Android
+Chrome). iOS has bitten us repeatedly. **Read this before adding any
+tap → camera, tap → file picker, tap → window.open, or tap → push
+permission flow.**
+
+### User-activation rule
+
+iOS only treats a tap as a "user gesture" for the same synchronous
+call stack. Any `await` between the tap handler and the destination
+call (`.click()`, `window.open()`, `Notification.requestPermission()`)
+**drops the activation flag** and the OS silently blocks the popup /
+camera / permission prompt.
+
+**Wrong:**
+```ts
+async function startPhotoFlow(taskId) {
+  await refreshPhotoCount(taskId);  // ← drops activation
+  photoInputRef.current?.click();   // ← iOS silently blocks
+}
+```
+
+**Right:**
+```ts
+function startPhotoFlow(taskId) {
+  // Read cached count synchronously from a useEffect-hydrated Map
+  const count = taskPhotoCounts.get(taskId) ?? 0;
+  photoInputRef.current?.click();   // ← same call stack as the tap
+}
+```
+
+`requestAnimationFrame(() => click())` ALSO breaks activation —
+schedule into the next frame and iOS treats it as no-longer-user-
+gestured. Don't use rAF between tap and click.
+
+See May 14 SESSIONS entry for `447fc82` — the actual root-cause fix
+for photo capture, after several "almost right" attempts.
+
+### Safe-area insets
+
+iOS standalone PWA renders content under the bottom home-indicator
+band. Set `viewport-fit: cover` in `viewport` export (already done
+in `morpheus-mobile/app/layout.tsx`) and use `env(safe-area-inset-*)`
+in any element that touches the screen edge.
+
+### Library / file open
+
+Same activation rule as camera. Pre-sign storage URLs in advance
+(batched `createSignedUrls`) and render each row as a real
+`<a href={url} target="_blank">` anchor — don't generate the URL on
+tap. See `cf04b9d` (May 14 library fix).
+
+### Cross-platform statement
+
+**Every mobile change must state which platforms were considered.**
+Per the CLAUDE_BEHAVIOR baseline, end your response with the
+platforms you tested or thought about:
+
+> "Cross-platform considered: iOS standalone PWA (synchronous tap
+> chain preserved), Android Chrome (no user-activation quirks, works
+> the same), desktop browsers (mouse click is also a user gesture)."
+
+---
+
+## 14. Accessibility baseline
+
+We don't have a formal a11y audit yet, but the floor is:
+
+- **Focus visible** — never `outline: none` without a replacement focus
+  ring. Brand-cyan ring is the default.
+- **Escape closes overlays** — modals, sheets, lightboxes all wire an
+  Escape handler.
+- **Backdrop click closes modals** (not sheets — those should require
+  a deliberate dismiss).
+- **Tab order is reading order** — don't `tabIndex` a fix in unless
+  there's a real reason.
+- **Touch target ≥ 44×44px on mobile** — iOS HIG floor. Pills, chips,
+  and inline buttons can be smaller VISUALLY but their tap target
+  (achieved with padding) must hit 44.
+- **Colour contrast** — ink on white is fine. Ink2 / Ink3 on white is
+  fine. Mute / Hint / Faint on white DROP below AA at small sizes —
+  use them only for ≥13px text or for non-text affordances.
+- **Glyph-only buttons need an `aria-label`** — the icon-only Pause
+  button, the menu hamburger, the close × on modals.
+
+---
+
+## 15. Checklist — adding a new page
+
+When you add a new page, walk this list. If a checkbox can't be
+ticked, leave a one-line code comment explaining why.
+
+- [ ] Wrapped in `AdminShell` (admin) or `MenuShell` (mobile).
+- [ ] No hardcoded hex colours — everything via `AC` / `MC`.
+- [ ] Cards use the `Card` component, not a raw div with a border.
+- [ ] Section headings use `SectionTitle` (admin) or the mobile
+      equivalent.
+- [ ] Buttons use `Btn` with `kind` set explicitly.
+- [ ] Pills use `Pill` / `StatusPill` — not a hand-rolled span.
+- [ ] Icons via `AGlyph` (admin) or `Glyph` (mobile). Added a new
+      one? `case "<name>":` added to the registry.
+- [ ] Empty state uses `EmptyState`.
+- [ ] Loading state shows something visible — skeleton card,
+      `LoadingBar`, or a "Working…" line. Never a blank card.
+- [ ] Save status uses `notifySaved` / `notifySaveError`.
+- [ ] Optimistic UI on toggles + flips.
+- [ ] Realtime subscription via the shared store, not a raw
+      `supabase.channel`.
+- [ ] If the page touches a Card with photos / signatures / docs,
+      thumbnails use the same shape (square 64×64 admin / round
+      72×72 mobile).
+- [ ] If the page renders a customer, customer = house glyph or
+      uploaded logo. If a rep, rep = photo or face/initials.
+- [ ] Mobile: tap → camera / file / window.open is synchronous
+      (no `await` between tap and call).
+- [ ] Mobile: every page passes the cross-platform statement
+      (iOS PWA + Android Chrome behaviour) in the PR description /
+      session log entry.
+- [ ] Microcopy formula: short title, one-sentence helper, optional
+      CTA. Friendly + crisp.
+- [ ] `npx --no-install next build` is clean before you commit.
+- [ ] Added to the relevant nav (`mock-data.ts` NAV_ITEMS,
+      `SETTINGS_SECTIONS`, mobile `SideMenu`).
+- [ ] SESSIONS.md entry written when you push.
+
+---
+
+## Glossary — when in doubt, "the X-est example is…"
+
+Reference points for "what good looks like":
+
+| Surface | Reference page | Why |
+|---|---|---|
+| List page | `/reps` | Filter chips + search + Grid/Table toggle + sortable headers + empty state |
+| Detail page (read-only) | `/shifts/[id]` | Header card + section cards + inline photo strip + lightbox |
+| Detail page (editable) | `/customers/[id]/edit` | Identity / Location / Check-in exceptions section structure |
+| Tabbed detail | `/customers/[id]` | TabHeader + per-tab components + shared tabStyles |
+| Settings page | `/settings/check-in-rules` | ToggleRow pattern, segmented picker, optimistic UI |
+| Wizard | `/settings/import/[entity]` | 5-step stepper, dropzone, mapping, preview, result |
+| Empty state | `/past-shifts` (when filter matches none) | EmptyState used correctly |
+| Confirmation modal | `EmailUserModal` | createPortal, backdrop, Escape, autoFocus |
+| Lightbox | PhotoLightbox in `/shifts/[id]` | Full-screen, prev/next, caption, keyboard |
+| Sheet (mobile) | `UnableToAttendSheet` | Bottom-anchored, dismissible, structured options |
+| Optimistic UI | `/settings/import` defaults | Toggle, segmented, revert on failure |
+| Realtime | `NeedsActionContext` | Shared provider, multi-surface count agreement |
+
+When you're not sure how to build a thing, find its row in this table
+and crack open the reference page first.
