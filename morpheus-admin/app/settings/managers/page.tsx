@@ -17,6 +17,7 @@ import { ColumnResizer } from "@/components/ui/ColumnResizer";
 // over once the user resizes (key `morpheus.cols.settings-managers.v1`).
 const USERS_COLUMNS = [280, 200, 110, 130, 110] as const;
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { SettingsShell } from "@/components/shell/SettingsShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
@@ -32,7 +33,6 @@ import {
 import { createUser, deleteUser, randomPassword } from "@/lib/users-admin";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
-import { ManageRepTypesSheet } from "@/components/users/ManageRepTypesSheet";
 
 const deriveInitials = (p: Profile) => initialsFromNameOrEmail(p.name, p.email);
 
@@ -46,22 +46,26 @@ function formatJoined(iso: string | undefined): string {
 }
 
 export default function ManagersPage() {
+  const router = useRouter();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [myId, setMyId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "manager" | "rep">("all");
+  // Search + rep-type filter — May 27 (very-very late). Brings this
+  // page up to the same UX as /reps + /customers etc. Both reset
+  // pagination to 0 on change.
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>("");
   const [page, setPage] = useState(0);
   // Resizable columns — widths persisted per-browser via localStorage.
   const cols = useColumnWidths("settings-managers", USERS_COLUMNS);
 
   // Add-user modal
   const [addOpen, setAddOpen] = useState(false);
-  // Manage-rep-types modal + the live vocabulary so we can offer
-  // type assignments inline + so it's available to pass into the
-  // edit page once that wiring lands.
-  const [repTypesOpen, setRepTypesOpen] = useState(false);
+  // Live rep-types vocabulary — read for the type-filter dropdown.
+  // Editing the vocabulary lives at /settings/rep-types now.
   const [repTypes, setRepTypesState] = useState<RepTypeConfig[]>([]);
 
   useEffect(() => {
@@ -88,15 +92,31 @@ export default function ManagersPage() {
   }, [profiles]);
 
   const filtered = useMemo(() => {
-    if (filter === "all") return profiles;
-    return profiles.filter((p) => p.role === filter);
-  }, [profiles, filter]);
+    let out = profiles;
+    if (filter !== "all") out = out.filter((p) => p.role === filter);
+    if (typeFilter) {
+      out = out.filter(
+        (p) =>
+          (p.rep_type || "").toLowerCase() === typeFilter.toLowerCase()
+      );
+    }
+    const q = search.trim().toLowerCase();
+    if (q) {
+      out = out.filter(
+        (p) =>
+          (p.name || "").toLowerCase().includes(q) ||
+          p.email.toLowerCase().includes(q) ||
+          (p.rep_type || "").toLowerCase().includes(q) ||
+          p.role.toLowerCase().includes(q)
+      );
+    }
+    return out;
+  }, [profiles, filter, typeFilter, search]);
 
-  // Reset to page 0 whenever the filter changes — without this the
-  // user could land on an empty page after narrowing results.
+  // Reset to page 0 whenever any filter or search changes.
   useEffect(() => {
     setPage(0);
-  }, [filter]);
+  }, [filter, typeFilter, search]);
 
   // Slice the filtered array down to the current page's window.
   const pageItems = filtered.slice(
@@ -138,9 +158,6 @@ export default function ManagersPage() {
       section="managers"
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          <Btn size="sm" icon="settings" onClick={() => setRepTypesOpen(true)}>
-            Manage rep types
-          </Btn>
           <Link href="/settings/import" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
               Import
@@ -216,6 +233,76 @@ export default function ManagersPage() {
             <FilterChip active={filter === "rep"} onClick={() => setFilter("rep")}>
               Reps
             </FilterChip>
+            {repTypes.length > 0 && (
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                title="Filter by rep type"
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: `1px solid ${
+                    typeFilter ? AC.brandDeep : AC.line
+                  }`,
+                  background: typeFilter ? AC.brandSoft : "#fff",
+                  color: typeFilter ? AC.brandInk : AC.ink2,
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">All types</option>
+                {repTypes.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "5px 10px",
+                background: AC.bg,
+                border: `1px solid ${AC.line}`,
+                borderRadius: 8,
+                width: 220,
+              }}
+            >
+              <AGlyph name="search" size={13} color={AC.hint} />
+              <input
+                placeholder="Name, email, role, or type…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{
+                  flex: 1,
+                  border: "none",
+                  outline: "none",
+                  background: "transparent",
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  color: AC.ink,
+                }}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    display: "flex",
+                  }}
+                >
+                  <AGlyph name="x" size={12} color={AC.hint} />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Column-header row — added for resizable-column UX. Mirrors
@@ -289,6 +376,15 @@ export default function ManagersPage() {
             pageItems.map((p, i) => (
               <div
                 key={p.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => router.push(`/settings/managers/${p.id}/edit`)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    router.push(`/settings/managers/${p.id}/edit`);
+                  }
+                }}
                 style={{
                   display: "grid",
                   gridTemplateColumns: cols.gridTemplateColumns,
@@ -297,6 +393,7 @@ export default function ManagersPage() {
                   padding: "12px 16px",
                   borderBottom: i < pageItems.length - 1 ? `1px solid ${AC.lineDim}` : "none",
                   background: "#fff",
+                  cursor: "pointer",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -397,24 +494,14 @@ export default function ManagersPage() {
                 >
                   {p.role === "manager" ? "Admin access" : "Mobile only"}
                 </div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
-                  <Link
-                    href={`/settings/managers/${p.id}/edit`}
-                    title="Edit user"
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: 8,
-                      border: `1px solid ${AC.line}`,
-                      background: "#fff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      textDecoration: "none",
-                    }}
-                  >
-                    <AGlyph name="edit" size={14} color={AC.ink2} />
-                  </Link>
+                <div
+                  style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}
+                  // The Promote/Demote button is an in-place action,
+                  // not a navigation — stop the click from bubbling
+                  // to the row-level "go to edit" handler.
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
                   <Btn
                     size="sm"
                     kind={p.role === "manager" ? "secondary" : "primary"}
@@ -462,16 +549,6 @@ export default function ManagersPage() {
         />
       )}
 
-      {repTypesOpen && (
-        <ManageRepTypesSheet
-          current={repTypes}
-          onClose={() => setRepTypesOpen(false)}
-          onSaved={(next) => {
-            setRepTypesState(next);
-            setRepTypesOpen(false);
-          }}
-        />
-      )}
     </SettingsShell>
   );
 }

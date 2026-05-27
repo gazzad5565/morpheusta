@@ -1,45 +1,54 @@
 "use client";
 
 /**
- * ManageRepTypesSheet — full CRUD modal for the rep-type vocabulary
- * stored in app_settings.rep_types.
+ * /settings/rep-types — manage the rep-category vocabulary + per-type
+ * capability flags.
  *
- * Shape mirrors ManageCategoriesSheet from /library — same centred
- * modal, name-input rows, add-from-bottom pattern. Difference: each
- * row also has a "Can add customers" checkbox (the first per-type
- * capability flag). Save commits the whole new list to app_settings
- * via setRepTypes().
+ * Each rep type has:
+ *   - name     — what shows on profiles, in pickers, and on filter
+ *                chips across the admin.
+ *   - canCreateCustomers — currently the only capability flag. Drives
+ *                whether the mobile app shows the Add Customer
+ *                affordance for reps of this type.
  *
- * Rows are stable across save (no UUID per row — the name is the
- * identifier). Renaming a type in the vocabulary list does NOT
- * automatically rename it on existing profiles.rep_type rows; those
- * would still hold the old name. A future migration could handle
- * that, but for now the manager owns the rename consequence.
+ * Renaming a type does NOT cascade to existing profiles.rep_type rows
+ * or shifts.claimable_rep_types arrays — those keep the old name and
+ * become effectively orphaned (no rep matches; restricted shifts
+ * become unclaimable). UI warns before destructive renames in a
+ * future polish; today it's manager judgement.
+ *
+ * Storage: app_settings.rep_types JSON array. Same shape every
+ * caller (admin + mobile) parses through getRepTypes() with a
+ * defensive reader that tolerates missing capability keys.
  */
 
-import { useState } from "react";
-import { AGlyph } from "@/components/ui/AGlyph";
+import { useEffect, useState } from "react";
+import { Card } from "@/components/ui/Card";
 import { Btn } from "@/components/ui/Btn";
+import { AGlyph } from "@/components/ui/AGlyph";
+import { SettingsShell } from "@/components/shell/SettingsShell";
 import { AC } from "@/lib/tokens";
 import {
+  getRepTypes,
   setRepTypes,
   type RepTypeConfig,
 } from "@/lib/settings-store";
 
-export function ManageRepTypesSheet({
-  current,
-  onClose,
-  onSaved,
-}: {
-  current: RepTypeConfig[];
-  onClose: () => void;
-  onSaved: (next: RepTypeConfig[]) => void;
-}) {
-  const [list, setList] = useState<RepTypeConfig[]>(() => [...current]);
+export default function RepTypesPage() {
+  const [list, setList] = useState<RepTypeConfig[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [newName, setNewName] = useState("");
   const [newCanCreate, setNewCanCreate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    getRepTypes().then((rows) => {
+      setList(rows);
+      setLoaded(true);
+    });
+  }, []);
 
   const addOne = () => {
     setError(null);
@@ -58,7 +67,7 @@ export function ManageRepTypesSheet({
     next[i] = { ...next[i], name };
     setList(next);
   };
-  const toggleCanCreateAt = (i: number, value: boolean) => {
+  const toggleAt = (i: number, value: boolean) => {
     const next = [...list];
     next[i] = { ...next[i], canCreateCustomers: value };
     setList(next);
@@ -75,86 +84,41 @@ export function ManageRepTypesSheet({
       setError(r.error || "Couldn't save.");
       return;
     }
-    onSaved(list);
+    setSavedAt(Date.now());
   };
 
   return (
-    <>
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(10,15,30,.32)",
-          zIndex: 200,
-        }}
-      />
-      <div
-        role="dialog"
-        aria-label="Manage rep types"
-        style={{
-          position: "fixed",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%)",
-          width: 540,
-          maxWidth: "calc(100vw - 32px)",
-          maxHeight: "calc(100vh - 80px)",
-          overflowY: "auto",
-          background: "#fff",
-          border: `1px solid ${AC.line}`,
-          borderRadius: 14,
-          boxShadow: "0 24px 60px rgba(10,15,30,.24)",
-          zIndex: 201,
-          padding: 22,
-          fontFamily: AC.font,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ flex: 1 }}>
-            <div
-              style={{
-                fontSize: 16,
-                fontWeight: 700,
-                color: AC.ink,
-                letterSpacing: -0.2,
-              }}
-            >
-              Rep types
-            </div>
-            <div style={{ fontSize: 12, color: AC.mute, marginTop: 2 }}>
-              Categorise mobile reps so you can filter by type + control which
-              types can add customers from the mobile app. Reps with no type
-              assigned (or a deleted type) keep all default capabilities.
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <AGlyph name="x" size={14} color={AC.mute} />
-          </button>
+    <SettingsShell
+      section="rep-types"
+      description="Categorise mobile reps + control what each type can do. Used across /reps filtering, the shift-claim restrictions, and the mobile app's Add Customer affordance."
+    >
+      <Card padding={20}>
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 12,
+            color: AC.mute,
+            marginBottom: 16,
+            lineHeight: 1.5,
+          }}
+        >
+          <b style={{ color: AC.ink2 }}>Heads up:</b> renaming a type
+          doesn&apos;t rename it on existing reps or restricted shifts —
+          those keep the old name and become effectively orphaned (no
+          rep matches; restricted shifts become unclaimable). Delete is
+          fine — reps with a deleted type fall back to allow-all
+          capabilities; restricted shifts on a deleted type become
+          unclaimable until a manager edits them.
         </div>
 
-        {/* Column hints — keeps the row layout readable. */}
+        {/* Header row — matches the modal it replaces. */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 160px 28px",
-            gap: 8,
+            gridTemplateColumns: "1fr 180px 32px",
+            gap: 10,
             padding: "0 8px 6px 8px",
+            fontFamily: AC.font,
             fontSize: 10.5,
             color: AC.mute,
             fontWeight: 700,
@@ -167,9 +131,20 @@ export function ManageRepTypesSheet({
           <div></div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
-          {list.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: AC.mute }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            marginBottom: 14,
+          }}
+        >
+          {!loaded ? (
+            <div style={{ fontSize: 12.5, color: AC.mute, padding: "12px 8px" }}>
+              Loading…
+            </div>
+          ) : list.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: AC.mute, padding: "12px 8px" }}>
               No types yet — add at least one below.
             </div>
           ) : (
@@ -178,7 +153,7 @@ export function ManageRepTypesSheet({
                 key={i}
                 config={t}
                 onRename={(name) => renameAt(i, name)}
-                onToggleCanCreate={(v) => toggleCanCreateAt(i, v)}
+                onToggle={(v) => toggleAt(i, v)}
                 onRemove={() => removeAt(i)}
               />
             ))
@@ -189,8 +164,8 @@ export function ManageRepTypesSheet({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 160px 28px",
-            gap: 8,
+            gridTemplateColumns: "1fr 180px 32px",
+            gap: 10,
             alignItems: "center",
             padding: "10px 8px",
             background: AC.brandSoft,
@@ -234,9 +209,9 @@ export function ManageRepTypesSheet({
             disabled={!newName.trim()}
             title="Add type"
             style={{
-              width: 28,
-              height: 28,
-              borderRadius: 7,
+              width: 32,
+              height: 32,
+              borderRadius: 8,
               border: `1px solid ${newName.trim() ? AC.brandDeep : AC.line}`,
               background: newName.trim() ? AC.brand : "#fff",
               color: newName.trim() ? "#fff" : AC.faint,
@@ -246,58 +221,83 @@ export function ManageRepTypesSheet({
               justifyContent: "center",
             }}
           >
-            <AGlyph name="plus" size={14} color={newName.trim() ? "#fff" : AC.faint} />
+            <AGlyph
+              name="plus"
+              size={14}
+              color={newName.trim() ? "#fff" : AC.faint}
+            />
           </button>
         </div>
 
         {error && (
           <div
             style={{
-              padding: "8px 10px",
+              padding: "10px 12px",
               background: AC.dangerTint,
               color: "#9c1a3c",
               borderRadius: 8,
-              fontSize: 12.5,
+              fontFamily: AC.font,
+              fontSize: 13,
               fontWeight: 500,
-              marginBottom: 10,
+              marginBottom: 12,
             }}
           >
             {error}
           </div>
         )}
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Btn onClick={onClose} disabled={busy}>
-            Cancel
-          </Btn>
-          <Btn kind="primary" onClick={save} disabled={busy || list.length === 0}>
-            {busy ? "Saving…" : "Save"}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          {savedAt && Date.now() - savedAt < 4000 && (
+            <span
+              style={{
+                fontFamily: AC.font,
+                fontSize: 12,
+                color: AC.ok,
+                fontWeight: 600,
+              }}
+            >
+              ✓ Saved
+            </span>
+          )}
+          <Btn
+            kind="primary"
+            onClick={save}
+            disabled={busy || list.length === 0 || !loaded}
+          >
+            {busy ? "Saving…" : "Save changes"}
           </Btn>
         </div>
-      </div>
-    </>
+      </Card>
+    </SettingsShell>
   );
 }
 
 function RowEditor({
   config,
   onRename,
-  onToggleCanCreate,
+  onToggle,
   onRemove,
 }: {
   config: RepTypeConfig;
   onRename: (name: string) => void;
-  onToggleCanCreate: (v: boolean) => void;
+  onToggle: (v: boolean) => void;
   onRemove: () => void;
 }) {
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 160px 28px",
-        gap: 8,
+        gridTemplateColumns: "1fr 180px 32px",
+        gap: 10,
         alignItems: "center",
-        padding: "6px 8px",
+        padding: "8px",
         background: AC.bg,
         borderRadius: 8,
       }}
@@ -320,10 +320,10 @@ function RowEditor({
         <input
           type="checkbox"
           checked={config.canCreateCustomers}
-          onChange={(e) => onToggleCanCreate(e.target.checked)}
+          onChange={(e) => onToggle(e.target.checked)}
           style={{ width: 14, height: 14, accentColor: AC.brand }}
         />
-        <span>Yes</span>
+        <span>{config.canCreateCustomers ? "Yes" : "No"}</span>
       </label>
       <button
         type="button"
@@ -331,9 +331,9 @@ function RowEditor({
         title={`Remove ${config.name}`}
         aria-label={`Remove ${config.name}`}
         style={{
-          width: 28,
-          height: 28,
-          borderRadius: 7,
+          width: 32,
+          height: 32,
+          borderRadius: 8,
           border: `1px solid ${AC.line}`,
           background: "#fff",
           cursor: "pointer",
@@ -350,8 +350,8 @@ function RowEditor({
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: "7px 9px",
-  borderRadius: 7,
+  padding: "8px 10px",
+  borderRadius: 8,
   border: `1px solid ${AC.line}`,
   background: "#fff",
   fontFamily: AC.font,

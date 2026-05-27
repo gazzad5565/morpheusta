@@ -14,6 +14,7 @@
 
 ## Quick TOC
 
+- [May 27, 2026 (very-very late) — /settings/rep-types page + Users page UX parity](#todays-session--what-shipped-may-27-2026-very-very-late)
 - [May 27, 2026 (very late) — rep_type propagation: chips everywhere reps appear + claimable_rep_types shift restriction](#todays-session--what-shipped-may-27-2026-very-late)
 - [May 27, 2026 (late) — rep types + capability flags (canCreateCustomers)](#todays-session--what-shipped-may-27-2026-late)
 - [May 27, 2026 (later) — resizable columns + customer overview contacts + shifts tab expanded](#todays-session--what-shipped-may-27-2026-evening)
@@ -28,6 +29,83 @@
 - [May 8, 2026 — multi-site customers schema + admin Sites tab](#todays-session--what-shipped-may-8-2026)
 - [May 7, 2026 — calendar, schedule rewrites, broad UX pass](#todays-session--what-shipped-may-7-2026)
 - [May 6, 2026 — auto-checkout, organisation settings, indexes](#todays-session--what-shipped-may-6-2026)
+
+---
+
+### Today's session — what shipped (May 27, 2026, very-very late)
+
+Gary's feedback right after the rep-types ship: vocabulary management
+isn't discoverable enough (the modal-on-/settings/managers is buried),
+and the Users page itself is inconsistent with every other list page
+in the admin (no row click, no search, no type filter).
+
+#### 1. Vocabulary management gets a first-class Settings page
+
+- **New page `/settings/rep-types`** — dedicated CRUD surface for the
+  rep-type vocabulary + per-type capability flags. Same shape as
+  the modal it replaces (name input, "Can add customers?" checkbox,
+  trash button to remove, add-from-bottom row, single Save button)
+  but as a regular page so it shows in the Settings rail and gets
+  the natural URL `/settings/rep-types`.
+- **`SettingsShell.SETTINGS_SECTIONS`** gains a "Rep types" entry
+  between Users and Check-in rules. Glyph: `tasks`. Description
+  spells out what types control (filtering + claim restrictions +
+  mobile capability flags).
+- **`/settings/managers`** loses the "Manage rep types" button
+  from its actions row — that action is now in the Settings rail
+  where it belongs.
+- **`components/users/ManageRepTypesSheet.tsx`** deleted (was the
+  modal that opened on the old button). The page replaces it
+  entirely; no callers reference the modal anymore.
+- The new page warns inline that renaming a type doesn't cascade
+  to existing profiles.rep_type or shifts.claimable_rep_types
+  arrays — same disclosure that was in the modal, kept verbatim.
+
+#### 2. Users page (`/settings/managers`) — UX parity with other list pages
+
+Three changes to bring it in line with `/reps`, `/customers`, `/tasks`,
+`/library`:
+
+- **Clickable rows** — every row now navigates to
+  `/settings/managers/<id>/edit` on click (and on Enter / Space for
+  keyboard users). `role="button"`, `tabIndex={0}`, `cursor: pointer`.
+- **Edit pencil button removed** — was redundant with the new
+  row-click behaviour. The Promote/Demote button remains as an
+  in-place action, wrapped in a `<div onClick={stopPropagation}>`
+  so clicking it doesn't bubble up to the row-level navigate
+  handler.
+- **Search box** added to the filter row — free-text matches name,
+  email, role, and rep_type. Same shape (left search glyph, right
+  ✕ clear button, 220px width) as the search box on `/reps` /
+  `/tasks` / `/library`.
+- **Rep-type filter `<select>`** added between the role filter
+  chips and the search box. Brand-tinted accent when active.
+  Hidden when the vocabulary is empty. Mirrors the same control
+  on `/reps`.
+- **`filtered` useMemo** extended to apply both the type filter
+  and the search (alongside the existing role filter). All three
+  inputs reset pagination to page 0 via the existing
+  `useEffect([filter, typeFilter, search]) → setPage(0)` hook.
+
+#### Acceptance
+
+- ✅ `next build` clean — 40 routes (added one for the new page).
+- Reps + managers no longer need an Edit pencil to enter the edit
+  form; clicking anywhere on the row (or pressing Enter when
+  focused) does it. The Promote/Demote button still works in
+  place without triggering navigation.
+- Filtering / searching the Users page works the same way as
+  filtering / searching the Reps page.
+
+#### Notes — small
+
+- **No mobile change** in this batch. Pure admin UX.
+- **No DB change.** All work is in lib + page TSX files.
+- **The settings-managers route URL stays `/settings/managers`**
+  for historical link compatibility even though the sidebar label
+  is "Users". The Settings rail's `id` for highlighting is also
+  unchanged (`managers`). When that ever feels off we'd add a 301
+  from `/settings/managers` → `/settings/users` and rename.
 
 ---
 

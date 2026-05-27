@@ -43,6 +43,15 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     available: true,
   },
   {
+    id: "rep-types",
+    label: "Rep types",
+    href: "/settings/rep-types",
+    glyph: "tasks",
+    description:
+      "Categorise mobile reps (Sales Rep / Merchandiser / Driver / …). Each type controls which app features that rep sees + which claimable shifts they can pick up.",
+    available: true,
+  },
+  {
     id: "check-in-rules",
     label: "Check-in rules",
     href: "/settings/check-in-rules",
