@@ -15,6 +15,30 @@
 
 Top of the queue (in priority order):
 
+0a. **🟡 OPERATOR — set `RESEND_FROM` env var in Vercel so user-credential emails actually deliver.** This is **the first thing** Gary needs to do when he picks up tomorrow (May 28). Background: the EmailUserModal on /settings/managers/[id]/edit and /reps/[id] uses Resend's `onboarding@resend.dev` sandbox sender by default, which only allows sending to the Resend account holder's own email. Without changing this, every "Email this user" click on any other recipient fails with "You can only send testing emails to your own email address (gazzad@mac.com)." All the OTHER causes are ruled out:
+   - ✅ `@react-email/render` installed (commit `e179539`, May 27 late) — fixed the "Failed to render React component" crash.
+   - ✅ send-credentials route has diagnostic prefixes + top-level try/catch (commit `e7757fa`).
+   - ✅ Sending domain (`morpheusops.app`) is already verified in Gary's Resend dashboard.
+   - ❌ `RESEND_FROM` env var on Vercel NOT yet set.
+
+   **Walkthrough (already messaged to Gary May 27 night, restated here):**
+   1. Resend → Domains → confirm `morpheusops.app` (or whichever) shows green Verified.
+   2. Pick a from-address local-part. Recommended: `noreply@morpheusops.app`.
+   3. Vercel → morpheus-admin project → Settings → Environment Variables → Add New:
+      - Key: `RESEND_FROM`
+      - Value: `Morpheus Ops <noreply@morpheusops.app>` (display name + email in angle brackets — format matters)
+      - Environments: tick Production, Preview, AND Development.
+   4. Redeploy: Vercel → Deployments → latest → ⋯ → Redeploy. Env vars only take effect on the next deploy.
+   5. Smoke test: /settings/managers → any user → Email this user → Send invite link → expect green "Invite link emailed to …" toast.
+
+   Code reference: `morpheus-admin/lib/email.ts` line 27-28:
+   ```ts
+   const FROM_ADDRESS =
+     process.env.RESEND_FROM || "Morpheus Ops <onboarding@resend.dev>";
+   ```
+
+   **When this is done, mark this item completed in the next SESSIONS entry and delete this bullet.**
+
 0. **Import hub + email welcome — Phases A → E all landed May 25.** All five phases shipped same day. Workstream complete; remaining items are operator setup.
 
    **Operator checklist to make the full pipeline live:**

@@ -145,6 +145,130 @@ visit then any new drag is saved under the `v2` key.
 
 ---
 
+#### 5. Settings rail label rename — "Import" → "Bulk import"  (commit `23e5990`)
+
+Gary: "call the heading import in the settings section not import
+it's other imports or something more clear". "Import" alone is
+ambiguous in a settings context (could read as code imports). Now
+labelled **Bulk import**. Rail entry + breadcrumbs in
+/settings/import/[entity]/page.tsx updated. URL stayed `/settings/
+import` (id unchanged) so existing links + Phase A-E shipped
+buttons keep working.
+
+---
+
+#### 6. /past-shifts — resizable columns  (commit `60bcaf8`)
+
+Caught up to the May 27 sweep — TableView was still rendering
+with a hard-coded fr-based TABLE_COLS string and no drag handles.
+Now uses `useColumnWidths("past-shifts", PAST_SHIFTS_COLUMNS)` with
+`[280, 220, 130, 130, 110, 140]` defaults and a ColumnResizer on
+every header except State. localStorage key
+`morpheus.cols.past-shifts.v1`. Same convention as every other
+admin Table view.
+
+---
+
+#### 7. EmailUserModal — diagnostics + render dep  (commits `e7757fa`, `e179539`)
+
+Gary hit "× The string did not match the expected pattern." on
+production when clicking Email this user. Two-step fix:
+
+1. **Diagnostic patch (`e7757fa`)** — every error path in the
+   send-credentials route now prefixes with the failing call name
+   ("Couldn't look up user: …", "Couldn't load profile: …", etc),
+   plus a top-level try/catch so unexpected throws surface as
+   "Unexpected server error: …" instead of a 500 HTML page the
+   client can't parse. Every branch also writes a
+   `console.error` to Vercel logs.
+2. **Real cause surfaced**: with the diagnostics, the next click
+   produced "Unexpected server error: Failed to render React
+   component. Make sure to install `@react-email/render` or
+   `@react-email/components`." Resend v6 doesn't bundle the
+   renderer anymore (older versions did). `@react-email/components`
+   was already a dep (the templates use Body/Button/etc from
+   there) but the renderer was missing.
+3. **Dep added (`e179539`)** — `@react-email/render@^2.0.8` in
+   morpheus-admin/package.json.
+
+After deploy: a NEW Resend error appeared — sandbox-mode "You can
+only send testing emails to gazzad@mac.com". That's
+NOT a bug — it's Resend's default for unverified senders. **Fix
+is operator config, not code: set RESEND_FROM env var in Vercel
+to an email on a verified domain.** Walkthrough captured in
+ROADMAP.md item 0a (top of "next chat" queue). Gary deferred
+doing this until May 28.
+
+---
+
+#### 8. Sidebar — Settings drawer + nav reorder + auto-close  (commits `f6539d5`, `490f3be`)
+
+Gary: clicking Settings should both navigate AND expand a sub-nav
+in the sidebar (matching how Tasks works). Plus reorder the nav.
+Plus when the user moves AWAY from /settings/* the drawer must
+auto-close.
+
+- **Settings drawer (`f6539d5`)** — new `settingsExpanded` state +
+  trailing caret + click-to-toggle when already on /settings/*.
+  Sub-nav items generated from `SETTINGS_SECTIONS` (imported from
+  SettingsShell) so the source of truth stays one list. Locked
+  rows for unavailable sections (Billing) use the same alert
+  affordance as Tasks Pro items with copy adjusted to "coming
+  soon".
+- **Nav order** — Live Ops, Customers, Workforce/Reps, Schedule,
+  then everything else as before. Swapped Customers ↔ Workforce.
+- **Auto-close on exit (`490f3be`)** — `useEffect` changed from
+  "set true if entering" to "set to (pathname startsWith
+  /settings)" — symmetric, so drawer closes the moment you
+  navigate out. Tasks deliberately doesn't auto-close (different
+  usage pattern).
+
+---
+
+#### 9. SettingsShell — in-page rail removed  (commit `490f3be`)
+
+With the sidebar drawer now showing every Settings section,
+keeping the 240px sticky rail on each /settings/* page was
+duplicate nav. Gary's call: "we don't need the navigation on the
+main pages of the settings as well it just has to have a page if
+you want to go you can use the navigation at the left".
+
+SettingsShell now renders just the page heading + breadcrumbs +
+children, max-width 1080px. RailItem helper + AGlyph / Link
+imports dropped (~140 lines removed). `SETTINGS_SECTIONS` stays
+exported because the Sidebar still imports it.
+
+---
+
+#### 10. CustomFieldsCard — no create from entity pages  (commit `7894989`)
+
+Gary: "You can't add a custom field on this page. Only use the
+custom fields. The only place you can add custom fields is in
+site settings."
+
+CustomFieldsCard (used on rep / customer / task / shift / library
+file / organisation detail pages) had two punch-through-to-
+Settings affordances. Both removed:
+- Empty state: "Define a field" CTA dropped. Hint text updated to
+  "A manager can define them in Settings → Custom fields."
+- Populated state: "+ Add field" button in card header dropped.
+
+Card still does its real job — fill in / save / clear values for
+already-defined fields. The legitimate create path is now ONLY
+`/settings/custom-fields → New field → /settings/fields/new`. The
+/settings/fields/new route + CustomFieldForm aren't deleted; just
+not reachable from entity pages.
+
+---
+
+#### Deferred to May 28
+
+- **`RESEND_FROM` env var on Vercel** — the only thing standing
+  between EmailUserModal and working credential sends. ROADMAP.md
+  item 0a has the full step-by-step.
+
+---
+
 ### Today's session — what shipped (May 27, 2026, very-very late)
 
 Gary's feedback right after the rep-types ship: vocabulary management
