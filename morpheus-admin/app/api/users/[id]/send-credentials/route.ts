@@ -136,6 +136,30 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  // Top-level try/catch so an unexpected throw (e.g. fetch DOMException
+  // from Supabase's admin client when an env var is malformed) lands as
+  // a JSON error with a stack-traceable prefix instead of a 500 HTML
+  // page that the client can't parse. Added May 27 (late) after Gary
+  // hit "The string did not match the expected pattern." in production
+  // — at the time none of the route's error paths could identify which
+  // Supabase call was failing, so every branch below now prefixes its
+  // error with the call name + this catch handles the unexpected case.
+  try {
+    return await handle(req, ctx);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[send-credentials] unexpected exception", err);
+    return NextResponse.json(
+      { ok: false, error: `Unexpected server error: ${msg}` },
+      { status: 500 }
+    );
+  }
+}
+
+async function handle(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> }
+) {
   const gate = await requireManager(req);
   if (!gate.ok) return gate.res;
 
@@ -171,11 +195,14 @@ export async function POST(
   // Pull the user's auth row (email) + the profile row (name, role).
   // Two round-trips because Supabase splits auth.users and profiles —
   // there's no PostgREST join we can rely on for auth.users without
-  // dropping into the admin API.
+  // dropping into the admin API. EVERY error message below is prefixed
+  // with the call name so production failures point at the right line
+  // instead of bubbling a bare Supabase / fetch message to the modal.
   const { data: authData, error: authErr } = await sb.auth.admin.getUserById(id);
   if (authErr || !authData?.user) {
+    console.error("[send-credentials] auth.admin.getUserById failed", { id, authErr });
     return NextResponse.json(
-      { ok: false, error: authErr?.message || "User not found" },
+      { ok: false, error: `Couldn't look up user: ${authErr?.message || "User not found"}` },
       { status: 404 }
     );
   }
@@ -193,8 +220,9 @@ export async function POST(
     .eq("id", id)
     .maybeSingle();
   if (profileErr) {
+    console.error("[send-credentials] profiles select failed", { id, profileErr });
     return NextResponse.json(
-      { ok: false, error: profileErr.message },
+      { ok: false, error: `Couldn't load profile: ${profileErr.message}` },
       { status: 500 }
     );
   }
@@ -212,6 +240,7 @@ export async function POST(
       password: newPassword,
     });
     if (pwErr) {
+      console.error("[send-credentials] auth.admin.updateUserById failed", { id, pwErr });
       return NextResponse.json(
         { ok: false, error: `Couldn't reset password: ${pwErr.message}` },
         { status: 400 }
@@ -272,6 +301,11 @@ export async function POST(
     options: { redirectTo: appUrl },
   });
   if (linkErr || !linkData?.properties?.action_link) {
+    console.error("[send-credentials] auth.admin.generateLink failed", {
+      email,
+      appUrl,
+      linkErr,
+    });
     return NextResponse.json(
       {
         ok: false,
