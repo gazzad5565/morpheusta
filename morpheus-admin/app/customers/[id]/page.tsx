@@ -53,7 +53,8 @@ import {
   getLibraryDownloadUrl,
   type LibraryFile,
 } from "@/lib/library-store";
-import { listShifts, type ShiftRow } from "@/lib/shifts-store";
+import { listShiftsInRange, type ShiftRow } from "@/lib/shifts-store";
+import { isoDaysAgo, todayLocalISO } from "@/lib/format";
 import { listSitesForCustomer, type CustomerSite } from "@/lib/sites-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
@@ -77,7 +78,7 @@ const TABS: { key: TabKey; label: string; glyph: GlyphName }[] = [
   { key: "reps", label: "Reps", glyph: "reps" },
   { key: "tasks", label: "Tasks", glyph: "tasks" },
   { key: "library", label: "Library", glyph: "lib" },
-  { key: "shifts", label: "Today's shifts", glyph: "cal" },
+  { key: "shifts", label: "Shifts", glyph: "cal" },
   { key: "custom", label: "Custom fields", glyph: "settings" },
 ];
 
@@ -120,7 +121,10 @@ export default function CustomerDetailPage() {
           listRepsForCustomer(id),
           listTasksForCustomer(id),
           listLibraryFilesForCustomer(id),
-          listShifts({ limit: 200 }),
+          // Shifts: last 90 days back through one year forward — wide
+          // enough to cover Past + Today + Upcoming filters on the
+          // ShiftsTab without an unbounded scan.
+          listShiftsInRange(isoDaysAgo(90), isoDaysAgo(-365)),
           listSitesForCustomer(id, { includeInactive: true }),
         ]);
       if (cancelled) return;
@@ -370,7 +374,11 @@ export default function CustomerDetailPage() {
               repsAssigned: assignedRepIds.length,
               tasks: tasks.length,
               files: files.length,
-              shiftsToday: shifts.length,
+              // shifts now holds last 90d + upcoming year so the
+              // Shifts tab can filter Past/Today/Upcoming. The
+              // Overview stat still wants TODAY only — filter
+              // inline rather than re-fetch.
+              shiftsToday: shifts.filter((s) => s.shift_date === todayLocalISO()).length,
             }}
           />
         )}

@@ -14,6 +14,7 @@
 
 ## Quick TOC
 
+- [May 27, 2026 (later) — resizable columns + customer overview contacts + shifts tab expanded](#todays-session--what-shipped-may-27-2026-evening)
 - [May 27, 2026 — pagination on every long list page (5 surfaces)](#todays-session--what-shipped-may-27-2026)
 - [May 25, 2026 — Import hub Phases A → E shipped end-to-end + uniqueness/link clarity pass](#todays-session--what-shipped-may-25-2026)
 - [May 21, 2026 — photo viewer + customer detail refactor + past shifts archive](#todays-session--what-shipped-may-21-2026)
@@ -25,6 +26,138 @@
 - [May 8, 2026 — multi-site customers schema + admin Sites tab](#todays-session--what-shipped-may-8-2026)
 - [May 7, 2026 — calendar, schedule rewrites, broad UX pass](#todays-session--what-shipped-may-7-2026)
 - [May 6, 2026 — auto-checkout, organisation settings, indexes](#todays-session--what-shipped-may-6-2026)
+
+---
+
+### Today's session — what shipped (May 27, 2026, evening)
+
+Three Gary asks stacked on top of the morning's pagination work — none
+need a deploy of their own; all sit safely local until GitHub's "Git
+Operations degraded" incident clears (commits stack on the same
+unpushed `main`; one push when GitHub recovers).
+
+#### 1. Resizable columns on every paginated list page
+
+- **`lib/use-column-widths.ts`** (new) — localStorage-backed hook.
+  One key per page (`morpheus.cols.<page>.v1`). Materialises any non-
+  px default (like `2.4fr`) into a sensible px fallback on first
+  resize; from then on all widths are pure px so the drag math is
+  trivial (delta-x → new px). MIN_COLUMN_PX = 60 enforced. Returns
+  `{widths, gridTemplateColumns, setWidth, resetColumn, resetAll}`.
+  Hydration deferred to a `useEffect` (not state init) because
+  localStorage isn't available during Next.js's SSR/prerender pass.
+- **`components/ui/ColumnResizer.tsx`** (new) — small absolute-
+  positioned drag handle. 6px-wide hit area, brand-tinted line on
+  hover/drag. Mouse-down → window-level mousemove tracks delta;
+  mouse-up releases. Body cursor + user-select locked during drag
+  so the OS cursor doesn't flip back and the header text doesn't
+  get accidentally selected. Double-click resets that column to
+  its default.
+- **5 pages wired**:
+  - `/tasks` — defaults `[360, 240, 100, 100, 80, 90]`. Resizers on
+    Task / Customer / Duration / Type / Order headers.
+  - `/settings/managers` — defaults `[280, 200, 110, 130, 110]`.
+    Added a new column-header row (didn't exist before — needed it
+    as the natural place for resize handles; matches the style on
+    the other 4 pages).
+  - `/library` (Table view only) — defaults `[320, 220, 110, 90, 90, 90]`.
+    Grid view doesn't have columns.
+  - `/reps` (Table view only) — defaults `[260, 260, 110, 140, 130]`.
+    Resizers wrap each `<SortableHeader>` in a positioned div. Hook
+    lives inside the `TableView` function so Grid view (which doesn't
+    use these) doesn't even instantiate the state.
+  - `/customers` (Table view only) — defaults `[360, 140, 260, 90, 90]`.
+    Same `<SortableHeader>` wrapping pattern as `/reps`. Map view
+    bypasses (pins, not columns); Grid view bypasses (auto-flow).
+- Every paginated list page's Card got `overflowX: "auto"` so
+  widening a column past container width opens a horizontal scroll
+  instead of breaking the layout.
+- **Design choice — client-side persistence only.** localStorage
+  is per-browser. Different machine = defaults again. Server-side
+  sync (writing widths to `app_settings` or a `user_prefs` table)
+  is deferred until it's actually painful — most managers stay on
+  one workstation.
+
+#### 2. Customer detail Overview — contacts + clickable address by default
+
+Gary's screenshot: opens a customer, sees stat cards + LOCATION map
++ address — but to read an email or phone he had to click into the
+Contacts tab. Surface that on Overview.
+
+- **`OverviewTab.tsx`** gains a new CONTACTS card above LOCATION.
+  Fetches via `listCustomerContacts(customer.id)` on mount (same
+  pattern as `ContactsTab` — inline fetch, no new parent prop). Up
+  to 3 active contacts shown; each row is name + role label + `mailto:`
+  email + `tel:` phone, all clickable. "+N more · open the Contacts
+  tab" line when there are more than 3. Empty state ("None yet —
+  open the Contacts tab to add the first one") replaces nothing —
+  small, polite.
+- **Address now clickable** — wraps the address line in an anchor
+  pointing at `https://www.google.com/maps/search/?api=1&query=<address>`
+  with target=_blank. Tooltip "Open in Google Maps". Visual: same
+  ink colour, dotted underline so it reads as actionable without
+  fighting the layout.
+- **Constant `OVERVIEW_CONTACT_LIMIT = 3`** at the top of the file
+  so the cap is a one-line change if Gary later wants 5 or 10.
+
+#### 3. Customer detail — "Today's shifts" → "Shifts" (past + today + upcoming)
+
+- **Tab label** in `/customers/[id]/page.tsx` renamed `Today's shifts`
+  → `Shifts` (one line).
+- **Data fetch widened** — replaced `listShifts({ limit: 200 })`
+  (which is today-only) with `listShiftsInRange(isoDaysAgo(90),
+  isoDaysAgo(-365))`. Window covers last 90 days back + one year
+  forward — wide enough for Past + Today + Upcoming filters without
+  an unbounded scan.
+- **`ShiftsTab.tsx` rewritten** to handle the new data shape:
+  - Filter chips: `All · N` (default) / `Today · N` / `Past · N` /
+    `Upcoming · N`. Counts compute from `shifts` against
+    `todayLocalISO()`.
+  - New **Date** column added to the row layout (`110px 130px 1fr
+    110px` = Date | Time | Rep | State). Date renders as "Today"
+    (brand-deep) for today's shifts, otherwise `formatDate(...)`.
+  - **Sort newest-first** by date then start_time so a manager
+    scanning a customer's recent history lands on the most relevant
+    rows first.
+  - **Paginated** with the same `<Pagination>` component as the
+    list pages (50 per page; resets to page 0 on filter change).
+- **Overview's `shiftsToday` stat** fix — `shifts.length` no longer
+  equals "today only" since the fetch was widened. Parent page now
+  computes it inline as `shifts.filter((s) => s.shift_date ===
+  todayLocalISO()).length`. One-line fix in the props block.
+- **Empty states** split into two cases: zero shifts in the whole
+  90-day window → `<EmptyState>` with a "Schedule a shift" CTA;
+  zero matches under the current filter → terse "No shifts match
+  this filter." line.
+
+#### Acceptance
+
+- ✅ `next build` clean after each of the 3 changes — 39 routes,
+  zero warnings, zero TS errors. Final build re-verified after all
+  three landed together.
+- ✅ Resizable: dragging the divider between two header cells widens
+  / narrows that column without shifting neighbours; double-click
+  resets; reload preserves the user's widths via localStorage.
+- ✅ Customer Overview: shows up to 3 contacts with mailto: / tel:
+  links + a Google Maps link on the address.
+- ✅ Customer Shifts: tab renamed; All / Today / Past / Upcoming
+  filter chips work; Date column shows; pagination kicks in at >50
+  shifts.
+
+#### Notes — deferred deliberately
+
+- **`/past-shifts`** (the dedicated archive page) still uses the
+  `PAST_SHIFTS_DEFAULT_LIMIT = 2000` cap pattern; not folded into
+  the new Pagination component yet. Same approach would work but
+  outside today's "5 paginated list pages" scope.
+- **Customer Overview `+N more` link** doesn't auto-switch to the
+  Contacts tab — that would require threading an `onJumpToTab`
+  callback down from the parent page. Kept as a plain hint instead
+  ("open the Contacts tab") since it costs the user one click and
+  saves a prop sprawl. Trivially upgradeable later if Gary cares.
+- **Per-org server-side column widths** could be a future "design
+  system" upgrade if managers complain about different widths on
+  different machines. Not painful today.
 
 ---
 
