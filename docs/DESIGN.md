@@ -260,6 +260,27 @@ so the next page can reuse it.
   (pending / done / failed) inline. Added with Phase E (May 25); use
   it anywhere a list row shows a site address that might not be
   resolved yet.
+- **`Pagination`** — `[« ‹ 1 … 4 [5] 6 … 12 › »]` + "Showing X-Y of
+  Z". Hidden when results fit on one page. `DEFAULT_PAGE_SIZE = 50`
+  exported as a constant. Client-side slicing — caller slices its
+  already-filtered array down to `page * SIZE → (page+1) * SIZE`
+  and passes `totalItems={filtered.length}` for the count. Added
+  May 27.
+- **`ColumnResizer`** + **`useColumnWidths(pageKey, defaults)` hook**
+  — drag handle on a header cell that resizes its column. Hook
+  owns the widths array + localStorage persistence (`morpheus.cols.
+  <page>.v1`). Min column width 60px. Double-click handle to reset
+  that column. Computed `gridTemplateColumns` string returned by
+  the hook is used on BOTH the header row AND every data row in
+  the table. Added May 27.
+- **`EmailUserModal`** — portal-based "Email this user" dialog
+  shared by `/settings/managers/[id]/edit` and `/reps/[id]`. Two
+  send paths: invite link (Supabase recovery flow, doesn't touch
+  password) or regenerate-and-email (server mints a fresh password
+  via `auth.admin.updateUserById`). Partial-success state surfaces
+  the new password as a copy-fallback when post-reset email send
+  fails. Reference for the "modal with two action-row options"
+  pattern.
 - **`LoadingBar`** — top-of-page progress bar for slow loads.
 - **`SaveIndicator`** — bottom-right toast that fires from
   `notifySaved()` / `notifySaveError()`. Don't show your own toast.
@@ -345,24 +366,114 @@ than admin (mobile is fewer surfaces, more focused).
 
 ### Gold-standard list page — `/reps`
 
-When in doubt, copy `/reps`. It's the canonical list-page shape:
+When in doubt, copy `/reps`. It's the canonical list-page shape.
+**Every list page in the admin should match this structure exactly**
+— after the May 27 sweep that paginated, made-resizable, and
+clickable-rowed every long list, divergence is a bug now.
 
 1. **Hero card** (optional, for KPI rollups). Live Ops uses one for
    the KPI strip; `/reps` skips it.
-2. **Filter card row** — a `Card` containing:
-   - `FilterChip`s for mutually-exclusive segments ("All / With shifts
-     today / No shifts today / Managers")
-   - A search input on the right
+2. **Filter card row** — a `Card` containing, left to right:
+   - `FilterChip`s for mutually-exclusive segments ("All / With
+     shifts today / No shifts today / Managers")
+   - Optional `<select>` for additional categorical filters (rep
+     type on `/reps` + `/settings/managers`, status on customers,
+     etc). Brand-tinted accent (border + background) when active.
+   - A search `<input>` — same shape across pages: 220px wide,
+     left-edge search glyph, right-edge ✕ clear button. Free-text
+     matching on name + email + any other "human readable" column.
    - A `SegTabs` view toggle ("Grid | Table") on the far right
+     when the page supports multiple views.
 3. **Body card** — another `Card` containing either:
-   - **Table view** — `<table>` with `SortableHeader` cells, sortable
-     by `name | role | joined | shiftsToday`, click a row → drill in.
+   - **Table view** — header row using `useColumnWidths` for
+     resizable columns (drag handles via `ColumnResizer` on each
+     header except the last). `SortableHeader` cells when applicable.
+     Data rows use the same `gridTemplateColumns` so widths stay
+     aligned. **Clickable rows** — see the sub-pattern below.
    - **Grid view** — responsive grid of cards, one per item.
-4. **Empty state** — when the filter has no matches, the body card
-   renders an `EmptyState` (not raw "No results" text).
+4. **Empty state** — when the filter matched nothing, the body card
+   renders an `EmptyState` (not raw "No results" text). When the
+   page itself has no rows yet (no filter applied), the empty state
+   is the "you haven't set this up" variant with a primary CTA.
+5. **Pagination** — `<Pagination totalItems={filtered.length}
+   currentPage={page} onPageChange={setPage} />` after the body
+   card. Hidden when results fit on one page. Slice the FILTERED
+   array (not raw rows) into the page window before passing to
+   the table/grid renderer.
 
 The same pattern is followed on `/customers`, `/past-shifts`, `/tasks`,
-`/settings/managers`.
+`/library`, `/settings/managers`.
+
+### List-page state machinery
+
+Every list page that follows the gold-standard shape needs the same
+state-management scaffolding. The pattern (May 27):
+
+```ts
+const [filter, setFilter]       = useState("all");
+const [typeFilter, setTypeFilter] = useState("");        // if applicable
+const [search, setSearch]       = useState("");
+const [sort, setSort]           = useState<SortState>({...}); // if applicable
+const [page, setPage]           = useState(0);
+const cols = useColumnWidths("<page-id>", DEFAULT_COLS);   // if Table view
+
+// Reset to page 0 whenever ANY filter / search / sort changes.
+// Without this, the user can land on an empty page 5 of a now-2-page
+// result. Include EVERY input that narrows the visible set.
+useEffect(() => {
+  setPage(0);
+}, [filter, typeFilter, search, sort]);
+
+const filtered = useMemo(() => {
+  // Apply role/category filters, then type filter, then search,
+  // then sort. Plain JS — client-side. See "Client-side pagination"
+  // call-out for the rationale.
+  ...
+}, [rows, filter, typeFilter, search, sort]);
+
+const pageItems = filtered.slice(
+  page * DEFAULT_PAGE_SIZE,
+  (page + 1) * DEFAULT_PAGE_SIZE
+);
+```
+
+**Client-side pagination, not server-side.** Every list store in this
+codebase fetches the full filtered set once and the UI slices it.
+Server-side range queries (`.range(from, to)` + `count: 'exact'`) are
+the future upgrade if any entity grows past ~10k rows — but at current
+admin scale (dozens-to-low-hundreds per entity), the simpler
+client-side slice preserves all existing search/filter/sort behaviour
+exactly. Don't refactor stores to server-paginate without checking
+row counts first.
+
+### Clickable rows + inline actions
+
+Every Table-view list page (customers / reps / tasks / library /
+settings-managers / past-shifts) makes the entire row a navigation
+target. Click anywhere on the row → navigate to that item's detail
+or edit page. Patterns:
+
+- The row container has `role="button"`, `tabIndex={0}`, and
+  `cursor: pointer`. Keyboard users get Enter / Space via an
+  `onKeyDown` handler that mirrors the `onClick`.
+- The navigation target is the same one a redundant "Edit" pencil
+  would have pointed at. **Don't ship both** — clickable row OR
+  edit pencil, not both. (Pre-May 27 the Users page had both; May
+  27 removed the pencil because it was duplicative.)
+- **Inline action buttons inside the row** (Promote/Demote, inline
+  toggles, delete confirmations) must be wrapped so their click
+  doesn't bubble up to the row navigate:
+  ```tsx
+  <div
+    onClick={(e) => e.stopPropagation()}
+    onKeyDown={(e) => e.stopPropagation()}
+  >
+    <Btn onClick={...}>Promote</Btn>
+  </div>
+  ```
+- Inline `<Link>` elements inside the row (e.g. a rep name linking
+  to that rep's detail) should also `e.stopPropagation()` if their
+  destination differs from the row's primary destination.
 
 ### Detail page — header card + sectioned content
 
@@ -392,13 +503,25 @@ The same pattern is followed on `/customers`, `/past-shifts`, `/tasks`,
 settings sections. To add a new settings section:
 
 1. Add an entry to `SETTINGS_SECTIONS` in
-   `components/shell/SettingsShell.tsx` (with the appropriate AGlyph).
-2. Create `app/settings/<your-section>/page.tsx` that wraps in both
-   `AdminShell` and `SettingsShell`.
-3. Use one `Card` per group of related toggles, each with a
+   `components/shell/SettingsShell.tsx`. Pick a glyph from the
+   `AGlyph` registry that's already in use (e.g. `tasks`, `reps`,
+   `upload`, `building`) — don't invent a new one unless none fit.
+2. Create `app/settings/<your-section>/page.tsx`. Wrap the page in
+   `<SettingsShell section="<your-id>" description="...">`. The
+   shell handles `AdminShell` + the rail + the title.
+3. Use one `Card` per group of related controls, each with a
    `SectionTitle`.
 4. For each toggle, use the shared `<ToggleRow>` shape — see
    `/settings/check-in-rules` for the canonical example.
+
+**Settings-rail entries are the discoverable home of org-wide
+vocabularies / settings.** If you add a managed list to
+`app_settings` (rep types, library categories, custom field
+definitions), the CRUD UI for it belongs in the Settings rail —
+not buried as a button-and-modal on another page. `/settings/rep-
+types` is the reference (May 27); a modal-on-another-page is the
+anti-pattern (was the first cut, replaced because it wasn't
+discoverable).
 
 ### Empty state
 
@@ -474,6 +597,36 @@ colour for the same state across surfaces.
 
 Don't repurpose a colour. Don't make "this customer has a lot of
 shifts" green — green means "operational" in this app.
+
+### Non-state chips — categorical, not rep-state
+
+Some chips don't represent rep state but still appear chip-shaped
+on rows + cards. These share the chip GRAMMAR (rounded pill, small
+uppercase letter-spacing, padding ~2px 7px) but use neutral tones
+instead of the rep-state palette:
+
+- **Rep type chip** — small badge showing a rep's category (Sales
+  Rep / Merchandiser / Driver / …). Used on `/reps` Grid + Table,
+  on `/reps/[id]` header card, as a sublabel in every rep picker
+  (Comboboxes across the admin). Inline component
+  `RepTypeChip` in `app/reps/page.tsx` (kept local because it's
+  only used twice — promote to `components/ui/` when a third
+  consumer arrives). Renders nothing for uncategorised reps so
+  empty chips never appear.
+- **ID / LINK badges** (import wizard Map step) — purple "ID"
+  pill on identifier fields, cyan "LINK → Customer" / "LINK →
+  Rep" pill on fields that reference another entity. Defined as
+  metadata on each adapter (`fieldKinds` + `linksTo`); rendered
+  inline by the wizard's Map step. Tooltips explain that linked
+  entities must already exist.
+- **`GeocodeBadge`** — see Section 6. Brand-tinted "Geocoding…"
+  for pending; warn-tinted "Couldn't find — edit to retry" for
+  failed; nothing for done/skipped.
+
+**Use neutral or contextual tones for non-state chips** — never the
+rep-state palette (green/amber/red/indigo). Those colours mean "rep
+operational state" everywhere else in the app; reusing them for
+"this row is a Sales Rep" would confuse the grammar.
 
 ---
 
@@ -601,6 +754,73 @@ places at once), use a shared React context provider mounted in
 - On success, the optimistic UI is already correct — just fire
   `notifySaved` and re-enable.
 
+### Client-side capability gates
+
+Some affordances are gated by user category — e.g. "Sales Reps can
+add customers; Merchandisers can't"; "this claimable shift is for
+Sales Reps only". The pattern (May 27):
+
+1. **Vocabulary stored in `app_settings`** as an array of objects
+   shaped like `{ name, <capability-flag>: boolean }`. CRUD via a
+   dedicated Settings rail page. Both admin + mobile read with a
+   defensive parser.
+2. **Pure capability check** — `repTypeCan(types, typeName,
+   capability)`. Caller fetches the vocab once and calls this per
+   check. Returned by both admin and mobile `lib/settings-store`.
+3. **Two opposing default semantics** — pick deliberately:
+   - **Lenient (default-allow)** — used for capability FLAGS like
+     `canCreateCustomers`. Unknown / null type → returns `true`.
+     Rationale: brand-new reps haven't been categorised yet;
+     hiding affordances from them would feel broken. Manager
+     EXPLICITLY restricts by ticking the box off.
+   - **Strict (default-deny)** — used for explicit RESTRICTIONS
+     like `shifts.claimable_rep_types`. Manager EXPLICITLY narrowed
+     the audience; unknown / null type doesn't match, so the
+     restricted shift hides from them.
+   Both behaviours surface in the in-file comment where the check
+   runs. Don't flip one to match the other "for consistency" —
+   they're different semantic categories.
+4. **UI gates** — hide buttons / menu items / list rows that the
+   user doesn't have access to. Belt-and-braces guard at the
+   destination page (a "Not enabled for your rep type" block
+   screen) for the deep-link / browser-history scenario.
+
+**SECURITY caveat — surface it every time.** These gates are
+client-side UX, not RLS. A motivated user with curl + JWT can
+bypass. Hard blocks require tightening the Phase 4 RLS policy to
+read the vocabulary and check the user's category — possible but
+deferred until needed. Document the deferred state in the
+SESSIONS.md entry for the feature.
+
+### Admin-managed vocabularies (app_settings)
+
+When a vocabulary of values needs to be manager-editable — rep
+types, library categories, custom-field definitions, future
+similar lists — store it as a JSON value in `app_settings`. Pattern
+(May 27 rep_types, earlier May library_categories):
+
+1. **Schema** — single row in `app_settings` with `key='<vocab>'`
+   and `value` = the JSON array.
+2. **Migration** seeds the row with a sane default vocabulary
+   using `ON CONFLICT (key) DO NOTHING` so re-runs don't stomp
+   manager edits.
+3. **Settings-store helpers** — `get<Vocab>()` returns the parsed
+   array with a DEFENSIVE reader (trims, dedupes, coerces missing
+   keys, falls back to a hardcoded default on malformed JSON).
+   `set<Vocab>(list)` writes back with the same defensive
+   sanitisation. Mobile gets a read-only mirror if mobile reads
+   the value.
+4. **CRUD UI** — a dedicated Settings rail page (see Settings
+   pattern above). Inline help text warns when renames don't
+   cascade (e.g. existing `profiles.rep_type` rows keep the old
+   name and orphan if you rename the type). Modal-on-another-page
+   is the anti-pattern.
+5. **Refs in user-facing data** — store the NAME, not an id
+   (matches the in-place approach of `library_files.category`,
+   `profiles.rep_type`, `shifts.claimable_rep_types`). Trade-off:
+   rename fragility, but no FK migration needed when vocabulary
+   changes.
+
 ---
 
 ## 13. iOS PWA landmines
@@ -717,6 +937,27 @@ ticked, leave a one-line code comment explaining why.
       72×72 mobile).
 - [ ] If the page renders a customer, customer = house glyph or
       uploaded logo. If a rep, rep = photo or face/initials.
+- [ ] If list page: `<Pagination>` at the bottom, page state
+      resets to 0 on every filter / search / sort change.
+- [ ] If list page with a Table view: `useColumnWidths` + a
+      `<ColumnResizer>` overlay on every header except the last.
+      Same `gridTemplateColumns` on header row + every data row.
+- [ ] If list page: rows are clickable to navigate (whole row →
+      detail / edit page). Inline action buttons inside the row
+      wrap in `onClick={e => e.stopPropagation()}` so their click
+      doesn't bubble up to the row-level navigate.
+- [ ] If list page: filter row order is `FilterChip`s → optional
+      `<select>` for categorical filters → search box → optional
+      `SegTabs` view toggle. Brand-tinted accent on the `<select>`
+      when active.
+- [ ] If the page renders a rep, surface their `rep_type` as a
+      `RepTypeChip` next to their name + as a sublabel in any
+      Combobox option.
+- [ ] If the page or affordance is gated by a rep-type capability,
+      use `repTypeCan(types, profile.rep_type, capability)`.
+      Belt-and-braces guard at the destination page (block screen
+      on deep-link nav). SECURITY caveat noted in the PR
+      description / SESSIONS entry — client-side only.
 - [ ] Mobile: tap → camera / file / window.open is synchronous
       (no `await` between tap and call).
 - [ ] Mobile: every page passes the cross-platform statement
@@ -737,12 +978,17 @@ Reference points for "what good looks like":
 
 | Surface | Reference page | Why |
 |---|---|---|
-| List page | `/reps` | Filter chips + search + Grid/Table toggle + sortable headers + empty state |
+| List page | `/reps` | Full gold-standard shape — filter chips + type select + search + Grid/Table toggle + sortable resizable headers + clickable rows + Pagination + empty state |
 | Detail page (read-only) | `/shifts/[id]` | Header card + section cards + inline photo strip + lightbox |
 | Detail page (editable) | `/customers/[id]/edit` | Identity / Location / Check-in exceptions section structure |
-| Tabbed detail | `/customers/[id]` | TabHeader + per-tab components + shared tabStyles |
+| Tabbed detail | `/customers/[id]` | TabHeader + per-tab components + shared tabStyles + inline contacts on Overview |
 | Settings page | `/settings/check-in-rules` | ToggleRow pattern, segmented picker, optimistic UI |
-| Wizard | `/settings/import/[entity]` | 5-step stepper, dropzone, mapping, preview, result |
+| Settings vocabulary CRUD | `/settings/rep-types` | Managed list in app_settings + dedicated rail entry — modal-on-another-page is the anti-pattern |
+| Wizard | `/settings/import/[entity]` | 5-step stepper, dropzone, mapping (with ID / LINK badges), preview, result |
+| Pagination | `/reps`, `/past-shifts` | `<Pagination>` + client-side slice + page-resets-on-filter pattern |
+| Resizable columns | `/reps` Table view | `useColumnWidths` + `<ColumnResizer>` overlay; localStorage per page |
+| Clickable rows | `/settings/managers` | Whole row navigates; inline buttons use `stopPropagation` |
+| Capability gate (UI) | Mobile `/add-customer` block screen | `repTypeCan` check + belt-and-braces block on deep-link nav |
 | Empty state | `/past-shifts` (when filter matches none) | EmptyState used correctly |
 | Confirmation modal | `EmailUserModal` | createPortal, backdrop, Escape, autoFocus |
 | Lightbox | PhotoLightbox in `/shifts/[id]` | Full-screen, prev/next, caption, keyboard |
