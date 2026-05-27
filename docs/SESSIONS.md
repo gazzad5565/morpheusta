@@ -14,6 +14,7 @@
 
 ## Quick TOC
 
+- [May 27, 2026 (late) — rep types + capability flags (canCreateCustomers)](#todays-session--what-shipped-may-27-2026-late)
 - [May 27, 2026 (later) — resizable columns + customer overview contacts + shifts tab expanded](#todays-session--what-shipped-may-27-2026-evening)
 - [May 27, 2026 — pagination on every long list page (5 surfaces)](#todays-session--what-shipped-may-27-2026)
 - [May 25, 2026 — Import hub Phases A → E shipped end-to-end + uniqueness/link clarity pass](#todays-session--what-shipped-may-25-2026)
@@ -26,6 +27,152 @@
 - [May 8, 2026 — multi-site customers schema + admin Sites tab](#todays-session--what-shipped-may-8-2026)
 - [May 7, 2026 — calendar, schedule rewrites, broad UX pass](#todays-session--what-shipped-may-7-2026)
 - [May 6, 2026 — auto-checkout, organisation settings, indexes](#todays-session--what-shipped-may-6-2026)
+
+---
+
+### Today's session — what shipped (May 27, 2026, late)
+
+Rep types (Option C from the design discussion) — admin-managed
+vocabulary in app_settings, single-type-per-rep on profiles.rep_type,
+per-type capability flags. First flag: `canCreateCustomers` — drives
+whether the mobile Add Customer affordance shows. Lays the pattern
+for future capability flags (canRequestShifts, canViewOtherReps,
+etc) — add one key to RepTypeConfig + one check at the call site.
+
+**Cross-platform considered:** mobile change covers iOS Safari PWA +
+Android Chrome identically. The capability check runs on mount via
+useEffect (no user-activation sensitivity); the "Back to home" CTA on
+the blocked state is a synchronous `router.push` — both stay inside
+the OS's tap-event chain.
+
+**SECURITY NOTE flagged explicitly:** client-side enforcement only.
+The mobile UI hides the Add Customer entry point and the page itself
+renders a friendly block message on direct nav, but a motivated rep
+with curl + their JWT could still INSERT a customer (Phase 4 RLS's
+`customers_rep_insert` policy allows any authenticated user with
+`created_by_rep_id = auth.uid()` to insert). A hard block would
+require tightening that policy to look up `profiles.rep_type` +
+`app_settings.rep_types` capabilities — doable but deferred until
+Gary explicitly needs it. Today's level is sufficient for accidental-
+misuse + clean-UX, same posture as most other "manager-only" UI
+affordances pre-Phase-4 hardening.
+
+#### What shipped
+
+- **Migration `2026_05_27_profiles_rep_type.sql`** (PENDING — apply
+  in Supabase SQL Editor). One nullable text column
+  `profiles.rep_type` + a partial index `WHERE rep_type IS NOT NULL`
+  + an `app_settings.rep_types` seed with three starter types:
+  - Sales Rep — canCreateCustomers: true
+  - Merchandiser — canCreateCustomers: false
+  - Driver — canCreateCustomers: false
+  Safe to re-run. ON CONFLICT DO NOTHING on the seed so re-running
+  after a manager has edited the vocabulary doesn't stomp them.
+
+- **`lib/settings-store.ts`** (admin + mobile, near-identical
+  shapes):
+  - `RepTypeConfig` interface — `{ name, canCreateCustomers }`.
+  - `getRepTypes()` — defensive parser. Trims, dedupes names,
+    coerces missing `canCreateCustomers` to `true` (allow-all)
+    so a legacy or hand-edited row doesn't silently block.
+  - `setRepTypes(list)` (admin only) — same defensive
+    sanitisation on write.
+  - `repTypeCan(types, typeName, "canCreateCustomers")` — pure
+    capability check. Unknown / null typeName defaults to `true`
+    (allow-all) so uncategorised reps aren't silently blocked
+    from existing flows.
+
+- **`components/users/ManageRepTypesSheet.tsx`** (admin, new) —
+  centred modal CRUD for the rep-type vocabulary. Mirrors
+  `ManageCategoriesSheet` from `/library` but with two columns per
+  row (name + "Can add customers?" checkbox) and a 540px width to
+  fit. Add new types from a bottom row with the same shape. Rename
+  + toggle + remove all live until Save commits via `setRepTypes`.
+
+- **`/settings/managers`** gets a new "Manage rep types" button in
+  the actions slot alongside Import + Add user. Modal mounts at
+  page root. On-save updates the local state so the dropdown on
+  the edit page (below) sees fresh values without a refresh.
+
+- **`/settings/managers/[id]/edit`** gains a "Rep type" field
+  rendered only when `role === "rep"` (managers don't have one).
+  Native `<select>` driven by the live vocabulary; "— Uncategorised
+  (allow all) —" is the leading option. Inline help points the
+  manager at the new modal for editing the vocabulary itself.
+  `updateUser({rep_type})` plumbed through `/api/users` PATCH +
+  the client `users-admin.ts` shape. Empty string clears the
+  category server-side.
+
+- **`/reps` list page** gets a "By type" `<select>` in the filter
+  row between the existing role chips and the search box. Renders
+  only when types exist. Sets the same brand-tinted accent when a
+  filter is active. Pagination resets to page 0 on type-filter
+  change (same pattern as other filters on the page).
+
+- **Phase D import adapter (`lib/import-adapters/user.ts`)** gets
+  an optional `rep_type` column on the REP adapter (manager adapter
+  omits it — there's no manager-type concept). Auto-mapped from
+  common header synonyms ("rep type", "type", "category", "rep
+  category", "role type"). Validation happens server-side in
+  `/api/import/users` against the live vocabulary — unknown values
+  are rejected with the list of valid options included in the
+  error so the import wizard's failures CSV is actionable. Server
+  uses the canonical-cased name from the vocabulary so
+  "sales rep" / "Sales Rep" don't drift on profiles.
+
+- **`/api/users` PATCH** — extended to accept `rep_type` (trims,
+  empty string clears the category). Update path on
+  `/api/import/users` only touches `rep_type` when the import row
+  specified one, so an update-mode import that omits the column
+  doesn't wipe an existing categorisation.
+
+- **Mobile `lib/profiles-store.ts`** — Profile gains `rep_type`,
+  `getMyProfile()` SELECT pulls it.
+
+- **Mobile `components/SideMenu.tsx`** — fetches the live vocab +
+  the rep's profile on mount, computes `canAddCustomers` via
+  `repTypeCan`, hides the Add Customer menu item when the type's
+  capability is `false`. Pattern is one `if (it.id === ... && !cap)
+  return null;` guard inside the `ITEMS.map` loop — extensible to
+  future capability-gated items by adding the same line per id.
+
+- **Mobile `/add-customer` page** — belt-and-braces guard renders a
+  friendly "Not enabled for your rep type" block screen instead of
+  the form when the capability check fails. Covers the deep-link /
+  browser-history scenario where the SideMenu's hide doesn't
+  intervene. "Back to home" CTA inside.
+
+#### Acceptance
+
+- ✅ `next build` clean on BOTH admin (39 routes) and mobile
+  (21 routes). Zero warnings, zero TS errors.
+- ⏳ Operator: apply `db/migrations/2026_05_27_profiles_rep_type.sql`
+  in Supabase SQL Editor (safe to re-run).
+- ⏳ Smoke test: open `/settings/managers` → click Manage rep types
+  → edit / add a type → save. Edit a rep → set their type →
+  save. Open `/reps` → filter by type. Log in as that rep on
+  mobile → Add Customer hidden if type's `canCreateCustomers` is
+  false.
+
+#### Notes — what's deliberately small
+
+- **One capability flag for now.** `canCreateCustomers` is the only
+  flag. Adding more (canRequestShifts, canViewOtherReps, etc) is
+  one key on `RepTypeConfig` + one row in the modal + one call-site
+  check each.
+- **No RLS upgrade.** Client-side enforcement is the trade-off
+  surfaced clearly in commit messages and this entry. Future hard
+  block: tighten `customers_rep_insert` to read
+  `profiles.rep_type` + look up the capability via a SECURITY
+  DEFINER helper.
+- **Rename consequences.** Renaming a type in the modal does NOT
+  rename existing `profiles.rep_type` rows. Those keep the old
+  name and become effectively uncategorised (unknown type =
+  allow-all). A future "Rename + cascade" affordance would migrate
+  rows; not in today's scope.
+- **No mobile UI to display the type** beyond hiding affordances.
+  Reps don't currently see their assigned type — could add a
+  read-only line on `/profile` later if requested.
 
 ---
 

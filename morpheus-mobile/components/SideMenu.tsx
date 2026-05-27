@@ -10,6 +10,11 @@ import { signOut } from "@/lib/auth";
 import { getMyProfile, type Profile } from "@/lib/profiles-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import { countMyUnread, subscribeMyInbox } from "@/lib/messaging-store";
+import {
+  getRepTypes,
+  repTypeCan,
+  type RepTypeConfig,
+} from "@/lib/settings-store";
 
 // Local deriveInitials removed — now uses shared initialsFromNameOrEmail.
 
@@ -78,6 +83,11 @@ export function SideMenu() {
   const pathname = usePathname() || "/";
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
+  // Rep-type vocabulary — needed for the capability check that gates
+  // the Add Customer menu item. Default to an empty list while
+  // loading; the check falls through to "allow" so the item shows
+  // unless we know the rep's type and that type forbids it.
+  const [repTypes, setRepTypes] = useState<RepTypeConfig[]>([]);
   // Unread Messages count for the Messages menu badge. Realtime-
   // subscribed so opening the menu always shows a fresh count, and
   // marking a message read elsewhere bumps the badge down live.
@@ -87,6 +97,9 @@ export function SideMenu() {
     let cancelled = false;
     getMyProfile().then((p) => {
       if (!cancelled) setProfile(p);
+    });
+    getRepTypes().then((t) => {
+      if (!cancelled) setRepTypes(t);
     });
     const refreshUnread = () => {
       void countMyUnread().then((n) => {
@@ -100,6 +113,15 @@ export function SideMenu() {
       unsub();
     };
   }, []);
+
+  // Whether this rep can see the Add Customer menu item. Defaults to
+  // true while data is loading so an uncategorised rep doesn't briefly
+  // lose the option on first render.
+  const canAddCustomers = repTypeCan(
+    repTypes,
+    profile?.rep_type ?? null,
+    "canCreateCustomers"
+  );
 
   if (!open) return null;
 
@@ -295,6 +317,10 @@ export function SideMenu() {
           }}
         >
           {ITEMS.map((it) => {
+            // Rep-type capability gate. Today only Add Customer is
+            // gated; any future capability-controlled item would
+            // follow the same pattern.
+            if (it.id === "add-customer" && !canAddCustomers) return null;
             // "Today" highlights for the dashboard + every shift-execution
             // page (check-in, active, etc); every other item is a direct
             // path match. /shifts has its own row now, so it lights up

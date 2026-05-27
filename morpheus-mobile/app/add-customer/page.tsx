@@ -33,7 +33,7 @@
  *     a manager opens its detail page.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { AppHeader, AppFooter } from "@/components/Chrome";
@@ -42,6 +42,8 @@ import { createCustomer, geocodeAddress } from "@/lib/customers-store";
 import { requestGeolocationOnce } from "@/lib/route-planner";
 import { AddressAutocomplete } from "@/components/AddressAutocomplete";
 import { MapPreview } from "@/components/MapPreview";
+import { getMyProfile } from "@/lib/profiles-store";
+import { getRepTypes, repTypeCan } from "@/lib/settings-store";
 
 interface Pin {
   /** "gps"        — captured from device GPS at the moment the rep
@@ -59,6 +61,27 @@ interface Pin {
 
 export default function AddCustomerPage() {
   const router = useRouter();
+
+  // Capability gate (May 27) — belt-and-braces in addition to the
+  // SideMenu hiding the entry point. If a rep deep-links here via
+  // URL or browser history and their rep_type doesn't have
+  // canCreateCustomers, render a friendly block message instead of
+  // the form. Default state: "checking" so we don't briefly flash
+  // the form to a forbidden rep before the gate resolves.
+  const [gate, setGate] = useState<"checking" | "allowed" | "blocked">(
+    "checking"
+  );
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getMyProfile(), getRepTypes()]).then(([profile, types]) => {
+      if (cancelled) return;
+      const can = repTypeCan(types, profile?.rep_type ?? null, "canCreateCustomers");
+      setGate(can ? "allowed" : "blocked");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
@@ -144,6 +167,80 @@ export default function AddCustomerPage() {
     setPin(null);
     setPinError(null);
   };
+
+  // Capability gate (May 27) — render a friendly block UI when the
+  // rep's type doesn't have canCreateCustomers. The SideMenu hides
+  // the entry point so most reps will never see this; this guard
+  // exists to cover direct URL nav + browser history back-button.
+  if (gate === "blocked") {
+    return (
+      <div
+        style={{
+          background: MC.bg,
+          minHeight: "100%",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <AppHeader title="Add customer" onBack={() => router.push("/")} withMenu />
+        <div
+          style={{
+            padding: "32px 20px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 14,
+            textAlign: "center",
+          }}
+        >
+          <Glyph name="lock" size={36} color={MC.mute} />
+          <div
+            style={{
+              fontFamily: MC.font,
+              fontSize: 16,
+              fontWeight: 700,
+              color: MC.ink,
+              letterSpacing: -0.2,
+            }}
+          >
+            Not enabled for your rep type
+          </div>
+          <div
+            style={{
+              fontFamily: MC.font,
+              fontSize: 13,
+              color: MC.mute,
+              lineHeight: 1.5,
+              maxWidth: 320,
+            }}
+          >
+            Adding new customers isn&apos;t enabled for your rep type. If you
+            need this, ask a manager to either update your type or change the
+            type&apos;s capabilities.
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/")}
+            style={{
+              marginTop: 8,
+              padding: "10px 18px",
+              borderRadius: 10,
+              border: "none",
+              background: MC.brand,
+              color: "#fff",
+              fontFamily: MC.font,
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Back to home
+          </button>
+        </div>
+        <AppFooter />
+      </div>
+    );
+  }
 
   return (
     <div style={{ background: MC.bg, minHeight: "100%", display: "flex", flexDirection: "column" }}>
