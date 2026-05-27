@@ -34,6 +34,7 @@ import {
 import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
 import { Combobox } from "@/components/ui/Combobox";
 import { SegTabs } from "@/components/ui/SegTabs";
+import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import type { Customer } from "@/lib/types";
 
 function fileGlyph(mime: string | null): GlyphName {
@@ -88,6 +89,8 @@ export default function LibraryPage() {
   const [filterCustomer, setFilterCustomer] = useState<string>("All");
   const [filterCategory, setFilterCategory] = useState<string>("All");
   const [search, setSearch] = useState<string>("");
+  // Pagination — 0-indexed. Resets to 0 whenever a filter changes.
+  const [page, setPage] = useState(0);
 
   const reload = () => {
     listLibraryFiles().then((rows) => {
@@ -186,6 +189,20 @@ export default function LibraryPage() {
         f.customers.some((c) => c.name.toLowerCase().includes(q))
     );
   }, [byCategory, search]);
+
+  // Reset to page 0 whenever any filter changes — without this the
+  // user could land on an empty page after narrowing results.
+  useEffect(() => {
+    setPage(0);
+  }, [filterCustomer, filterCategory, search]);
+
+  // Slice the filtered array down to the current page's window. Both
+  // Grid and Table views consume this same slice so pagination works
+  // identically across views.
+  const pageItems = filtered.slice(
+    page * DEFAULT_PAGE_SIZE,
+    (page + 1) * DEFAULT_PAGE_SIZE
+  );
 
   // Dynamic category list — union of the manager-managed list (from
   // settings) plus any free-text categories that already appear on
@@ -497,7 +514,7 @@ export default function LibraryPage() {
           {/* File list — Table or Grid view depending on the toggle. */}
           {view === "Grid" ? (
             <FileGrid
-              files={filtered}
+              files={pageItems}
               loaded={loaded}
               hasAnyFiles={files.length > 0}
               onOpen={onOpen}
@@ -540,7 +557,7 @@ export default function LibraryPage() {
                 <Empty text="No files match this filter." />
               )
             ) : (
-              filtered.map((f) => (
+              pageItems.map((f) => (
                 <div
                   key={f.id}
                   style={{
@@ -670,6 +687,12 @@ export default function LibraryPage() {
             )}
           </Card>
           )}
+
+          <Pagination
+            totalItems={filtered.length}
+            currentPage={page}
+            onPageChange={setPage}
+          />
         </div>
       </div>
 

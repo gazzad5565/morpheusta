@@ -22,6 +22,7 @@ import { Combobox } from "@/components/ui/Combobox";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
 import { listAllTasks, deleteTask, type TaskRow } from "@/lib/tasks-store";
+import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 
 export default function TasksPage() {
   const [rows, setRows] = useState<TaskRow[]>([]);
@@ -35,6 +36,9 @@ export default function TasksPage() {
   // joined customer name. Mirrors the search input on /customers and
   // /reps so every list page in the admin uses the same affordance.
   const [search, setSearch] = useState<string>("");
+  // Pagination — 0-indexed. Reset to 0 whenever a filter changes so
+  // the user doesn't land on an empty page 5 of a now-2-page result.
+  const [page, setPage] = useState(0);
 
   const reload = () => {
     listAllTasks().then((r) => {
@@ -56,6 +60,11 @@ export default function TasksPage() {
     }
     return Array.from(set.values());
   }, [rows]);
+
+  // Reset to page 0 whenever any filter/search changes.
+  useEffect(() => {
+    setPage(0);
+  }, [activeFilter, customerFilter, search]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -99,6 +108,14 @@ export default function TasksPage() {
 
   const compulsoryCount = rows.filter((r) => r.compulsory).length;
   const optionalCount = rows.filter((r) => !r.compulsory).length;
+
+  // Slice the filtered array down to the current page's window. Page
+  // size lives in the Pagination component as DEFAULT_PAGE_SIZE so
+  // every paginated list page in the admin uses the same value.
+  const pageItems = filtered.slice(
+    page * DEFAULT_PAGE_SIZE,
+    (page + 1) * DEFAULT_PAGE_SIZE
+  );
 
   return (
     <AdminShell
@@ -263,7 +280,7 @@ export default function TasksPage() {
               )}
             </div>
           ) : (
-            filtered.map((t) => (
+            pageItems.map((t) => (
               <div
                 key={t.id}
                 style={{
@@ -463,6 +480,12 @@ export default function TasksPage() {
             ))
           )}
         </Card>
+
+        <Pagination
+          totalItems={filtered.length}
+          currentPage={page}
+          onPageChange={setPage}
+        />
       </div>
     </AdminShell>
   );

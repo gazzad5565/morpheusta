@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import Link from "next/link";
 import { SettingsShell } from "@/components/shell/SettingsShell";
 import { Btn } from "@/components/ui/Btn";
@@ -43,6 +44,7 @@ export default function ManagersPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "manager" | "rep">("all");
+  const [page, setPage] = useState(0);
 
   // Add-user modal
   const [addOpen, setAddOpen] = useState(false);
@@ -70,6 +72,18 @@ export default function ManagersPage() {
     if (filter === "all") return profiles;
     return profiles.filter((p) => p.role === filter);
   }, [profiles, filter]);
+
+  // Reset to page 0 whenever the filter changes — without this the
+  // user could land on an empty page after narrowing results.
+  useEffect(() => {
+    setPage(0);
+  }, [filter]);
+
+  // Slice the filtered array down to the current page's window.
+  const pageItems = filtered.slice(
+    page * DEFAULT_PAGE_SIZE,
+    (page + 1) * DEFAULT_PAGE_SIZE
+  );
 
   const onToggle = async (p: Profile) => {
     if (busyId) return;
@@ -223,7 +237,7 @@ export default function ManagersPage() {
               No users yet.
             </div>
           ) : (
-            filtered.map((p, i) => (
+            pageItems.map((p, i) => (
               <div
                 key={p.id}
                 style={{
@@ -232,7 +246,7 @@ export default function ManagersPage() {
                   gap: 14,
                   alignItems: "center",
                   padding: "12px 16px",
-                  borderBottom: i < filtered.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                  borderBottom: i < pageItems.length - 1 ? `1px solid ${AC.lineDim}` : "none",
                   background: "#fff",
                 }}
               >
@@ -369,6 +383,12 @@ export default function ManagersPage() {
             ))
           )}
         </Card>
+
+        <Pagination
+          totalItems={filtered.length}
+          currentPage={page}
+          onPageChange={setPage}
+        />
 
         <div
           style={{

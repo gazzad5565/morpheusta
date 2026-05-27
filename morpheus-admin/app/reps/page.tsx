@@ -26,6 +26,7 @@ import {
   compareBy,
   type SortState,
 } from "@/components/ui/SortableHeader";
+import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import { AC } from "@/lib/tokens";
 import { listProfiles, subscribeProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listShifts } from "@/lib/shifts-store";
@@ -53,6 +54,15 @@ export default function RepsPage() {
     key: "name",
     dir: "asc",
   });
+  // Pagination — 0-indexed. Resets to 0 on any filter/sort change.
+  const [page, setPage] = useState(0);
+
+  // Reset to page 0 whenever any filter, search, or sort changes —
+  // without this the user could land on an empty page after narrowing
+  // or re-sorting.
+  useEffect(() => {
+    setPage(0);
+  }, [statusFilter, search, sort]);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,9 +205,35 @@ export default function RepsPage() {
             </Centered>
           </Card>
         ) : view === "Grid" ? (
-          <GridView reps={filtered} />
+          <>
+            <GridView
+              reps={filtered.slice(
+                page * DEFAULT_PAGE_SIZE,
+                (page + 1) * DEFAULT_PAGE_SIZE
+              )}
+            />
+            <Pagination
+              totalItems={filtered.length}
+              currentPage={page}
+              onPageChange={setPage}
+            />
+          </>
         ) : (
-          <TableView reps={filtered} sort={sort} onSort={setSort} />
+          <>
+            <TableView
+              reps={filtered.slice(
+                page * DEFAULT_PAGE_SIZE,
+                (page + 1) * DEFAULT_PAGE_SIZE
+              )}
+              sort={sort}
+              onSort={setSort}
+            />
+            <Pagination
+              totalItems={filtered.length}
+              currentPage={page}
+              onPageChange={setPage}
+            />
+          </>
         )}
       </div>
     </AdminShell>

@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
@@ -98,6 +99,16 @@ export default function CustomersPage() {
     key: persisted.sortKey ?? "name",
     dir: persisted.sortDir ?? "asc",
   });
+  // Pagination — 0-indexed. Resets to 0 whenever a filter or sort
+  // changes. View switching (Grid ↔ Table) preserves the current
+  // page so the user keeps context when comparing layouts. The Map
+  // view BYPASSES pagination entirely (showing all pins is the
+  // whole point of the view — paginating it would hide context).
+  const [page, setPage] = useState(0);
+
+  useEffect(() => {
+    setPage(0);
+  }, [statusFilter, withAddressOnly, search, sort]);
 
   // Persist any of the above on change. Write is debounced behind
   // React's batching — every update lands on a single tick.
@@ -362,10 +373,42 @@ export default function CustomersPage() {
             </div>
           </Card>
         ) : view === "Grid" ? (
-          <GridView customers={filtered} seenIds={seenIds} />
+          <>
+            <GridView
+              customers={filtered.slice(
+                page * DEFAULT_PAGE_SIZE,
+                (page + 1) * DEFAULT_PAGE_SIZE
+              )}
+              seenIds={seenIds}
+            />
+            <Pagination
+              totalItems={filtered.length}
+              currentPage={page}
+              onPageChange={setPage}
+            />
+          </>
         ) : view === "Table" ? (
-          <TableView customers={filtered} seenIds={seenIds} sort={sort} onSort={setSort} />
+          <>
+            <TableView
+              customers={filtered.slice(
+                page * DEFAULT_PAGE_SIZE,
+                (page + 1) * DEFAULT_PAGE_SIZE
+              )}
+              seenIds={seenIds}
+              sort={sort}
+              onSort={setSort}
+            />
+            <Pagination
+              totalItems={filtered.length}
+              currentPage={page}
+              onPageChange={setPage}
+            />
+          </>
         ) : (
+          // Map view shows every pin in the filtered set, NOT just
+          // the current page's slice — paginating a map view would
+          // defeat the "see everywhere" affordance. No pagination
+          // bar rendered here.
           <CustomersMap customers={filtered} />
         )}
       </div>
