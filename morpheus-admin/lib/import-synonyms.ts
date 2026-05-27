@@ -48,6 +48,10 @@ const USER_SYNONYMS: SynonymMap = {
   // settings-page default — useful when one CSV mixes "send" and
   // "don't send" rows.
   send_welcome_email: ["send welcome email", "send email", "email welcome"],
+  // Optional. Only meaningful for rep imports; managers ignore it.
+  // Server validates against the live app_settings.rep_types vocabulary
+  // and rejects unknown values with a list of valid options.
+  rep_type: ["rep type", "type", "category", "rep category", "role type"],
 };
 
 const SHIFT_SYNONYMS: SynonymMap = {

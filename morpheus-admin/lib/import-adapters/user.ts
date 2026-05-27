@@ -31,6 +31,10 @@ async function callImportUsersRoute(payload: {
   role: "rep" | "manager";
   send_welcome_email: boolean;
   mode: DuplicateMode;
+  /** May 27 — optional rep_type category. Server validates against
+   *  app_settings.rep_types and rejects unknown values with a clear
+   *  error message that lists the available types. */
+  rep_type?: string | null;
 }): Promise<{
   ok: boolean;
   outcome?: UpsertOutcome;
@@ -64,15 +68,22 @@ async function callImportUsersRoute(payload: {
 }
 
 function userAdapter(role: "rep" | "manager"): ImportAdapter {
+  // Managers don't have a rep_type — only the rep adapter advertises
+  // the column. (Managers import would silently ignore it anyway.)
+  const isRep = role === "rep";
   return {
     entity: role,
     requiredFields: ["email", "name"],
-    optionalFields: ["send_welcome_email"],
+    optionalFields: isRep
+      ? ["send_welcome_email", "rep_type"]
+      : ["send_welcome_email"],
     fieldLabels: {
       email: "Email address",
       name: "Full name",
       send_welcome_email:
         "Send welcome email (true/false — overrides the import-run default)",
+      rep_type:
+        "Rep type (Sales Rep / Merchandiser / Driver / … — must match a configured type)",
     },
     fieldKinds: {
       email: "id",
@@ -98,6 +109,11 @@ function userAdapter(role: "rep" | "manager"): ImportAdapter {
     ): Promise<UpsertOutcome> => {
       const email = row.email.trim().toLowerCase();
       const name = row.name.trim();
+      // rep_type only meaningful for rep imports; managers don't have
+      // one. Empty string => null (uncategorised).
+      const repType = isRep
+        ? ((row.rep_type || "").trim() || null)
+        : null;
       // Per-row override: if the CSV has a non-empty send_welcome_email
       // column, that wins over the import-run default. Run default is
       // applied server-side from the request body.
@@ -113,6 +129,7 @@ function userAdapter(role: "rep" | "manager"): ImportAdapter {
         role,
         send_welcome_email: sendWelcome,
         mode,
+        rep_type: repType,
       });
 
       if (!result.ok) {

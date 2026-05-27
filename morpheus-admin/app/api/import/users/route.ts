@@ -123,6 +123,12 @@ interface Body {
   role?: "rep" | "manager";
   send_welcome_email?: boolean;
   mode?: "skip" | "update";
+  /** May 27 — rep_type category (Sales Rep / Merchandiser / Driver / …).
+   *  Validated against the live vocabulary in app_settings.rep_types;
+   *  unknown values are rejected with the list of valid options so
+   *  the import wizard's failures CSV is actionable. Ignored when
+   *  role=manager. Empty / null = uncategorised. */
+  rep_type?: string | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -140,6 +146,9 @@ export async function POST(req: NextRequest) {
   const role: "rep" | "manager" = body.role === "manager" ? "manager" : "rep";
   const sendWelcome = body.send_welcome_email === true;
   const mode: "skip" | "update" = body.mode === "update" ? "update" : "skip";
+  // rep_type only meaningful for rep imports. Empty / null = uncategorised.
+  const repTypeRaw = (body.rep_type ?? "").toString().trim();
+  const wantsRepType = role === "rep" && repTypeRaw.length > 0;
 
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return NextResponse.json(
@@ -155,6 +164,45 @@ export async function POST(req: NextRequest) {
   }
 
   const sb = adminClient();
+
+  // Validate rep_type against the live vocabulary in
+  // app_settings.rep_types. Done here (not in the adapter) because
+  // the adapter's validate() is sync; an async DB fetch is awkward
+  // there. Server-side check is the canonical source of truth anyway.
+  let resolvedRepType: string | null = null;
+  if (wantsRepType) {
+    const { data: settingRow } = await sb
+      .from("app_settings")
+      .select("value")
+      .eq("key", "rep_types")
+      .maybeSingle();
+    const rawList = (settingRow as { value?: unknown } | null)?.value;
+    const types = Array.isArray(rawList) ? rawList : [];
+    const names: string[] = [];
+    for (const t of types) {
+      if (t && typeof t === "object") {
+        const n = (t as { name?: unknown }).name;
+        if (typeof n === "string" && n.trim()) names.push(n.trim());
+      }
+    }
+    const match = names.find(
+      (n) => n.toLowerCase() === repTypeRaw.toLowerCase()
+    );
+    if (!match) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `unknown rep_type "${repTypeRaw}". Configured types: ${
+            names.length > 0 ? names.join(", ") : "(none — add some from Manage rep types)"
+          }`,
+        },
+        { status: 400 }
+      );
+    }
+    // Use the canonical-cased name from the vocabulary so we don't
+    // end up with "sales rep" / "Sales Rep" drift on profiles.
+    resolvedRepType = match;
+  }
 
   // Look up by email. The auth.admin API exposes listUsers; we
   // page through up to one batch (1000 users) and match locally.
@@ -179,10 +227,16 @@ export async function POST(req: NextRequest) {
     if (mode === "skip") {
       return NextResponse.json({ ok: true, outcome: "skipped" });
     }
-    // Update name + role on the profile, leave password alone.
+    // Update name + role on the profile, leave password alone. Only
+    // touch rep_type when the import row specified one (don't wipe an
+    // existing categorisation on an update import that omits the column).
+    const updatePatch: Record<string, unknown> = { name, role };
+    if (role === "rep" && wantsRepType) {
+      updatePatch.rep_type = resolvedRepType;
+    }
     const { error: profErr } = await sb
       .from("profiles")
-      .update({ name, role })
+      .update(updatePatch)
       .eq("id", existing.id);
     if (profErr) {
       return NextResponse.json(
@@ -211,13 +265,14 @@ export async function POST(req: NextRequest) {
     );
   }
   // handle_new_user() trigger inserts the profile from metadata, but
-  // belt-and-braces upsert so name+role are guaranteed.
+  // belt-and-braces upsert so name+role(+rep_type) are guaranteed.
   await sb.from("profiles").upsert(
     {
       id: created.user.id,
       email,
       name,
       role,
+      ...(role === "rep" && wantsRepType ? { rep_type: resolvedRepType } : {}),
     },
     { onConflict: "id" }
   );
