@@ -23,6 +23,12 @@ import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
 import { listAllTasks, deleteTask, type TaskRow } from "@/lib/tasks-store";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
+import { useColumnWidths } from "@/lib/use-column-widths";
+import { ColumnResizer } from "@/components/ui/ColumnResizer";
+
+// Default column widths for /tasks. localStorage takes over once the
+// user resizes (per-browser persistence; key `morpheus.cols.tasks.v1`).
+const TASKS_COLUMNS = [360, 240, 100, 100, 80, 90] as const;
 
 export default function TasksPage() {
   const [rows, setRows] = useState<TaskRow[]>([]);
@@ -39,6 +45,8 @@ export default function TasksPage() {
   // Pagination — 0-indexed. Reset to 0 whenever a filter changes so
   // the user doesn't land on an empty page 5 of a now-2-page result.
   const [page, setPage] = useState(0);
+  // Resizable columns — widths persisted per-browser via localStorage.
+  const cols = useColumnWidths("tasks", TASKS_COLUMNS);
 
   const reload = () => {
     listAllTasks().then((r) => {
@@ -220,11 +228,11 @@ export default function TasksPage() {
           </div>
         </Card>
 
-        <Card padding={0}>
+        <Card padding={0} style={{ overflowX: "auto" }}>
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2.4fr 1.6fr 100px 100px 80px 90px",
+              gridTemplateColumns: cols.gridTemplateColumns,
               gap: 14,
               padding: "10px 16px",
               background: AC.bg,
@@ -237,11 +245,11 @@ export default function TasksPage() {
               textTransform: "uppercase",
             }}
           >
-            <div>Task</div>
-            <div>Customer</div>
-            <div>Duration</div>
-            <div>Type</div>
-            <div>Order</div>
+            <div style={{ position: "relative" }}>Task<ColumnResizer index={0} cols={cols} /></div>
+            <div style={{ position: "relative" }}>Customer<ColumnResizer index={1} cols={cols} /></div>
+            <div style={{ position: "relative" }}>Duration<ColumnResizer index={2} cols={cols} /></div>
+            <div style={{ position: "relative" }}>Type<ColumnResizer index={3} cols={cols} /></div>
+            <div style={{ position: "relative" }}>Order<ColumnResizer index={4} cols={cols} /></div>
             <div></div>
           </div>
 
@@ -285,7 +293,7 @@ export default function TasksPage() {
                 key={t.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "2.4fr 1.6fr 100px 100px 80px 90px",
+                  gridTemplateColumns: cols.gridTemplateColumns,
                   gap: 14,
                   alignItems: "center",
                   padding: "12px 16px",

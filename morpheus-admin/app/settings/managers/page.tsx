@@ -10,6 +10,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
+import { useColumnWidths } from "@/lib/use-column-widths";
+import { ColumnResizer } from "@/components/ui/ColumnResizer";
+
+// Default column widths for /settings/managers. localStorage takes
+// over once the user resizes (key `morpheus.cols.settings-managers.v1`).
+const USERS_COLUMNS = [280, 200, 110, 130, 110] as const;
 import Link from "next/link";
 import { SettingsShell } from "@/components/shell/SettingsShell";
 import { Btn } from "@/components/ui/Btn";
@@ -45,6 +51,8 @@ export default function ManagersPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "manager" | "rep">("all");
   const [page, setPage] = useState(0);
+  // Resizable columns — widths persisted per-browser via localStorage.
+  const cols = useColumnWidths("settings-managers", USERS_COLUMNS);
 
   // Add-user modal
   const [addOpen, setAddOpen] = useState(false);
@@ -160,7 +168,7 @@ export default function ManagersPage() {
           </div>
         </Card>
 
-        <Card padding={0}>
+        <Card padding={0} style={{ overflowX: "auto" }}>
           <div
             style={{
               padding: "12px 16px",
@@ -194,6 +202,33 @@ export default function ManagersPage() {
             <FilterChip active={filter === "rep"} onClick={() => setFilter("rep")}>
               Reps
             </FilterChip>
+          </div>
+
+          {/* Column-header row — added for resizable-column UX. Mirrors
+              the header pattern on /tasks, /library, /reps, /customers
+              so all 5 paginated list pages now have consistent column
+              labels + draggable dividers. */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: cols.gridTemplateColumns,
+              gap: 14,
+              padding: "10px 16px",
+              background: AC.bg,
+              borderBottom: `1px solid ${AC.line}`,
+              fontFamily: AC.font,
+              fontSize: 11,
+              color: AC.mute,
+              fontWeight: 600,
+              letterSpacing: 0.3,
+              textTransform: "uppercase",
+            }}
+          >
+            <div style={{ position: "relative" }}>User<ColumnResizer index={0} cols={cols} /></div>
+            <div style={{ position: "relative" }}>Joined<ColumnResizer index={1} cols={cols} /></div>
+            <div style={{ position: "relative" }}>Role<ColumnResizer index={2} cols={cols} /></div>
+            <div style={{ position: "relative" }}>Access<ColumnResizer index={3} cols={cols} /></div>
+            <div></div>
           </div>
 
           {error && (
@@ -242,7 +277,7 @@ export default function ManagersPage() {
                 key={p.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1.6fr 1.4fr 110px 110px 110px",
+                  gridTemplateColumns: cols.gridTemplateColumns,
                   gap: 14,
                   alignItems: "center",
                   padding: "12px 16px",

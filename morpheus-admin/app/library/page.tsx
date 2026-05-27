@@ -35,7 +35,14 @@ import { CustomerScopePicker, type CustomerScope } from "@/components/ui/Custome
 import { Combobox } from "@/components/ui/Combobox";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
+import { useColumnWidths } from "@/lib/use-column-widths";
+import { ColumnResizer } from "@/components/ui/ColumnResizer";
 import type { Customer } from "@/lib/types";
+
+// Default column widths for /library Table view. localStorage takes
+// over once the user resizes (key `morpheus.cols.library.v1`). Grid
+// view doesn't use these — it has no column layout to resize.
+const LIBRARY_COLUMNS = [320, 220, 110, 90, 90, 90] as const;
 
 function fileGlyph(mime: string | null): GlyphName {
   if (!mime) return "lib";
@@ -91,6 +98,8 @@ export default function LibraryPage() {
   const [search, setSearch] = useState<string>("");
   // Pagination — 0-indexed. Resets to 0 whenever a filter changes.
   const [page, setPage] = useState(0);
+  // Resizable columns — only used by the Table view.
+  const cols = useColumnWidths("library", LIBRARY_COLUMNS);
 
   const reload = () => {
     listLibraryFiles().then((rows) => {
@@ -520,11 +529,11 @@ export default function LibraryPage() {
               onOpen={onOpen}
             />
           ) : (
-          <Card padding={0}>
+          <Card padding={0} style={{ overflowX: "auto" }}>
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "2.2fr 1.4fr 110px 90px 90px 90px",
+                gridTemplateColumns: cols.gridTemplateColumns,
                 gap: 14,
                 padding: "10px 16px",
                 background: AC.bg,
@@ -537,11 +546,11 @@ export default function LibraryPage() {
                 textTransform: "uppercase",
               }}
             >
-              <div>Name</div>
-              <div>Customers</div>
-              <div>Category</div>
-              <div>Size</div>
-              <div>Uploaded</div>
+              <div style={{ position: "relative" }}>Name<ColumnResizer index={0} cols={cols} /></div>
+              <div style={{ position: "relative" }}>Customers<ColumnResizer index={1} cols={cols} /></div>
+              <div style={{ position: "relative" }}>Category<ColumnResizer index={2} cols={cols} /></div>
+              <div style={{ position: "relative" }}>Size<ColumnResizer index={3} cols={cols} /></div>
+              <div style={{ position: "relative" }}>Uploaded<ColumnResizer index={4} cols={cols} /></div>
               <div></div>
             </div>
 
@@ -562,7 +571,7 @@ export default function LibraryPage() {
                   key={f.id}
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "2.2fr 1.4fr 110px 90px 90px 90px",
+                    gridTemplateColumns: cols.gridTemplateColumns,
                     gap: 14,
                     alignItems: "center",
                     padding: "12px 16px",

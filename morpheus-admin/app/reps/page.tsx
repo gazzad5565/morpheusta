@@ -27,7 +27,14 @@ import {
   type SortState,
 } from "@/components/ui/SortableHeader";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
+import { useColumnWidths } from "@/lib/use-column-widths";
+import { ColumnResizer } from "@/components/ui/ColumnResizer";
 import { AC } from "@/lib/tokens";
+
+// Default column widths for /reps Table view. localStorage takes
+// over once the user resizes (key `morpheus.cols.reps.v1`). Grid
+// view doesn't use these — it has no column layout to resize.
+const REPS_COLUMNS = [260, 260, 110, 140, 130] as const;
 import { listProfiles, subscribeProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listShifts } from "@/lib/shifts-store";
 import { initialsFromNameOrEmail, formatDate } from "@/lib/format";
@@ -436,6 +443,9 @@ function GridView({ reps }: { reps: RepWithStats[] }) {
 
 // ─── Table view ─────────────────────────────────────────────────────────
 
+// Legacy literal — kept around in case any code path still references
+// it. Live Table view now uses cols.gridTemplateColumns from the
+// useColumnWidths hook.
 const TABLE_COLS = "1.5fr 1.5fr 110px 140px 130px";
 
 function TableView({
@@ -447,21 +457,36 @@ function TableView({
   sort: SortState<RepSortKey>;
   onSort: (s: SortState<RepSortKey>) => void;
 }) {
+  // Hook lives inside TableView since this is its only consumer.
+  // Grid view doesn't have columns to resize.
+  const cols = useColumnWidths("reps", REPS_COLUMNS);
   return (
-    <Card padding={0}>
-      <div style={tableHeader()}>
-        <SortableHeader k="name" sort={sort} onChange={onSort}>
-          Name
-        </SortableHeader>
-        <SortableHeader k="email" sort={sort} onChange={onSort}>
-          Email
-        </SortableHeader>
-        <SortableHeader k="role" sort={sort} onChange={onSort}>
-          Role
-        </SortableHeader>
-        <SortableHeader k="joined" sort={sort} onChange={onSort}>
-          Joined
-        </SortableHeader>
+    <Card padding={0} style={{ overflowX: "auto" }}>
+      <div style={tableHeader(cols.gridTemplateColumns)}>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="name" sort={sort} onChange={onSort}>
+            Name
+          </SortableHeader>
+          <ColumnResizer index={0} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="email" sort={sort} onChange={onSort}>
+            Email
+          </SortableHeader>
+          <ColumnResizer index={1} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="role" sort={sort} onChange={onSort}>
+            Role
+          </SortableHeader>
+          <ColumnResizer index={2} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="joined" sort={sort} onChange={onSort}>
+            Joined
+          </SortableHeader>
+          <ColumnResizer index={3} cols={cols} />
+        </div>
         <SortableHeader k="shiftsToday" sort={sort} onChange={onSort}>
           Shifts today
         </SortableHeader>
@@ -473,7 +498,7 @@ function TableView({
           href={`/reps/${r.id}`}
           style={{
             display: "grid",
-            gridTemplateColumns: TABLE_COLS,
+            gridTemplateColumns: cols.gridTemplateColumns,
             alignItems: "center",
             gap: 14,
             padding: "12px 16px",
@@ -531,10 +556,10 @@ function TableView({
   );
 }
 
-function tableHeader(): CSSProperties {
+function tableHeader(gridTemplateColumns: string): CSSProperties {
   return {
     display: "grid",
-    gridTemplateColumns: TABLE_COLS,
+    gridTemplateColumns,
     alignItems: "center",
     gap: 14,
     padding: "10px 16px",

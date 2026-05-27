@@ -13,6 +13,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
+import { useColumnWidths } from "@/lib/use-column-widths";
+import { ColumnResizer } from "@/components/ui/ColumnResizer";
+
+// Default column widths for /customers Table view. localStorage takes
+// over once the user resizes (key `morpheus.cols.customers.v1`). Grid
+// view + Map view don't use these — Grid auto-flows; Map shows pins.
+const CUSTOMERS_COLUMNS = [360, 140, 260, 90, 90] as const;
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
@@ -558,12 +565,15 @@ function TableView({
 }) {
   const isNew = (c: Customer) =>
     !!c.createdByRepId && !seenIds.has(c.id);
+  // Hook lives inside TableView since this is its only consumer.
+  // Grid view + Map view don't have columns to resize.
+  const cols = useColumnWidths("customers", CUSTOMERS_COLUMNS);
   return (
-    <Card padding={0}>
+    <Card padding={0} style={{ overflowX: "auto" }}>
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "2.4fr 1fr 1.6fr 90px 90px",
+          gridTemplateColumns: cols.gridTemplateColumns,
           gap: 14,
           padding: "10px 16px",
           background: AC.bg,
@@ -576,18 +586,30 @@ function TableView({
           textTransform: "uppercase",
         }}
       >
-        <SortableHeader k="name" sort={sort} onChange={onSort}>
-          Name
-        </SortableHeader>
-        <SortableHeader k="code" sort={sort} onChange={onSort}>
-          Code
-        </SortableHeader>
-        <SortableHeader k="address" sort={sort} onChange={onSort}>
-          Address
-        </SortableHeader>
-        <SortableHeader k="status" sort={sort} onChange={onSort}>
-          Status
-        </SortableHeader>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="name" sort={sort} onChange={onSort}>
+            Name
+          </SortableHeader>
+          <ColumnResizer index={0} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="code" sort={sort} onChange={onSort}>
+            Code
+          </SortableHeader>
+          <ColumnResizer index={1} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="address" sort={sort} onChange={onSort}>
+            Address
+          </SortableHeader>
+          <ColumnResizer index={2} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="status" sort={sort} onChange={onSort}>
+            Status
+          </SortableHeader>
+          <ColumnResizer index={3} cols={cols} />
+        </div>
         <div></div>
       </div>
       {customers.map((c, i) => (
@@ -599,7 +621,7 @@ function TableView({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2.4fr 1fr 1.6fr 90px 90px",
+              gridTemplateColumns: cols.gridTemplateColumns,
               gap: 14,
               alignItems: "center",
               padding: "12px 16px",
