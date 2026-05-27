@@ -64,7 +64,7 @@ export default function EntityImportPage({
   const { entity: entityParam } = use(params);
   if (!isEntity(entityParam)) {
     return (
-      <AdminShell breadcrumbs={["Home", "Settings", "Import", "Not found"]}>
+      <AdminShell breadcrumbs={["Home", "Settings", "Bulk import", "Not found"]}>
         <div style={{ padding: 32 }}>
           <Card padding={24}>
             <div
@@ -344,7 +344,7 @@ function Wizard({ entity }: { entity: EntityType }) {
   // ── Render ──────────────────────────────────────────────────────
   return (
     <AdminShell
-      breadcrumbs={["Home", "Settings", "Import", ENTITY_LABEL[entity]]}
+      breadcrumbs={["Home", "Settings", "Bulk import", ENTITY_LABEL[entity]]}
       actions={
         <Link href="/settings/import" style={{ textDecoration: "none" }}>
           <Btn size="sm">← All entities</Btn>

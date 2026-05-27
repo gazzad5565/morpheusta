@@ -78,8 +78,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     available: true,
   },
   {
+    // URL stays /settings/import (id unchanged) so existing links +
+    // breadcrumbs in app/settings/import/[entity]/page.tsx keep working.
+    // Label renamed May 27 (post-very-very-late) — Gary's call: "Import"
+    // alone is ambiguous (could mean code imports or anything); "Bulk
+    // import" tells you what it is.
     id: "import",
-    label: "Import",
+    label: "Bulk import",
     href: "/settings/import",
     glyph: "upload",
     description:
