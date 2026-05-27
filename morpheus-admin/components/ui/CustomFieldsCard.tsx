@@ -8,13 +8,20 @@
  * renders an editable form. "Save" persists; required-but-empty fields
  * are flagged.
  *
- * If no custom fields are defined for the entity type, the card renders
- * a small empty state pointing at /settings/fields/new.
+ * **Read-only on field definitions.** This card NEVER creates new
+ * custom field definitions — the manager fills in values for fields
+ * that already exist on this entity type. Definitions are created
+ * exclusively at /settings/custom-fields per Gary's directive (May 27
+ * late): "Only use the custom fields. The only place you can add
+ * custom fields is in site settings." That means:
+ *   - Empty state has NO "Define a field" CTA — just hint text
+ *     pointing at Settings.
+ *   - Populated state has NO "+ Add field" button in the card header.
+ * If we ever want a create button back, it belongs on
+ * /settings/custom-fields itself, not on entity pages.
  */
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
@@ -39,7 +46,6 @@ export function CustomFieldsCard({
   entity: FieldEntity;
   entityId: string;
 }) {
-  const router = useRouter();
   const [fields, setFields] = useState<CustomField[]>([]);
   const [values, setValues] = useState<Record<string, CustomFieldValue>>({});
   const [loaded, setLoaded] = useState(false);
@@ -110,9 +116,7 @@ export function CustomFieldsCard({
         <EmptyState
           icon="settings"
           title="No custom fields defined"
-          hint="Custom fields capture extra info you want to track per entity. Define them in Settings."
-          actionLabel="Define a field"
-          onAction={() => router.push(`/settings/fields/new?entity=${entity}`)}
+          hint="Custom fields capture extra info you want to track per entity. A manager can define them in Settings → Custom fields."
         />
       </Card>
     );
@@ -120,20 +124,7 @@ export function CustomFieldsCard({
 
   return (
     <Card padding={0}>
-      <TabHeader
-        title="Custom fields"
-        count={fields.length}
-        action={
-          <Link
-            href={`/settings/fields/new?entity=${entity}`}
-            style={{ textDecoration: "none" }}
-          >
-            <Btn size="sm" icon="plus">
-              Add field
-            </Btn>
-          </Link>
-        }
-      />
+      <TabHeader title="Custom fields" count={fields.length} />
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
         {fields.map((f) => (
           <FieldRow
