@@ -1,12 +1,15 @@
+"use client";
+
 import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 import { RepAvatar } from "@/components/ui/Avatars";
 import { AGlyph } from "@/components/ui/AGlyph";
-import { TableColumnHeader } from "@/components/ui/TabHeader";
+import { ColumnResizer } from "@/components/ui/ColumnResizer";
 import {
   SortableHeader,
   type SortState,
 } from "@/components/ui/SortableHeader";
+import { useColumnWidths } from "@/lib/use-column-widths";
 import { AC } from "@/lib/tokens";
 import { shiftHref } from "@/lib/shifts-store";
 import { formatDate, formatTimeRange, initialsFromNameOrEmail } from "@/lib/format";
@@ -14,7 +17,7 @@ import { TasksDonePill } from "./TasksDonePill";
 import {
   STATE_LABEL,
   STATE_TONE,
-  TABLE_COLS,
+  PAST_SHIFTS_COLUMNS,
   type PastShiftRow,
   type SortKey,
 } from "./types";
@@ -38,26 +41,62 @@ export function TableView({
    *  we render no badge — silence beats a "0" everywhere. */
   photoCounts?: Map<string, number>;
 }) {
+  // Resizable columns — matches /reps, /customers, /tasks, /library
+  // (the rest of the May 27 sweep). The first five columns get drag
+  // handles; the last column (State) does not — same convention as
+  // every other Table view in the admin.
+  const cols = useColumnWidths("past-shifts", PAST_SHIFTS_COLUMNS);
   return (
-    <Card padding={0}>
-      <TableColumnHeader columns={TABLE_COLS}>
-        <SortableHeader k="customer" sort={sort} onChange={onSort}>
-          Customer
-        </SortableHeader>
-        <SortableHeader k="rep" sort={sort} onChange={onSort}>
-          Rep
-        </SortableHeader>
-        <SortableHeader k="date" sort={sort} onChange={onSort}>
-          Date
-        </SortableHeader>
-        <div>Time</div>
-        <SortableHeader k="tasksDone" sort={sort} onChange={onSort}>
-          Tasks done
-        </SortableHeader>
+    <Card padding={0} style={{ overflowX: "auto" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: cols.gridTemplateColumns,
+          gap: 14,
+          alignItems: "center",
+          padding: "10px 16px",
+          background: AC.bg,
+          borderBottom: `1px solid ${AC.line}`,
+          fontFamily: AC.font,
+          fontSize: 11,
+          fontWeight: 600,
+          color: AC.mute,
+          letterSpacing: 0.3,
+          textTransform: "uppercase",
+        }}
+      >
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="customer" sort={sort} onChange={onSort}>
+            Customer
+          </SortableHeader>
+          <ColumnResizer index={0} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="rep" sort={sort} onChange={onSort}>
+            Rep
+          </SortableHeader>
+          <ColumnResizer index={1} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="date" sort={sort} onChange={onSort}>
+            Date
+          </SortableHeader>
+          <ColumnResizer index={2} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <div>Time</div>
+          <ColumnResizer index={3} cols={cols} />
+        </div>
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="tasksDone" sort={sort} onChange={onSort}>
+            Tasks done
+          </SortableHeader>
+          <ColumnResizer index={4} cols={cols} />
+        </div>
         <SortableHeader k="state" sort={sort} onChange={onSort}>
           State
         </SortableHeader>
-      </TableColumnHeader>
+      </div>
 
       {rows.map((r, i) => {
         const s = r.shift;
@@ -69,7 +108,7 @@ export function TableView({
             href={shiftHref(s)}
             style={{
               display: "grid",
-              gridTemplateColumns: TABLE_COLS,
+              gridTemplateColumns: cols.gridTemplateColumns,
               alignItems: "center",
               gap: 14,
               padding: "12px 16px",
