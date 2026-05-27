@@ -164,6 +164,11 @@ export async function PATCH(req: NextRequest) {
     password?: string;
     name?: string;
     role?: string;
+    /** May 27 — rep type category. Empty string / null = uncategorise.
+     *  Anything else writes through as plain text; no server-side
+     *  validation against app_settings.rep_types yet (the dropdown
+     *  on the edit form is the authoritative source). */
+    rep_type?: string | null;
   };
   try {
     body = await req.json();
@@ -203,11 +208,17 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  // Profile-side update (name + role + email mirror)
+  // Profile-side update (name + role + email mirror + rep_type)
   const profilePatch: Record<string, unknown> = {};
   if (body.name !== undefined) profilePatch.name = body.name.trim() || null;
   if (body.role !== undefined) {
     profilePatch.role = body.role === "manager" ? "manager" : "rep";
+  }
+  if (body.rep_type !== undefined) {
+    // Empty string / null = clear the category. Trim whitespace on
+    // anything else so "Sales Rep " doesn't drift from "Sales Rep".
+    const v = (body.rep_type ?? "").trim();
+    profilePatch.rep_type = v.length > 0 ? v : null;
   }
   if (authPatch.email) profilePatch.email = authPatch.email;
   if (Object.keys(profilePatch).length > 0) {

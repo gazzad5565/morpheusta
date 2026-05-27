@@ -22,6 +22,7 @@ import { displayName, type Profile } from "@/lib/profiles-store";
 import { updateUser, deleteUser, randomPassword } from "@/lib/users-admin";
 import { EmailUserModal } from "@/components/users/EmailUserModal";
 import { formatRelative } from "@/lib/format";
+import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
 
 function formatJoined(iso: string | undefined): string {
   if (!iso) return "—";
@@ -48,6 +49,10 @@ export default function EditManagerPage({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"manager" | "rep">("rep");
+  // May 27 — rep type category (Sales Rep / Merchandiser / Driver / …).
+  // Empty string = uncategorised; only meaningful when role=rep.
+  const [repType, setRepType] = useState<string>("");
+  const [repTypes, setRepTypes] = useState<RepTypeConfig[]>([]);
   const [newPassword, setNewPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
 
@@ -65,11 +70,14 @@ export default function EditManagerPage({
       }
       const u = await getUser();
       if (!cancelled) setMyId(u?.id ?? null);
-      const { data, error: dbErr } = await supabase
-        .from("profiles")
-        .select("id, email, name, role, created_at")
-        .eq("id", id)
-        .maybeSingle();
+      const [{ data, error: dbErr }, types] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("id, email, name, role, created_at, rep_type")
+          .eq("id", id)
+          .maybeSingle(),
+        getRepTypes(),
+      ]);
       if (cancelled) return;
       if (dbErr || !data) {
         setNotFound(true);
@@ -81,6 +89,8 @@ export default function EditManagerPage({
       setName(p.name || "");
       setEmail(p.email);
       setRole(p.role === "manager" ? "manager" : "rep");
+      setRepType(p.rep_type ?? "");
+      setRepTypes(types);
       setLoading(false);
     })();
     return () => {
@@ -100,6 +110,9 @@ export default function EditManagerPage({
       name,
       role,
       password: newPassword.length > 0 ? newPassword : undefined,
+      // Only send rep_type for reps — managers don't have one. Empty
+      // string clears the category server-side.
+      rep_type: role === "rep" ? repType : null,
     });
     setBusy(false);
     if (!r.ok) {
@@ -236,6 +249,40 @@ export default function EditManagerPage({
                 </div>
               )}
             </Field>
+
+            {role === "rep" && (
+              <Field label="Rep type">
+                <select
+                  value={repType}
+                  onChange={(e) => setRepType(e.target.value)}
+                  style={{ ...inputStyle, cursor: "pointer" }}
+                >
+                  <option value="">— Uncategorised (allow all) —</option>
+                  {repTypes.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.name}
+                      {t.canCreateCustomers ? "" : " · can't add customers"}
+                    </option>
+                  ))}
+                </select>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 11.5,
+                    color: AC.mute,
+                    marginTop: 6,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Drives which mobile-app affordances this rep sees. Edit the
+                  vocabulary + per-type capabilities from{" "}
+                  <b style={{ color: AC.ink2 }}>
+                    Manage rep types
+                  </b>{" "}
+                  on the Users page.
+                </div>
+              </Field>
+            )}
           </Card>
 
           <Card padding={20}>

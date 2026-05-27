@@ -31,6 +31,8 @@ import {
 } from "@/lib/profiles-store";
 import { createUser, deleteUser, randomPassword } from "@/lib/users-admin";
 import { initialsFromNameOrEmail } from "@/lib/format";
+import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
+import { ManageRepTypesSheet } from "@/components/users/ManageRepTypesSheet";
 
 const deriveInitials = (p: Profile) => initialsFromNameOrEmail(p.name, p.email);
 
@@ -56,6 +58,15 @@ export default function ManagersPage() {
 
   // Add-user modal
   const [addOpen, setAddOpen] = useState(false);
+  // Manage-rep-types modal + the live vocabulary so we can offer
+  // type assignments inline + so it's available to pass into the
+  // edit page once that wiring lands.
+  const [repTypesOpen, setRepTypesOpen] = useState(false);
+  const [repTypes, setRepTypesState] = useState<RepTypeConfig[]>([]);
+
+  useEffect(() => {
+    getRepTypes().then(setRepTypesState);
+  }, []);
 
   const reload = () => {
     listProfiles().then((rows) => {
@@ -127,6 +138,9 @@ export default function ManagersPage() {
       section="managers"
       actions={
         <div style={{ display: "flex", gap: 8 }}>
+          <Btn size="sm" icon="settings" onClick={() => setRepTypesOpen(true)}>
+            Manage rep types
+          </Btn>
           <Link href="/settings/import" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
               Import
@@ -444,6 +458,17 @@ export default function ManagersPage() {
           onCreated={() => {
             setAddOpen(false);
             reload();
+          }}
+        />
+      )}
+
+      {repTypesOpen && (
+        <ManageRepTypesSheet
+          current={repTypes}
+          onClose={() => setRepTypesOpen(false)}
+          onSaved={(next) => {
+            setRepTypesState(next);
+            setRepTypesOpen(false);
           }}
         />
       )}

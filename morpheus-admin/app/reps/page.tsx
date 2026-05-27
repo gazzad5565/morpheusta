@@ -29,6 +29,7 @@ import {
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
+import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
 import { AC } from "@/lib/tokens";
 
 // Default column widths for /reps Table view. localStorage takes
@@ -63,13 +64,21 @@ export default function RepsPage() {
   });
   // Pagination — 0-indexed. Resets to 0 on any filter/sort change.
   const [page, setPage] = useState(0);
+  // Rep type filter — "" = all types. The list comes from the
+  // admin-managed vocabulary in app_settings.rep_types.
+  const [typeFilter, setTypeFilter] = useState<string>("");
+  const [repTypes, setRepTypesState] = useState<RepTypeConfig[]>([]);
+
+  useEffect(() => {
+    getRepTypes().then(setRepTypesState);
+  }, []);
 
   // Reset to page 0 whenever any filter, search, or sort changes —
   // without this the user could land on an empty page after narrowing
   // or re-sorting.
   useEffect(() => {
     setPage(0);
-  }, [statusFilter, search, sort]);
+  }, [statusFilter, search, sort, typeFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,6 +127,12 @@ export default function RepsPage() {
     if (statusFilter === "with-shifts") out = out.filter((r) => r.shiftsToday > 0);
     if (statusFilter === "no-shifts") out = out.filter((r) => r.shiftsToday === 0);
     if (statusFilter === "managers") out = out.filter((r) => r.role === "manager");
+    if (typeFilter) {
+      out = out.filter(
+        (r) =>
+          (r.rep_type || "").toLowerCase() === typeFilter.toLowerCase()
+      );
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       out = out.filter(
@@ -143,7 +158,7 @@ export default function RepsPage() {
       }
     });
     return sorted;
-  }, [reps, statusFilter, search, sort]);
+  }, [reps, statusFilter, search, sort, typeFilter]);
 
   return (
     <AdminShell
@@ -188,6 +203,33 @@ export default function RepsPage() {
             >
               Managers · {counts.managers}
             </FilterChip>
+            {repTypes.length > 0 && (
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                title="Filter by rep type"
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: `1px solid ${
+                    typeFilter ? AC.brandDeep : AC.line
+                  }`,
+                  background: typeFilter ? AC.brandSoft : "#fff",
+                  color: typeFilter ? AC.brandInk : AC.ink2,
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">All types</option>
+                {repTypes.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <div style={{ flex: 1 }} />
             <SearchBox value={search} onChange={setSearch} />
             <SegTabs

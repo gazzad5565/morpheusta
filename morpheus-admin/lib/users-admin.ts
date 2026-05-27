@@ -50,6 +50,9 @@ export interface UpdateUserInput {
   password?: string;
   name?: string;
   role?: "manager" | "rep";
+  /** Rep category (Sales Rep / Merchandiser / Driver / …). Passing
+   *  an empty string clears the category. Ignored when role=manager. */
+  rep_type?: string | null;
 }
 
 export async function updateUser(
