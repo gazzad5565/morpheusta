@@ -75,15 +75,21 @@ export function Sidebar() {
     if (pathname.startsWith("/tasks")) setTasksExpanded(true);
   }, [pathname]);
 
-  // Settings sub-nav — same expand/collapse pattern as Tasks. Gary's
-  // directive (May 27 late): clicking Settings should both navigate
-  // to /settings AND open the sub-nav with every section, identical
-  // to how Tasks works. Default open when on a /settings/* route.
+  // Settings sub-nav — same expand/collapse pattern as Tasks but with
+  // symmetric auto-close. Gary's directive (May 27 late):
+  //   - clicking Settings navigates to /settings AND opens the drawer
+  //   - while on /settings/* the drawer stays open
+  //   - the moment the user navigates OUT of /settings/* the drawer
+  //     auto-closes (no stale duplicate of nav lingering on customer
+  //     / rep / etc pages)
+  // Tasks doesn't auto-close — that's intentional asymmetry: Settings
+  // is a top-level section the user enters and exits; Tasks is a
+  // section with sub-modes the user often returns to.
   const [settingsExpanded, setSettingsExpanded] = useState<boolean>(() =>
     typeof window !== "undefined" && window.location.pathname.startsWith("/settings")
   );
   useEffect(() => {
-    if (pathname.startsWith("/settings")) setSettingsExpanded(true);
+    setSettingsExpanded(pathname.startsWith("/settings"));
   }, [pathname]);
 
   useEffect(() => {

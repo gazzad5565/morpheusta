@@ -1,21 +1,29 @@
 "use client";
 
 /**
- * SettingsShell — wraps AdminShell, adds the sticky left rail with all
- * settings sections.
+ * SettingsShell — wraps AdminShell for every /settings/* page.
  *
- * Each settings page calls this and provides a `section` id so the rail
- * highlights the correct item. Replaces the previous single-page
- * sticky-scroll approach where every section lived on /settings — each
- * section now has its own URL and the rail is the nav between them.
+ * Originally rendered a sticky left rail listing every Settings section.
+ * That rail was REMOVED on May 27 (late) when the global sidebar
+ * (components/shell/Sidebar.tsx) gained an expandable Settings drawer
+ * that lists the same sections — keeping both was straight duplication
+ * (Gary's call: "we don't need the navigation on the main pages of the
+ * settings as well it just has to have a page if you want to go you
+ * can use the navigation at the left").
  *
- * Adding a new section is two lines in SETTINGS_SECTIONS plus a new
- * page file under app/settings/<id>/page.tsx.
+ * The component still owns the page heading + breadcrumbs so each
+ * Settings page calls it with a `section` id (used for the title /
+ * breadcrumbs / description fallback) and gets a consistent shape.
+ *
+ * SETTINGS_SECTIONS stays exported here because the sidebar imports
+ * it as the single source of truth for the drawer list. Adding a new
+ * section is still two lines here plus a new page file under
+ * app/settings/<id>/page.tsx — the new drawer entry appears in the
+ * sidebar automatically.
  */
 
-import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
-import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
+import { type GlyphName } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
 
 export interface SettingsSection {
@@ -127,143 +135,40 @@ export function SettingsShell({
       breadcrumbs={["Home", "Settings", current.label]}
       actions={actions}
     >
-      <div
-        style={{
-          padding: 20,
-          display: "grid",
-          gridTemplateColumns: "240px 1fr",
-          gap: 24,
-          alignItems: "start",
-        }}
-      >
-        {/* ─── Sticky left rail ───────────────────────────────────────── */}
-        <nav
-          style={{
-            position: "sticky",
-            top: 16,
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-          }}
-        >
+      {/* Settings page body — no sticky rail anymore (sidebar drawer
+          handles inter-section nav). Just a heading + the section's
+          own content. Max-width keeps long pages readable on wide
+          desktops without forcing every page to set its own. */}
+      <div style={{ padding: 20, maxWidth: 1080 }}>
+        <div style={{ marginBottom: 18 }}>
           <div
             style={{
               fontFamily: AC.font,
-              fontSize: 10.5,
-              color: AC.mute,
+              fontSize: 22,
               fontWeight: 700,
-              letterSpacing: 0.6,
-              textTransform: "uppercase",
-              padding: "6px 10px 8px",
+              color: AC.ink,
+              letterSpacing: -0.4,
             }}
           >
-            Settings
+            {heading}
           </div>
-          {SETTINGS_SECTIONS.map((s) => (
-            <RailItem key={s.id} section={s} active={s.id === section} />
-          ))}
-        </nav>
-
-        {/* ─── Section content ───────────────────────────────────────── */}
-        <div>
-          <div style={{ marginBottom: 18 }}>
+          {sub && (
             <div
               style={{
                 fontFamily: AC.font,
-                fontSize: 22,
-                fontWeight: 700,
-                color: AC.ink,
-                letterSpacing: -0.4,
+                fontSize: 12.5,
+                color: AC.mute,
+                marginTop: 4,
+                lineHeight: 1.5,
+                maxWidth: 720,
               }}
             >
-              {heading}
+              {sub}
             </div>
-            {sub && (
-              <div
-                style={{
-                  fontFamily: AC.font,
-                  fontSize: 12.5,
-                  color: AC.mute,
-                  marginTop: 4,
-                  lineHeight: 1.5,
-                  maxWidth: 720,
-                }}
-              >
-                {sub}
-              </div>
-            )}
-          </div>
-          {children}
+          )}
         </div>
+        {children}
       </div>
     </AdminShell>
-  );
-}
-
-function RailItem({ section, active }: { section: SettingsSection; active: boolean }) {
-  const inner = (
-    <div
-      style={{
-        width: "100%",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "9px 10px",
-        borderRadius: 8,
-        background: active ? AC.brandSoft : "transparent",
-        color: active ? AC.brandInk : section.available ? AC.ink2 : AC.faint,
-        fontFamily: AC.font,
-        fontSize: 13,
-        fontWeight: active ? 600 : 500,
-        letterSpacing: -0.1,
-        position: "relative",
-        opacity: section.available ? 1 : 0.6,
-        cursor: section.available ? "pointer" : "not-allowed",
-      }}
-      title={section.description}
-    >
-      {active && (
-        <span
-          style={{
-            position: "absolute",
-            left: -4,
-            top: 8,
-            bottom: 8,
-            width: 3,
-            borderRadius: 99,
-            background: AC.brand,
-          }}
-        />
-      )}
-      <AGlyph
-        name={section.glyph}
-        size={14}
-        color={active ? AC.brandDeep : section.available ? AC.mute : AC.faint}
-      />
-      <span style={{ flex: 1 }}>{section.label}</span>
-      {!section.available && (
-        <span
-          style={{
-            padding: "1px 6px",
-            borderRadius: 99,
-            background: AC.bg,
-            color: AC.mute,
-            fontFamily: AC.font,
-            fontSize: 9.5,
-            fontWeight: 700,
-            letterSpacing: 0.4,
-            textTransform: "uppercase",
-          }}
-        >
-          Soon
-        </span>
-      )}
-    </div>
-  );
-  if (!section.available) return inner;
-  return (
-    <Link href={section.href} style={{ textDecoration: "none" }}>
-      {inner}
-    </Link>
   );
 }
