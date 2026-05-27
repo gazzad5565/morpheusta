@@ -405,6 +405,35 @@ function RolePill({ role }: { role: string }) {
 
 // ─── Grid view ──────────────────────────────────────────────────────────
 
+/** Tiny chip showing a rep's type — used on the Grid card + Table
+ *  row + rep detail page. Renders nothing when the rep is
+ *  uncategorised so we don't show an empty pill. */
+function RepTypeChip({ type }: { type: string | null | undefined }) {
+  if (!type) return null;
+  return (
+    <span
+      title={`Rep type: ${type}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "1px 7px",
+        borderRadius: 99,
+        background: AC.bg,
+        color: AC.ink2,
+        fontFamily: AC.font,
+        fontSize: 10.5,
+        fontWeight: 700,
+        letterSpacing: 0.3,
+        textTransform: "uppercase",
+        border: `1px solid ${AC.line}`,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {type}
+    </span>
+  );
+}
+
 function GridView({ reps }: { reps: RepWithStats[] }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
@@ -460,6 +489,18 @@ function GridView({ reps }: { reps: RepWithStats[] }) {
               >
                 {r.email}
               </div>
+              {r.role === "rep" && r.rep_type && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    display: "flex",
+                    gap: 6,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <RepTypeChip type={r.rep_type} />
+                </div>
+              )}
               <div
                 style={{
                   fontFamily: AC.font,
@@ -583,8 +624,9 @@ function TableView({
           >
             {r.email}
           </div>
-          <div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
             <RolePill role={r.role} />
+            {r.role === "rep" && r.rep_type && <RepTypeChip type={r.rep_type} />}
           </div>
           <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.ink2, fontWeight: 500 }}>
             {r.joinedLabel}

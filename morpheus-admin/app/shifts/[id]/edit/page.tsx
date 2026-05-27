@@ -38,6 +38,7 @@ import {
 } from "@/lib/shifts-store";
 import { listCustomers } from "@/lib/customers-store";
 import { listSitesForCustomer, type CustomerSite } from "@/lib/sites-store";
+import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
 import {
   listProfiles,
   getProfileById,
@@ -77,6 +78,11 @@ export default function EditShiftPage({
   // Form fields
   const [customerId, setCustomerId] = useState("");
   const [repId, setRepId] = useState<string>("");
+  // Claimable-rep-types restriction (May 27 — late). Only meaningful
+  // when repId === "" (Unassigned). Stored either way so a later
+  // release-to-claimable preserves the manager's intent.
+  const [claimableRepTypes, setClaimableRepTypes] = useState<string[]>([]);
+  const [repTypesVocab, setRepTypesVocab] = useState<RepTypeConfig[]>([]);
   // Sites for the currently-selected customer + the chosen site_id.
   // Auto-resolves when the customer has a single active site;
   // requires a manual pick when there are multiple.
@@ -110,12 +116,14 @@ export default function EditShiftPage({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [shift, cs, rs] = await Promise.all([
+      const [shift, cs, rs, types] = await Promise.all([
         getShiftById(id),
         listCustomers(),
         listProfiles({ role: "rep" }),
+        getRepTypes(),
       ]);
       if (cancelled) return;
+      setRepTypesVocab(types);
       if (!shift) {
         setNotFound(true);
         setLoading(false);
@@ -133,6 +141,7 @@ export default function EditShiftPage({
       setCustomerId(shift.customer_id);
       setSiteId(shift.site_id ?? "");
       setRepId(shift.rep_id ?? "");
+      setClaimableRepTypes(shift.claimable_rep_types ?? []);
       setShiftDate(shift.shift_date);
       // start_time/end_time come back as "HH:MM:SS"; <input type="time">
       // wants "HH:MM".
@@ -292,6 +301,10 @@ export default function EditShiftPage({
       start_time: startTime,
       end_time: endTime,
       tasks_total: effectiveTaskTotal,
+      // Empty array → updateShift normalises to null (= any rep can
+      // claim). Stored regardless of rep_id so a later release
+      // preserves the intent.
+      claimable_rep_types: claimableRepTypes,
       // updateShift doesn't currently accept series_id in its patch
       // shape — that's fine, the row's existing series_id is left
       // untouched on update. Siblings below pick it up via createShift.
@@ -480,7 +493,9 @@ export default function EditShiftPage({
               options={reps.map((r) => ({
                 value: r.id,
                 label: displayName(r),
-                sublabel: r.email,
+                sublabel: r.rep_type
+                  ? `${r.email} · ${r.rep_type}`
+                  : r.email,
                 renderLeading: () => (
                   <RepAvatar
                     rep={{
@@ -494,6 +509,67 @@ export default function EditShiftPage({
               }))}
             />
           </Field>
+
+          {/* Claimable-rep-types restriction (May 27 — late). Surfaces
+              only when the shift is currently unassigned (claimable).
+              Editing the restriction on an assigned shift would
+              confuse the "stored either way for release intent"
+              model — that's editable when the manager next releases
+              the rep via the picker above. */}
+          {repId === "" && repTypesVocab.length > 0 && (
+            <Field
+              label="Restrict claim by rep type"
+              hint="Empty = any rep type can claim. Tick to limit the mobile claim list."
+            >
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {repTypesVocab.map((t) => {
+                  const on = claimableRepTypes.includes(t.name);
+                  return (
+                    <label
+                      key={t.name}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "6px 11px",
+                        borderRadius: 99,
+                        background: on ? AC.brandSoft : "#fff",
+                        border: `1px solid ${on ? AC.brand : AC.line}`,
+                        cursor: "pointer",
+                        fontFamily: AC.font,
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        color: on ? AC.brandInk : AC.ink2,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setClaimableRepTypes([
+                              ...claimableRepTypes,
+                              t.name,
+                            ]);
+                          } else {
+                            setClaimableRepTypes(
+                              claimableRepTypes.filter((n) => n !== t.name)
+                            );
+                          }
+                        }}
+                        style={{
+                          width: 14,
+                          height: 14,
+                          accentColor: AC.brand,
+                        }}
+                      />
+                      {t.name}
+                    </label>
+                  );
+                })}
+              </div>
+            </Field>
+          )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
             <Field label="Date" required>

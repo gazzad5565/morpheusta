@@ -230,6 +230,9 @@ export function RepScopePicker({
                     >
                       {r.email}
                       {r.role !== "rep" ? ` · ${r.role}` : ""}
+                      {r.role === "rep" && r.rep_type
+                        ? ` · ${r.rep_type}`
+                        : ""}
                     </div>
                   </div>
                 </label>

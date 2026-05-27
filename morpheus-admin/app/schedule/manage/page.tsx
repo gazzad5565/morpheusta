@@ -1195,7 +1195,9 @@ function EditFutureModal({
                 .map((r) => ({
                   value: r.id,
                   label: displayName(r),
-                  sublabel: r.email,
+                  sublabel: r.rep_type
+                    ? `${r.email} · ${r.rep_type}`
+                    : r.email,
                   renderLeading: () => (
                     <RepAvatar
                       rep={{

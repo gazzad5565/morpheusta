@@ -257,6 +257,13 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
                 label="Role"
                 value={profile.role.charAt(0).toUpperCase() + profile.role.slice(1)}
               />
+              {profile.role === "rep" && profile.rep_type && (
+                <DetailRow
+                  icon="reps"
+                  label="Type"
+                  value={profile.rep_type}
+                />
+              )}
             </div>
           </Card>
 

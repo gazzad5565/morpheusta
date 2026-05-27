@@ -1,4 +1,4 @@
-email,name,send_welcome_email
-ayanda.mthembu@example.com,Ayanda Mthembu,true
-jordan.smith@example.com,Jordan Smith,true
-priya.naidoo@example.com,Priya Naidoo,
+email,name,send_welcome_email,rep_type
+ayanda.mthembu@example.com,Ayanda Mthembu,true,Sales Rep
+jordan.smith@example.com,Jordan Smith,true,Merchandiser
+priya.naidoo@example.com,Priya Naidoo,,Driver
