@@ -14,6 +14,7 @@
 
 ## Quick TOC
 
+- [May 27, 2026 (very late) — rep_type propagation: chips everywhere reps appear + claimable_rep_types shift restriction](#todays-session--what-shipped-may-27-2026-very-late)
 - [May 27, 2026 (late) — rep types + capability flags (canCreateCustomers)](#todays-session--what-shipped-may-27-2026-late)
 - [May 27, 2026 (later) — resizable columns + customer overview contacts + shifts tab expanded](#todays-session--what-shipped-may-27-2026-evening)
 - [May 27, 2026 — pagination on every long list page (5 surfaces)](#todays-session--what-shipped-may-27-2026)
@@ -27,6 +28,139 @@
 - [May 8, 2026 — multi-site customers schema + admin Sites tab](#todays-session--what-shipped-may-8-2026)
 - [May 7, 2026 — calendar, schedule rewrites, broad UX pass](#todays-session--what-shipped-may-7-2026)
 - [May 6, 2026 — auto-checkout, organisation settings, indexes](#todays-session--what-shipped-may-6-2026)
+
+---
+
+### Today's session — what shipped (May 27, 2026, very late)
+
+Gary's follow-up after the rep-types ship: surface the rep_type
+**everywhere** reps appear in the admin, plus add a per-shift
+restriction so "unassigned" can mean "claimable by Sales Reps only"
+rather than "claimable by any rep". Three pieces:
+
+#### 1. Sample reps.csv carries a rep_type column
+
+- `public/import-templates/reps.csv` updated — the three example
+  rows now include `rep_type` values (Sales Rep / Merchandiser /
+  Driver) matching the seeded vocabulary. The import adapter's
+  column was already in place from the previous commit; the sample
+  just demonstrates it.
+
+#### 2. Rep type displayed everywhere reps appear
+
+- **`/reps` Grid view** — small chip on each card under the email
+  (only renders for role=rep with a non-null rep_type).
+- **`/reps` Table view** — chip stacked under the RolePill in the
+  Role column.
+- **`/reps/[id]` rep detail page** — new "Type" row in the header
+  card alongside Email / Joined / Role.
+- **Rep pickers (Combobox sublabels)** — three sites updated:
+  `/shifts/[id]/edit` rep dropdown, `/schedule/manage` rep filter,
+  `/schedule` rep filter. Sublabel format: `"<email> · <rep_type>"`
+  when set; falls back to plain email when not. Helps the manager
+  know who they're assigning to at a glance.
+- **`RepScopePicker`** (used by `/schedule/new`) — second-line text
+  appends `· <rep_type>` when the rep has one. Same affordance as
+  the comboboxes elsewhere.
+- One small helper component: `RepTypeChip` inside
+  `app/reps/page.tsx` (kept local because it's only used twice in
+  the same file — extracting to `components/ui/` is overkill).
+
+#### 3. `shifts.claimable_rep_types` — per-shift type restriction
+
+The big one. Until now an "unassigned" shift was claimable by **any**
+rep. Now a manager can narrow the audience to specific rep types.
+
+- **Migration `2026_05_27_shifts_claimable_rep_types.sql`** (PENDING):
+  one column `shifts.claimable_rep_types text[] NULL`. NULL or empty
+  = any rep (backwards compatible — existing claimable shifts behave
+  unchanged on next deploy). Non-empty = only reps whose
+  `profiles.rep_type` is in this array. Values are type NAMES from
+  `app_settings.rep_types`. Safe to re-run.
+
+- **Admin `lib/shifts-store.ts`** — `ShiftRow`, `NewShift`, and
+  `ShiftPatch` all gain `claimable_rep_types: string[] | null`.
+  `createShift` writes `null` for empty arrays so the "any rep"
+  path has a single representation on read. `updateShift` normalises
+  the same way in its `cleaned` step.
+
+- **Mobile `lib/shifts-store.ts`** — `ShiftRow` gains the field. JSDoc
+  notes the strict-by-default semantics (uncategorised reps don't
+  match restricted shifts — opposite of the lenient
+  canCreateCustomers default; explained below).
+
+- **Admin `/schedule/new`** — when "Unassigned (claimable)" is the
+  selected rep scope, a new "Restrict claim by rep type" Field
+  appears with pill-style multi-select checkboxes (one per vocabulary
+  entry). Empty selection = any rep (default). Inline help line
+  spells out the effect when at least one is ticked. Field hides
+  when no types exist in the vocabulary. Stored in
+  `claimable_rep_types` on insert regardless of repScope (same
+  "preserve through release" pattern as `claim_radius_m`).
+
+- **Admin `/shifts/[id]/edit`** — same multi-select Field, visible
+  only when the shift is currently unassigned (editing a restriction
+  on an assigned shift would confuse the UX; the manager can edit
+  it when they next release). Hydrated from `shift.claimable_rep_types`
+  on mount. Passed through `updateShift`.
+
+- **Mobile `listUnassignedShiftsToday`** — fast path preserved
+  (skip the profile fetch when NO shift carries a restriction).
+  When at least one shift is restricted, we fetch the current rep's
+  profile once and filter the row set. **STRICT** behaviour:
+  uncategorised reps don't match anything, so they don't see
+  restricted shifts. Different from the lenient
+  `canCreateCustomers` capability check — the rationale is in the
+  in-file comment: capability defaults protect new reps, explicit
+  restrictions deliberately narrow.
+
+- **Mobile `claimShift`** — belt-and-braces server-side check. Even
+  if a rep gets a stale shift id (list was loaded before a manager
+  tightened the restriction), the claim call refetches the shift,
+  re-verifies the rep type matches, and returns a clear error if
+  not. Still client-side trust — a curl-savvy rep with a JWT could
+  bypass — but closes the "stale list" hole.
+
+#### Acceptance
+
+- ✅ `next build` clean on BOTH admin (39 routes) and mobile (21
+  routes). Zero warnings, zero TS errors.
+- ⏳ Operator: apply
+  `db/migrations/2026_05_27_shifts_claimable_rep_types.sql` (safe
+  to re-run).
+- ⏳ Smoke test: on `/schedule/new`, leave the shift unassigned,
+  tick "Sales Rep" on the restriction multi-select, save. As a
+  rep with `rep_type='Merchandiser'`, the claim list shouldn't
+  include this shift. As a Sales Rep, it should. Try to deep-link
+  the merchandiser's mobile app to `claimShift(<id>)` directly →
+  rejected with a clear error.
+
+#### SECURITY note — same posture as before
+
+Client-side enforcement only. The mobile UI hides restricted shifts
+from the claim list + the claim function rejects mismatched types,
+but a motivated rep with curl + JWT could still INSERT
+`rep_id = auth.uid()` on a restricted shift directly. Phase 4 RLS's
+`shifts_rep_self_update` allows `rep_id = auth.uid() OR rep_id IS
+NULL` without checking `claimable_rep_types`. Hard block would need
+that policy to look up `profiles.rep_type` + the array. Same
+deferred-upgrade story as `canCreateCustomers`. Sufficient for
+accidental-misuse + clean-UX; not security-grade.
+
+#### Notes — deliberately small
+
+- **No mobile UI to display the type on the rep's own /profile**.
+  Same scope decision as before — could add a read-only line later
+  if Gary wants reps to see their own type.
+- **No retroactive rename handling on the vocabulary.** Renaming
+  "Sales Rep" → "Account Manager" in the modal does NOT update
+  `claimable_rep_types` arrays on existing shifts. They keep the
+  old name and become effectively unclaimable (no rep matches).
+  Future polish: warn before destructive renames + offer a cascade.
+- **No filter chip on /reps for claimable_rep_types** — that's a
+  per-shift attribute, not a rep attribute. The rep type filter
+  on /reps is for filtering REPS by their type. (Worth mentioning
+  because the two feel related; they're not the same surface.)
 
 ---
 

@@ -59,6 +59,12 @@ export interface ShiftRow {
    *  /active page, read-only on the admin detail. See the
    *  2026-05-11 shifts_notes migration. */
   rep_notes: string | null;
+  /** Optional restriction on which rep types can claim this shift.
+   *  NULL / empty = any rep can claim (the historical default).
+   *  Non-empty = only reps whose profiles.rep_type is in this array.
+   *  Values are type NAMES from app_settings.rep_types. See the
+   *  2026-05-27 shifts_claimable_rep_types migration. */
+  claimable_rep_types: string[] | null;
   /** Joined site row when the shift has a site_id. The customer's
    *  legacy address fields are still populated for back-compat but
    *  every read path should prefer the site coords / address. */
@@ -211,6 +217,14 @@ export interface NewShift {
    * one-off shifts leave this null.
    */
   series_id?: string | null;
+  /**
+   * Optional claimable-rep-types restriction. Only meaningful for
+   * unassigned shifts (rep_id == null). NULL / empty = any rep can
+   * claim (historical default). Non-empty = only reps whose
+   * profiles.rep_type is in this array. Values are type NAMES from
+   * app_settings.rep_types. See 2026-05-27 migration.
+   */
+  claimable_rep_types?: string[] | null;
 }
 
 /**
@@ -274,6 +288,14 @@ export async function createShift(
       // rep_id is non-null. See the migration comment for details.
       claim_radius_m: s.claim_radius_m ?? null,
       is_flexible_time: s.is_flexible_time ?? false,
+      // Same "only meaningful when rep_id is null" pattern as
+      // claim_radius_m — stored either way so a later release can
+      // restore the restriction. Empty arrays normalise to null
+      // so the "any rep" path is unambiguous on read.
+      claimable_rep_types:
+        s.claimable_rep_types && s.claimable_rep_types.length > 0
+          ? s.claimable_rep_types
+          : null,
     })
     .select("id, customers(name)")
     .single();
@@ -315,6 +337,10 @@ export interface ShiftPatch {
   end_time?: string;
   distance_label?: string;
   tasks_total?: number;
+  /** Optional claimable-rep-types restriction. Same semantics as
+   *  NewShift.claimable_rep_types. Empty array normalises to null on
+   *  write (= any rep can claim). */
+  claimable_rep_types?: string[] | null;
 }
 
 export async function updateShift(
@@ -348,6 +374,14 @@ export async function updateShift(
   for (const [k, v] of Object.entries(patch)) {
     if (v === undefined) continue;
     cleaned[k] = v;
+  }
+  // Normalise empty arrays on claimable_rep_types to null (= any rep)
+  // so the read side has a single "no restriction" representation.
+  if (
+    Array.isArray(cleaned.claimable_rep_types) &&
+    (cleaned.claimable_rep_types as unknown[]).length === 0
+  ) {
+    cleaned.claimable_rep_types = null;
   }
   if (Object.keys(cleaned).length === 0) return { ok: true };
 

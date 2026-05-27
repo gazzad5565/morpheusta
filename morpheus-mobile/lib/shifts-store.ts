@@ -54,6 +54,12 @@ interface ShiftRow {
    *  shifts they can't realistically attend. See
    *  2026_05_12_shifts_claim_radius.sql. */
   claim_radius_m: number | null;
+  /** Claimable-rep-types restriction. Only meaningful when rep_id IS
+   *  NULL (claimable). NULL or empty = any rep can claim. Non-empty
+   *  = only reps whose profiles.rep_type is in this array. Filtered
+   *  client-side in listUnassignedShiftsToday based on the rep's own
+   *  profile.rep_type. See 2026_05_27_shifts_claimable_rep_types. */
+  claimable_rep_types: string[] | null;
   /** Flexible-time flag — when true the shift has no specific start /
    *  end, just a workday window. UI displays "Anytime today" instead
    *  of the time range and late / early exceptions are skipped.
@@ -412,7 +418,37 @@ export async function listUnassignedShiftsToday(): Promise<
     console.warn("[shifts] listUnassignedShiftsToday:", error.message);
     return [];
   }
-  const rows = (data as ShiftRow[]) || [];
+  let rows = (data as ShiftRow[]) || [];
+
+  // Claimable-rep-types filter (May 27 — late). Only fetch the rep's
+  // profile when at least one shift carries a restriction, so the
+  // common "no restrictions on any row" case skips the extra query.
+  // Behaviour: STRICT — a restricted shift hides itself from any rep
+  // whose rep_type doesn't appear in the array. Uncategorised reps
+  // (rep_type=null) don't match anything, so they don't see
+  // restricted shifts. Consistent with the manager's intent: "only
+  // Sales Reps can claim this" should not show to uncategorised
+  // reps. Counterpart capability-flag semantics (canCreateCustomers)
+  // are lenient/default-allow because they protect against
+  // accidental restriction of brand-new reps; explicit restrictions
+  // are the opposite — the manager EXPLICITLY narrowed the audience.
+  const anyTypeRestriction = rows.some(
+    (r) => Array.isArray(r.claimable_rep_types) && r.claimable_rep_types.length > 0
+  );
+  if (anyTypeRestriction) {
+    const { getMyProfile } = await import("./profiles-store");
+    const profile = await getMyProfile();
+    const myType = profile?.rep_type ?? null;
+    rows = rows.filter((r) => {
+      const restricted =
+        Array.isArray(r.claimable_rep_types) && r.claimable_rep_types.length > 0;
+      if (!restricted) return true; // no restriction on this shift
+      if (!myType) return false; // restricted but rep has no type → can't match
+      return r.claimable_rep_types!.some(
+        (t) => t.toLowerCase() === myType.toLowerCase()
+      );
+    });
+  }
 
   // Fast path: no row has a claim radius set → skip the GPS call
   // entirely (avoids triggering the permission prompt for nothing).
@@ -465,12 +501,36 @@ export async function claimShift(
   const userId = userData.user?.id;
   if (!userId) return { ok: false, error: "Not signed in" };
 
-  // Look up the shift first so we can include the customer in the event log.
+  // Look up the shift first so we can include the customer in the event log
+  // + double-check the claimable_rep_types restriction (belt-and-braces
+  // against a stale list view that doesn't reflect a manager's recent
+  // narrowing of the restriction).
   const { data: shiftRow } = await supabase
     .from("shifts")
-    .select("customer_id, customers(name)")
+    .select("customer_id, customers(name), claimable_rep_types")
     .eq("id", shiftId)
     .maybeSingle();
+
+  // Verify rep_type matches the shift's restriction (if any). This is
+  // still client-side trust — a curl-savvy rep could bypass — but
+  // closing the obvious UI back-door (stale list → wrong claim).
+  const restriction = (
+    shiftRow as { claimable_rep_types?: string[] | null } | null
+  )?.claimable_rep_types;
+  if (Array.isArray(restriction) && restriction.length > 0) {
+    const { getMyProfile } = await import("./profiles-store");
+    const profile = await getMyProfile();
+    const myType = profile?.rep_type ?? null;
+    const allowed =
+      myType !== null &&
+      restriction.some((t) => t.toLowerCase() === myType.toLowerCase());
+    if (!allowed) {
+      return {
+        ok: false,
+        error: `This shift is restricted to ${restriction.join(" / ")}. Your rep type doesn't match.`,
+      };
+    }
+  }
 
   const { error } = await supabase
     .from("shifts")

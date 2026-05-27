@@ -30,6 +30,7 @@ import { deleteRequest } from "@/lib/requests-store";
 import { countTasksForCustomers } from "@/lib/tasks-store";
 import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
 import { RepScopePicker, type RepScope } from "@/components/ui/RepScopePicker";
+import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
 import { todayLocalISO, localISO } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
@@ -139,6 +140,15 @@ function NewShiftPage() {
   // row even when an assigned rep is chosen so a later "release"
   // preserves the manager's intent — see migration notes.
   const [claimRadiusM, setClaimRadiusM] = useState<number | null>(null);
+  // Claimable-rep-types restriction (May 27 — late). Only used when
+  // repScope === null (Unassigned / claimable). Empty array = any
+  // rep type can claim; non-empty restricts to those types. Mirrors
+  // app_settings.rep_types vocabulary. Mobile filters client-side.
+  const [claimableRepTypes, setClaimableRepTypes] = useState<string[]>([]);
+  const [repTypesVocab, setRepTypesVocab] = useState<RepTypeConfig[]>([]);
+  useEffect(() => {
+    getRepTypes().then(setRepTypesVocab);
+  }, []);
 
   // Time mode — "specific" is the historical default (start + end
   // pickers shown), "anytime" hides the pickers and writes the
@@ -640,6 +650,12 @@ function NewShiftPage() {
             // original "scope" intent without extra UI on the
             // release flow.
             claim_radius_m: claimRadiusM,
+            // Same "preserve through release" rationale as claim_radius_m
+            // above — store the restriction even if a specific rep is
+            // assigned, so a future release-to-claimable keeps the
+            // manager's intent without re-prompting.
+            claimable_rep_types:
+              claimableRepTypes.length > 0 ? claimableRepTypes : null,
             is_flexible_time: timeMode === "anytime",
           });
           done += 1;
@@ -828,6 +844,85 @@ function NewShiftPage() {
                         of the customer's site will see this shift.
                         Reps without location permission see it
                         anyway (we don't penalise denied GPS).
+                      </div>
+                    )}
+                  </Field>
+                )}
+
+                {/* Claimable-rep-types restriction (May 27 — late).
+                    Also only surfaces when the shift is claimable.
+                    Empty = any type can claim (default); checking
+                    boxes narrows to those types only. Mobile filters
+                    client-side. */}
+                {repScope === null && repTypesVocab.length > 0 && (
+                  <Field
+                    label="Restrict claim by rep type"
+                    hint="Empty = any rep type can claim. Tick one or more to limit the claim list to those types on the mobile app."
+                  >
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {repTypesVocab.map((t) => {
+                        const on = claimableRepTypes.includes(t.name);
+                        return (
+                          <label
+                            key={t.name}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "6px 11px",
+                              borderRadius: 99,
+                              background: on ? AC.brandSoft : "#fff",
+                              border: `1px solid ${on ? AC.brand : AC.line}`,
+                              cursor: "pointer",
+                              fontFamily: AC.font,
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              color: on ? AC.brandInk : AC.ink2,
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setClaimableRepTypes([
+                                    ...claimableRepTypes,
+                                    t.name,
+                                  ]);
+                                } else {
+                                  setClaimableRepTypes(
+                                    claimableRepTypes.filter(
+                                      (n) => n !== t.name
+                                    )
+                                  );
+                                }
+                              }}
+                              style={{
+                                width: 14,
+                                height: 14,
+                                accentColor: AC.brand,
+                              }}
+                            />
+                            {t.name}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {claimableRepTypes.length > 0 && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontFamily: AC.font,
+                          fontSize: 11.5,
+                          color: AC.mute,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        Only reps of type{" "}
+                        <b style={{ color: AC.ink2 }}>
+                          {claimableRepTypes.join(" · ")}
+                        </b>{" "}
+                        will see this shift on the mobile claim list.
                       </div>
                     )}
                   </Field>
