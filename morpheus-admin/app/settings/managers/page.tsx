@@ -33,6 +33,7 @@ import {
 import { createUser, deleteUser, randomPassword } from "@/lib/users-admin";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
+import { ManageRepTypesSheet } from "@/components/users/ManageRepTypesSheet";
 
 const deriveInitials = (p: Profile) => initialsFromNameOrEmail(p.name, p.email);
 
@@ -64,9 +65,13 @@ export default function ManagersPage() {
 
   // Add-user modal
   const [addOpen, setAddOpen] = useState(false);
-  // Live rep-types vocabulary — read for the type-filter dropdown.
-  // Editing the vocabulary lives at /settings/rep-types now.
+  // Live rep-types vocabulary — read for the type-filter dropdown +
+  // the "Manage rep types" modal. The modal sits on this page (not
+  // in a separate Settings rail entry) because rep types are
+  // intrinsically a property of users — managing them while
+  // looking at users is the natural place. See DESIGN.md sec 8.
   const [repTypes, setRepTypesState] = useState<RepTypeConfig[]>([]);
+  const [repTypesOpen, setRepTypesOpen] = useState(false);
 
   useEffect(() => {
     getRepTypes().then(setRepTypesState);
@@ -158,6 +163,9 @@ export default function ManagersPage() {
       section="managers"
       actions={
         <div style={{ display: "flex", gap: 8 }}>
+          <Btn size="sm" icon="tasks" onClick={() => setRepTypesOpen(true)}>
+            Manage rep types
+          </Btn>
           <Link href="/settings/import" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
               Import
@@ -549,6 +557,16 @@ export default function ManagersPage() {
         />
       )}
 
+      {repTypesOpen && (
+        <ManageRepTypesSheet
+          current={repTypes}
+          onClose={() => setRepTypesOpen(false)}
+          onSaved={(next) => {
+            setRepTypesState(next);
+            setRepTypesOpen(false);
+          }}
+        />
+      )}
     </SettingsShell>
   );
 }
