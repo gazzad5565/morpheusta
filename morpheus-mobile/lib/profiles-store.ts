@@ -17,6 +17,12 @@ export interface Profile {
    *  Uploaded from /profile via updateMyAvatar(). Null = generic
    *  face glyph fallback in UIs that render an avatar. */
   avatar_url: string | null;
+  /** Rep category (Sales Rep / Merchandiser / Driver / …) managed
+   *  on the admin side via /settings/managers → Manage rep types.
+   *  Drives client-side capability checks via repTypeCan() — e.g.
+   *  whether to show the Add Customer affordance. NULL =
+   *  uncategorised (allow-all). Only meaningful when role='rep'. */
+  rep_type: string | null;
 }
 
 export async function getMyProfile(): Promise<Profile | null> {
@@ -26,7 +32,7 @@ export async function getMyProfile(): Promise<Profile | null> {
   if (!userId) return null;
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, name, role, avatar_url")
+    .select("id, email, name, role, avatar_url, rep_type")
     .eq("id", userId)
     .single();
   if (error) {

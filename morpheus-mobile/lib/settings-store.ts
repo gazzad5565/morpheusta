@@ -83,3 +83,70 @@ export async function getRouteOptimizationAllowed(): Promise<boolean> {
   const v = await readSetting<boolean>("route_optimization_allowed", true);
   return v === false ? false : true;
 }
+
+// ─── Rep types (May 27, 2026) ─────────────────────────────────────
+//
+// Mirror of the admin's RepTypeConfig vocabulary, read-only. The
+// mobile app checks per-type capability flags client-side to decide
+// what affordances to show — currently `canCreateCustomers` drives
+// the Add Customer button visibility on the dashboard + shifts flow.
+//
+// Defensive parsing: an unknown / unset rep_type defaults to
+// allow-all so reps who haven't been categorised yet don't get
+// silently blocked from existing flows.
+//
+// SECURITY NOTE: this is UX-level enforcement, not RLS. A motivated
+// rep with curl + JWT could still INSERT a customer regardless.
+// Hard block would require tightening RLS to look up rep_type +
+// capability — deferred.
+
+export interface RepTypeConfig {
+  name: string;
+  canCreateCustomers: boolean;
+}
+
+const DEFAULT_REP_TYPES: ReadonlyArray<RepTypeConfig> = [
+  { name: "Sales Rep", canCreateCustomers: true },
+  { name: "Merchandiser", canCreateCustomers: false },
+  { name: "Driver", canCreateCustomers: false },
+] as const;
+
+function parseRepTypes(raw: unknown): RepTypeConfig[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_REP_TYPES];
+  const seen = new Set<string>();
+  const out: RepTypeConfig[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as { name?: unknown; canCreateCustomers?: unknown };
+    const name = typeof r.name === "string" ? r.name.trim() : "";
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push({
+      name,
+      canCreateCustomers: r.canCreateCustomers === false ? false : true,
+    });
+  }
+  return out.length > 0 ? out : [...DEFAULT_REP_TYPES];
+}
+
+export async function getRepTypes(): Promise<RepTypeConfig[]> {
+  const v = await readSetting<unknown>("rep_types", null);
+  return parseRepTypes(v);
+}
+
+/** Pure capability check — caller fetches once via getRepTypes()
+ *  and calls this per check. Unknown / null type → allow-all so
+ *  uncategorised reps don't get silently blocked from existing
+ *  flows. */
+export function repTypeCan(
+  types: RepTypeConfig[],
+  typeName: string | null | undefined,
+  capability: "canCreateCustomers"
+): boolean {
+  if (!typeName) return true;
+  const entry = types.find(
+    (t) => t.name.toLowerCase() === typeName.toLowerCase()
+  );
+  if (!entry) return true;
+  return entry[capability];
+}

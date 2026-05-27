@@ -670,3 +670,96 @@ export async function getImportSettings(): Promise<{
   return { duplicateMode, sendWelcomeEmail };
 }
 
+// ─── Rep types (May 27, 2026) ─────────────────────────────────────
+//
+// Vocabulary of mobile-rep categories (Sales Rep, Merchandiser,
+// Driver, etc) + per-type capability flags. Each rep can have ONE
+// type assigned via the user-edit form (or via the import adapter);
+// the type is stored on profiles.rep_type as plain text matching
+// one of the entries in this list.
+//
+// Capability flags drive client-side branching — currently the
+// mobile app reads `canCreateCustomers` to decide whether to show
+// the Add Customer affordance. New flags can be added later by
+// extending RepTypeConfig + the seed; the reader tolerates missing
+// keys (treats them as `true` = allow-all so legacy rows don't
+// break behaviour).
+//
+// SECURITY NOTE: this is client-side enforcement, not RLS. A motivated
+// rep with curl + their JWT could still INSERT a customer regardless
+// of canCreateCustomers — Phase 4 RLS allows any authenticated user
+// with `created_by_rep_id = auth.uid()` to insert. A future RLS
+// tightening (read profiles.rep_type → look up the capability) is
+// the proper hard block. For now, hiding the UI is sufficient for
+// the "accidental misuse" + "clean UX" cases.
+
+export interface RepTypeConfig {
+  name: string;
+  /** Whether reps of this type can create customers from the mobile
+   *  app (Feature A flow — /add-customer). Defaults to true when
+   *  unset / unknown so a missing entry doesn't block by accident. */
+  canCreateCustomers: boolean;
+}
+
+export const DEFAULT_REP_TYPES: ReadonlyArray<RepTypeConfig> = [
+  { name: "Sales Rep", canCreateCustomers: true },
+  { name: "Merchandiser", canCreateCustomers: false },
+  { name: "Driver", canCreateCustomers: false },
+] as const;
+
+/** Defensive parser — coerces a raw app_settings JSON value into a
+ *  clean RepTypeConfig[]. Strips invalid entries, dedupes names,
+ *  trims whitespace, falls back to defaults on malformed input. */
+function parseRepTypes(raw: unknown): RepTypeConfig[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_REP_TYPES];
+  const seen = new Set<string>();
+  const out: RepTypeConfig[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as { name?: unknown; canCreateCustomers?: unknown };
+    const name = typeof r.name === "string" ? r.name.trim() : "";
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push({
+      name,
+      // Missing key / wrong type → treat as true (allow-all) so a
+      // legacy entry doesn't silently block reps from doing things.
+      canCreateCustomers: r.canCreateCustomers === false ? false : true,
+    });
+  }
+  return out.length > 0 ? out : [...DEFAULT_REP_TYPES];
+}
+
+export async function getRepTypes(): Promise<RepTypeConfig[]> {
+  const v = await readSetting<unknown>("rep_types", null);
+  return parseRepTypes(v);
+}
+
+export async function setRepTypes(
+  list: RepTypeConfig[]
+): Promise<{ ok: boolean; error?: string }> {
+  // Sanitise on write too — defensive against UI bugs that might
+  // send empty strings or duplicates.
+  const clean = parseRepTypes(list);
+  if (clean.length === 0) {
+    return { ok: false, error: "Need at least one rep type." };
+  }
+  return writeSetting("rep_types", clean, "rep types");
+}
+
+/** Pure capability check — caller fetches the vocabulary once via
+ *  getRepTypes() and then calls this per check. typeName=null /
+ *  unknown defaults to true (allow-all) so uncategorised reps
+ *  don't get silently blocked. */
+export function repTypeCan(
+  types: RepTypeConfig[],
+  typeName: string | null | undefined,
+  capability: "canCreateCustomers"
+): boolean {
+  if (!typeName) return true;
+  const entry = types.find(
+    (t) => t.name.toLowerCase() === typeName.toLowerCase()
+  );
+  if (!entry) return true; // unknown type → don't block
+  return entry[capability];
+}
