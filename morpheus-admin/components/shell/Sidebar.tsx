@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AC } from "@/lib/tokens";
 import { NAV_ITEMS } from "@/lib/mock-data";
+import { SETTINGS_SECTIONS } from "@/components/shell/SettingsShell";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { getUser, signOut } from "@/lib/auth";
 import {
@@ -72,6 +73,17 @@ export function Sidebar() {
   // visible after they nav away. Cheap to expand back on return.
   useEffect(() => {
     if (pathname.startsWith("/tasks")) setTasksExpanded(true);
+  }, [pathname]);
+
+  // Settings sub-nav — same expand/collapse pattern as Tasks. Gary's
+  // directive (May 27 late): clicking Settings should both navigate
+  // to /settings AND open the sub-nav with every section, identical
+  // to how Tasks works. Default open when on a /settings/* route.
+  const [settingsExpanded, setSettingsExpanded] = useState<boolean>(() =>
+    typeof window !== "undefined" && window.location.pathname.startsWith("/settings")
+  );
+  useEffect(() => {
+    if (pathname.startsWith("/settings")) setSettingsExpanded(true);
   }, [pathname]);
 
   useEffect(() => {
@@ -410,6 +422,11 @@ export function Sidebar() {
               : item.href;
           const parentActive = isActive(item.href);
           const isTasks = item.id === "tasks";
+          const isSettings = item.id === "settings";
+          // Items that own a sub-nav drawer get a trailing caret +
+          // toggle-on-re-click behaviour. Currently Tasks + Settings.
+          const hasSubNav = isTasks || isSettings;
+          const subNavOpen = isTasks ? tasksExpanded : isSettings ? settingsExpanded : false;
           return (
             <React.Fragment key={item.id}>
               <NavItem
@@ -423,23 +440,25 @@ export function Sidebar() {
                     : false
                 }
                 badgeCount={item.id === "ops" ? needsActionCount : 0}
-                trailingCaret={isTasks}
-                caretOpen={isTasks && tasksExpanded}
+                trailingCaret={hasSubNav}
+                caretOpen={subNavOpen}
                 onClick={
-                  isTasks
+                  hasSubNav
                     ? (e) => {
-                        // Re-click while already on a /tasks route =
-                        // toggle the sub-nav. Without this the
-                        // re-click was a no-op navigation (the rep
-                        // tried to "close" Tasks and nothing
-                        // happened).
-                        if (pathname.startsWith("/tasks")) {
+                        // Re-click while already on the section's
+                        // route = toggle the sub-nav. Without this
+                        // the re-click was a no-op navigation (user
+                        // tried to "close" the drawer and nothing
+                        // happened). Otherwise let Next.js navigate;
+                        // the useEffect on pathname auto-expands when
+                        // the user lands on the section.
+                        if (isTasks && pathname.startsWith("/tasks")) {
                           e.preventDefault();
                           setTasksExpanded((v) => !v);
+                        } else if (isSettings && pathname.startsWith("/settings")) {
+                          e.preventDefault();
+                          setSettingsExpanded((v) => !v);
                         }
-                        // Otherwise let Next.js navigate; the
-                        // useEffect on pathname will auto-expand
-                        // when the user lands on /tasks.
                       }
                     : undefined
                 }
@@ -508,6 +527,72 @@ export function Sidebar() {
                         )
                       }
                     />
+                  </div>
+                </div>
+              )}
+
+              {/* Settings sub-nav. One row per SETTINGS_SECTIONS entry
+                  so adding a new settings page automatically appears
+                  in the sidebar drawer too. Unavailable sections (e.g.
+                  Billing) render as locked rows with the "Soon" pill.
+                  Animation matches Tasks — same cubic-bezier curve,
+                  same translateY entry — so the two drawers feel
+                  identical. */}
+              {isSettings && (
+                <div
+                  aria-hidden={!settingsExpanded}
+                  style={{
+                    overflow: "hidden",
+                    // Generous max-height for the longer settings list
+                    // (currently 7 entries × ~30px). Bump if more get
+                    // added.
+                    maxHeight: settingsExpanded ? 360 : 0,
+                    opacity: settingsExpanded ? 1 : 0,
+                    transition:
+                      "max-height .32s cubic-bezier(.22, 1, .36, 1), opacity .22s ease-out, margin .22s ease-out",
+                    marginTop: settingsExpanded ? 2 : 0,
+                    marginBottom: settingsExpanded ? 4 : 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 1,
+                      marginLeft: 16,
+                      paddingLeft: 12,
+                      borderLeft: `1px solid #232932`,
+                      transform: settingsExpanded
+                        ? "translateY(0)"
+                        : "translateY(-6px)",
+                      transition:
+                        "transform .32s cubic-bezier(.22, 1, .36, 1)",
+                    }}
+                  >
+                    {SETTINGS_SECTIONS.map((s) =>
+                      s.available ? (
+                        <SubNavItem
+                          key={s.id}
+                          label={s.label}
+                          href={s.href}
+                          active={pathname === s.href || pathname.startsWith(s.href + "/")}
+                        />
+                      ) : (
+                        <SubNavItem
+                          key={s.id}
+                          label={s.label}
+                          locked
+                          // Use the existing locked path but the alert
+                          // copy explains it's coming, not paywalled —
+                          // matches the SOON pill on the in-page rail.
+                          onLockedClick={() =>
+                            alert(
+                              `${s.label} is coming soon.\n\nTalk to us if you'd like early access.`
+                            )
+                          }
+                        />
+                      )
+                    )}
                   </div>
                 </div>
               )}

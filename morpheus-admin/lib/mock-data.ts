@@ -12,12 +12,16 @@
  */
 
 export const NAV_ITEMS = [
+  // Order (May 27, late) — Gary's directive: Live Ops, Customers,
+  // Workforce/Reps, Schedule, then everything else as before. Reads
+  // top-down: where's today happening → who are we working with →
+  // who's doing the work → when is it scheduled.
   { id: "ops", label: "Live Ops", glyph: "ops", href: "/" },
+  { id: "customers", label: "Customers", glyph: "customer", href: "/customers" },
   // Workforce / Reps — kept the route as /reps (matches the codebase
   // throughout) but the label is the broader "Workforce" since the
   // section now covers reps + managers + role/auth admin too.
   { id: "reps", label: "Workforce / Reps", glyph: "reps", href: "/reps" },
-  { id: "customers", label: "Customers", glyph: "customer", href: "/customers" },
   { id: "schedule", label: "Schedule / Calendar", glyph: "cal", href: "/schedule" },
   { id: "past-shifts", label: "Past Shifts", glyph: "clock", href: "/past-shifts" },
   { id: "tasks", label: "Tasks", glyph: "tasks", href: "/tasks" },
