@@ -22,6 +22,7 @@ import { AGlyph } from "@/components/ui/AGlyph";
 import { FilterChip } from "@/components/ui/Filters";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ListCount } from "@/components/ui/ListCount";
 import { type SortState, compareBy } from "@/components/ui/SortableHeader";
 import { TableView } from "@/components/past-shifts/TableView";
 import { GridView } from "@/components/past-shifts/GridView";
@@ -325,6 +326,13 @@ export default function PastShiftsPage() {
               archive may contain more shifts than are listed here.
             </div>
           </Card>
+        )}
+
+        {/* Count subtitle — DESIGN.md §8. `rows` is the full dataset
+            after the date-window fetch; `filtered` is what's visible
+            after search + rep filter. */}
+        {filtered !== null && rows !== null && (
+          <ListCount visible={filtered.length} total={rows.length} noun="shift" />
         )}
 
         {/* Body */}

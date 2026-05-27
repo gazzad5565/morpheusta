@@ -35,6 +35,7 @@ import { CustomerScopePicker, type CustomerScope } from "@/components/ui/Custome
 import { Combobox } from "@/components/ui/Combobox";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
+import { ListCount } from "@/components/ui/ListCount";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
 import type { Customer } from "@/lib/types";
@@ -502,16 +503,6 @@ export default function LibraryPage() {
                 <AGlyph name="x" size={13} color={AC.mute} />
               </button>
             )}
-            <span
-              style={{
-                fontFamily: AC.font,
-                fontSize: 11,
-                color: AC.mute,
-                fontWeight: 600,
-              }}
-            >
-              {filtered.length} of {files.length}
-            </span>
             <div style={{ flex: 1 }} />
             <SegTabs
               tabs={["Table", "Grid"]}
@@ -519,6 +510,12 @@ export default function LibraryPage() {
               onChange={(v) => setView(v as "Table" | "Grid")}
             />
           </div>
+
+          {/* Count subtitle — DESIGN.md §8. Replaces the old inline
+              "{filtered.length} of {files.length}" tucked into the
+              search row so every list page renders the count in the
+              same spot. */}
+          <ListCount visible={filtered.length} total={files.length} noun="file" />
 
           {/* File list — Table or Grid view depending on the toggle. */}
           {view === "Grid" ? (

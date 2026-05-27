@@ -266,6 +266,12 @@ so the next page can reuse it.
   already-filtered array down to `page * SIZE → (page+1) * SIZE`
   and passes `totalItems={filtered.length}` for the count. Added
   May 27.
+- **`ListCount`** — small "Showing X of Y noun" line shown between
+  the filter row and the body on every list page. Pairs with
+  Pagination at the bottom — same total, surfaced at the top so a
+  manager doesn't have to scroll. Returns `null` when total is 0.
+  Added May 27 (late) per Gary's directive that every list page
+  show its count up front.
 - **`ColumnResizer`** + **`useColumnWidths(pageKey, defaults)` hook**
   — drag handle on a header cell that resizes its column. Hook
   owns the widths array + localStorage persistence (`morpheus.cols.
@@ -401,8 +407,29 @@ clickable-rowed every long list, divergence is a bug now.
    array (not raw rows) into the page window before passing to
    the table/grid renderer.
 
+**Count subtitle between filter row and body** (May 27, late). Every
+list page renders a `<ListCount>` line **between the filter Card and
+the body Card** showing the total + filtered count. Format:
+- Unfiltered: `247 customers`
+- Filtered:   `Showing 32 of 247 customers`
+
+```tsx
+import { ListCount } from "@/components/ui/ListCount";
+…
+{filtered !== null && (
+  <ListCount visible={filtered.length} total={counts.total} noun="customer" />
+)}
+```
+
+Pagination already shows "Showing 201–250 of 587" at the bottom, but
+Gary's directive (May 27) is that the **total reachable count** must
+be visible at the top too — without scrolling past a long table. Use
+the shared `ListCount` component (don't reinvent the inline span) so
+the wording stays consistent. The component returns `null` when total
+is 0 (the empty-state Card below already says "No customers yet").
+
 The same pattern is followed on `/customers`, `/past-shifts`, `/tasks`,
-`/library`, `/settings/managers`.
+`/library`, `/settings/managers`, `/reps`, `/schedule/manage`.
 
 ### List-page state machinery
 
@@ -514,14 +541,29 @@ settings sections. To add a new settings section:
 4. For each toggle, use the shared `<ToggleRow>` shape — see
    `/settings/check-in-rules` for the canonical example.
 
-**Settings-rail entries are the discoverable home of org-wide
-vocabularies / settings.** If you add a managed list to
-`app_settings` (rep types, library categories, custom field
-definitions), the CRUD UI for it belongs in the Settings rail —
-not buried as a button-and-modal on another page. `/settings/rep-
-types` is the reference (May 27); a modal-on-another-page is the
-anti-pattern (was the first cut, replaced because it wasn't
-discoverable).
+**Where does vocabulary CRUD live?** Two acceptable shapes, judged
+case-by-case (May 27 revision):
+
+1. **Dedicated rail entry under `/settings/*`** — best for
+   vocabularies that stand alone or are referenced from many places
+   (e.g. `custom-fields`, `check-in-rules`). They benefit from a
+   discoverable URL + their own breadcrumb.
+2. **Modal button on the entity's primary management page** —
+   acceptable when the vocabulary is *intrinsic to one entity* and
+   the manager is most likely to want to edit it while already
+   looking at that entity. Rep types live here (Manage rep types
+   button → modal on `/settings/managers`) because the vocabulary
+   belongs to users and rep-type churn happens while editing users.
+
+Gary's directive (May 27, late): rep types do **not** need their
+own Settings rail entry — the modal on the Users page is "kind of
+fine". When in doubt, prefer the modal pattern for entity-intrinsic
+vocabularies; only promote to a rail entry when the vocabulary is
+referenced from genuinely independent places.
+
+**Anti-pattern (still):** burying a vocabulary modal on a page
+unrelated to the entity it governs. Library categories belong with
+library files, not under /settings/random-page.
 
 ### Empty state
 
@@ -810,11 +852,17 @@ similar lists — store it as a JSON value in `app_settings`. Pattern
    `set<Vocab>(list)` writes back with the same defensive
    sanitisation. Mobile gets a read-only mirror if mobile reads
    the value.
-4. **CRUD UI** — a dedicated Settings rail page (see Settings
-   pattern above). Inline help text warns when renames don't
-   cascade (e.g. existing `profiles.rep_type` rows keep the old
-   name and orphan if you rename the type). Modal-on-another-page
-   is the anti-pattern.
+4. **CRUD UI** — two acceptable shapes (see §8 "Where does
+   vocabulary CRUD live?"):
+   - **Dedicated rail page** — for vocabularies referenced across
+     many surfaces (e.g. `/settings/custom-fields`).
+   - **Modal on the entity's primary page** — for entity-intrinsic
+     vocabularies where the manager is most likely already on that
+     entity's page (e.g. "Manage rep types" on `/settings/managers`).
+   Either shape, inline help text warns when renames don't cascade
+   (existing `profiles.rep_type` rows keep the old name and orphan
+   if you rename the type). The anti-pattern is burying the vocab
+   modal on a page **unrelated** to the entity it governs.
 5. **Refs in user-facing data** — store the NAME, not an id
    (matches the in-place approach of `library_files.category`,
    `profiles.rep_type`, `shifts.claimable_rep_types`). Trade-off:
@@ -939,6 +987,10 @@ ticked, leave a one-line code comment explaining why.
       uploaded logo. If a rep, rep = photo or face/initials.
 - [ ] If list page: `<Pagination>` at the bottom, page state
       resets to 0 on every filter / search / sort change.
+- [ ] If list page: `<ListCount visible={filtered.length}
+      total={rows.length} noun="…" />` between the filter Card and
+      the body Card. Pagination shows the same total at the bottom,
+      but the count must also be visible at the top.
 - [ ] If list page with a Table view: `useColumnWidths` + a
       `<ColumnResizer>` overlay on every header except the last.
       Same `gridTemplateColumns` on header row + every data row.
@@ -983,7 +1035,8 @@ Reference points for "what good looks like":
 | Detail page (editable) | `/customers/[id]/edit` | Identity / Location / Check-in exceptions section structure |
 | Tabbed detail | `/customers/[id]` | TabHeader + per-tab components + shared tabStyles + inline contacts on Overview |
 | Settings page | `/settings/check-in-rules` | ToggleRow pattern, segmented picker, optimistic UI |
-| Settings vocabulary CRUD | `/settings/rep-types` | Managed list in app_settings + dedicated rail entry — modal-on-another-page is the anti-pattern |
+| Settings vocabulary CRUD (rail) | `/settings/custom-fields` | Standalone vocabulary with its own rail entry + URL |
+| Settings vocabulary CRUD (modal) | "Manage rep types" button on `/settings/managers` | Entity-intrinsic vocabulary — modal where the manager is already working |
 | Wizard | `/settings/import/[entity]` | 5-step stepper, dropzone, mapping (with ID / LINK badges), preview, result |
 | Pagination | `/reps`, `/past-shifts` | `<Pagination>` + client-side slice + page-resets-on-filter pattern |
 | Resizable columns | `/reps` Table view | `useColumnWidths` + `<ColumnResizer>` overlay; localStorage per page |

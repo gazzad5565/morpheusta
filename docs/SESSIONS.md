@@ -14,6 +14,7 @@
 
 ## Quick TOC
 
+- [May 27, 2026 (post-very-very-late) — undo rep-types-in-rail, customers columns, managers off /reps, list count at top](#todays-session--what-shipped-may-27-2026-post-very-very-late)
 - [May 27, 2026 (very-very late) — /settings/rep-types page + Users page UX parity](#todays-session--what-shipped-may-27-2026-very-very-late)
 - [May 27, 2026 (very late) — rep_type propagation: chips everywhere reps appear + claimable_rep_types shift restriction](#todays-session--what-shipped-may-27-2026-very-late)
 - [May 27, 2026 (late) — rep types + capability flags (canCreateCustomers)](#todays-session--what-shipped-may-27-2026-late)
@@ -29,6 +30,118 @@
 - [May 8, 2026 — multi-site customers schema + admin Sites tab](#todays-session--what-shipped-may-8-2026)
 - [May 7, 2026 — calendar, schedule rewrites, broad UX pass](#todays-session--what-shipped-may-7-2026)
 - [May 6, 2026 — auto-checkout, organisation settings, indexes](#todays-session--what-shipped-may-6-2026)
+
+---
+
+### Today's session — what shipped (May 27, 2026, post-very-very-late)
+
+Gary reviewed the rep-types-in-Settings-rail ship from the previous
+slot and reversed it (the modal pattern was "kind of fine"), plus
+asked for four more list-page improvements while the page was open.
+Four asks, all shipped:
+
+#### 1. Undo: rep-types modal restored under Users, rail entry removed
+
+- **`/settings/rep-types` deleted.** Whole page directory removed —
+  was a duplicate UI that fragmented the management surface.
+- **`SettingsShell.SETTINGS_SECTIONS`** loses the "Rep types" entry.
+  Rail order returns to: Users, Check-in rules, Custom fields,
+  Organisation, Messaging, Import, Billing.
+- **`components/users/ManageRepTypesSheet.tsx`** restored — the same
+  modal Gary saw before, with name input, "Can add customers?"
+  checkbox, trash, add-from-bottom, single Save.
+- **`/settings/managers`** gets the "Manage rep types" button back
+  in its actions slot. Click → modal opens. Same modal, same data,
+  no rail entry.
+
+Why the reversal: Gary's view, paraphrased — rep types are intrinsic
+to users; the modal-on-Users-page is fine; an extra rail entry is
+needless surface area. **DESIGN.md §8 + §12 updated** to acknowledge
+both shapes (rail entry vs. entity-intrinsic modal) as acceptable,
+case-by-case. Anti-pattern is still burying a vocab modal on a page
+*unrelated* to the entity it governs.
+
+#### 2. /reps shows reps only — managers off the Workforce list
+
+`listProfiles({ role: "rep" })` on `/reps` (was unfiltered, included
+managers). Knock-ons:
+- The "Managers" `FilterChip` removed (it filtered a row that no
+  longer exists on the page).
+- `counts.managers` dropped from the rollup.
+- `StatusFilter` type union loses `"managers"`.
+- Managers continue to live under `/settings/managers` where they
+  belong. Reps belong on Workforce.
+
+Gary's framing: "managers should only be under their users section
+in settings because they're the managers of the company." Agreed —
+splitting roles by surface matches their job: managers operate the
+console, reps work in the field.
+
+#### 3. Customers list — new five-column layout
+
+Per Gary's directive:
+
+| Code | Name | Address | Last visit | Next visit |
+
+- **No status column.** Active/inactive is rarely scanned in table
+  view; filter chips above handle live status filtering.
+- **Last + Next visit** computed client-side from a parallel
+  `listShiftsInRange(-180d, +90d)` fetch on page load. Per-customer
+  aggregation: last = most-recent completed past shift; next =
+  soonest scheduled future shift. New `VisitCell` helper renders
+  relative time ("Today", "Yesterday", "5d ago", "in 2d", "Tomorrow")
+  with amber tint when `lastVisit >= 30d` (signal: "we haven't been
+  there in over a month").
+- **Sortable** on every column. New sort keys `lastVisit` /
+  `nextVisit` join existing `code` / `name` / `address`. Sort
+  defaults to Code asc.
+- **`safeCustomerSortKey()`** validator: any user with a stale
+  `status` value in localStorage falls back to `code` rather than
+  crashing the sort.
+- **Resizable column widths** key bumped to `customers-v2` because
+  the column shape changed — old saved widths would have landed on
+  the wrong columns.
+
+Default widths: `[110, 360, 260, 120, 120]`. Code first because Gary
+said so + it matches how managers actually identify customers in
+conversation ("can you check on #1042?").
+
+#### 4. Count at the top of every list page
+
+Gary: "I also like to see at the top of the page how many what the
+count is in what I'm viewing — I know it's good at the bottom about
+navigation but it's some nice to see well…"
+
+- **New `components/ui/ListCount.tsx`** — small subtitle rendered
+  between the filter Card and the body Card. Format:
+  - `247 customers` when unfiltered
+  - `Showing 32 of 247 customers` when filtered
+  - returns `null` when total is 0 (empty-state Card handles the
+    "no customers yet" case).
+- Wired into `/customers`, `/reps`, `/tasks`, `/library`,
+  `/past-shifts`, `/schedule/manage`. `/settings/managers` already
+  had its own filter-count chip next to the SectionTitle and was
+  left alone (different layout, same effect).
+- The old `/library` + `/schedule/manage` inline `{filtered.length}
+  of {series.length}` spans removed — they're replaced by the
+  standardised `<ListCount>` so the wording is identical
+  everywhere.
+- **DESIGN.md §8** updated with the canonical pattern + §15
+  checklist gains a ListCount tick.
+
+Pagination at the bottom still shows "Showing 201-250 of 587" for
+the current window; the new line at the top answers the broader
+question without scrolling.
+
+---
+
+#### Build & deploy
+
+`npx --no-install next build` clean on admin (39 routes). Mobile
+not touched in this slot. Old `customer-v1` localStorage entries
+remain readable but ignored — users who had resized columns on the
+old `name → code` layout will see the new default widths on first
+visit then any new drag is saved under the `v2` key.
 
 ---
 

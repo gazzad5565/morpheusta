@@ -27,6 +27,7 @@ import {
   type SortState,
 } from "@/components/ui/SortableHeader";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
+import { ListCount } from "@/components/ui/ListCount";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
 import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
@@ -49,7 +50,7 @@ interface RepWithStats extends Profile {
   shiftsToday: number;
 }
 
-type StatusFilter = "all" | "with-shifts" | "no-shifts" | "managers";
+type StatusFilter = "all" | "with-shifts" | "no-shifts";
 type ViewMode = "Grid" | "Table";
 type RepSortKey = "name" | "email" | "role" | "joined" | "shiftsToday";
 
@@ -82,8 +83,14 @@ export default function RepsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    // role:"rep" — May 27 (very-late). /reps is the Workforce/Reps
+    // page; managers are admin users, not field workforce, and live
+    // under Settings → Users instead. Was showing everyone before;
+    // this filter at the store level keeps managers off the page
+    // entirely (no role chip, no filter, no row).
     const load = () =>
-      Promise.all([listProfiles(), listShifts()]).then(([profiles, shifts]) => {
+      Promise.all([listProfiles({ role: "rep" }), listShifts()]).then(
+        ([profiles, shifts]) => {
         if (cancelled) return;
         const shiftsByRep = new Map<string, number>();
         for (const s of shifts) {
@@ -100,7 +107,8 @@ export default function RepsPage() {
           shiftsToday: shiftsByRep.get(p.id) || 0,
         }));
         setReps(enriched);
-      });
+      }
+    );
     load();
     // Refresh on any profiles change — new user invited, name/role
     // changed in /settings/managers, avatar uploaded from the mobile
@@ -117,8 +125,9 @@ export default function RepsPage() {
     const total = reps?.length ?? 0;
     const withShifts = reps?.filter((r) => r.shiftsToday > 0).length ?? 0;
     const noShifts = reps?.filter((r) => r.shiftsToday === 0).length ?? 0;
-    const managers = reps?.filter((r) => r.role === "manager").length ?? 0;
-    return { total, withShifts, noShifts, managers };
+    // managers count dropped (May 27 very-late) — listProfiles
+    // is now scoped to role='rep' so the value would always be 0.
+    return { total, withShifts, noShifts };
   }, [reps]);
 
   const filtered = useMemo(() => {
@@ -126,7 +135,7 @@ export default function RepsPage() {
     let out = reps;
     if (statusFilter === "with-shifts") out = out.filter((r) => r.shiftsToday > 0);
     if (statusFilter === "no-shifts") out = out.filter((r) => r.shiftsToday === 0);
-    if (statusFilter === "managers") out = out.filter((r) => r.role === "manager");
+    // "managers" status-filter dropped — page only fetches reps.
     if (typeFilter) {
       out = out.filter(
         (r) =>
@@ -197,12 +206,6 @@ export default function RepsPage() {
             >
               No shifts today · {counts.noShifts}
             </FilterChip>
-            <FilterChip
-              active={statusFilter === "managers"}
-              onClick={() => setStatusFilter("managers")}
-            >
-              Managers · {counts.managers}
-            </FilterChip>
             {repTypes.length > 0 && (
               <select
                 value={typeFilter}
@@ -239,6 +242,11 @@ export default function RepsPage() {
             />
           </div>
         </Card>
+
+        {/* Count subtitle — DESIGN.md §8. */}
+        {filtered !== null && (
+          <ListCount visible={filtered.length} total={counts.total} noun="rep" />
+        )}
 
         {/* Body */}
         {filtered === null ? (

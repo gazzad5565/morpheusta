@@ -23,6 +23,7 @@ import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
+import { ListCount } from "@/components/ui/ListCount";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { Combobox } from "@/components/ui/Combobox";
 import { TimeCombobox } from "@/components/ui/TimeCombobox";
@@ -263,18 +264,13 @@ export default function ManageShiftsPage() {
                 <AGlyph name="x" size={13} color={AC.mute} />
               </button>
             )}
-            <span
-              style={{
-                fontFamily: AC.font,
-                fontSize: 11,
-                color: AC.mute,
-                fontWeight: 600,
-              }}
-            >
-              {filtered.length} of {series.length}
-            </span>
           </div>
         </Card>
+
+        {/* Count subtitle — DESIGN.md §8. Replaces the old inline
+            "{filtered.length} of {series.length}" so this list matches
+            /customers, /reps, /tasks, /library, /past-shifts. */}
+        <ListCount visible={filtered.length} total={series.length} noun="series" pluralNoun="series" />
 
         {/* List */}
         <Card padding={0}>

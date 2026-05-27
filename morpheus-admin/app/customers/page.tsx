@@ -13,13 +13,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
+import { ListCount } from "@/components/ui/ListCount";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
 
 // Default column widths for /customers Table view. localStorage takes
-// over once the user resizes (key `morpheus.cols.customers.v1`). Grid
-// view + Map view don't use these — Grid auto-flows; Map shows pins.
-const CUSTOMERS_COLUMNS = [360, 140, 260, 90, 90] as const;
+// over once the user resizes (key `morpheus.cols.customers-v2.v1`).
+// Grid view + Map view don't use these — Grid auto-flows; Map shows pins.
+//
+// Column order (May 27, late) — Gary's directive:
+//   Code | Name | Address | Last visit | Next visit
+// Status column dropped (active/inactive flag was rarely scanned in
+// table view; live status is more usefully shown via the filter
+// chips above). Last + Next visit pair is computed from a parallel
+// shift fetch (see ShiftRow aggregation in the page). Key bumped
+// from v1 to v2 because the column shape changed — old saved
+// widths would land on the wrong columns.
+const CUSTOMERS_COLUMNS = [110, 360, 260, 120, 120] as const;
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
@@ -40,9 +50,32 @@ import {
   subscribeCustomers,
   listSeenRepAddedCustomerIds,
 } from "@/lib/customers-store";
+import { listShiftsInRange } from "@/lib/shifts-store";
+import { isoDaysAgo, todayLocalISO, formatDate } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
-type CustomerSortKey = "name" | "code" | "address" | "status";
+type CustomerSortKey =
+  | "code"
+  | "name"
+  | "address"
+  | "lastVisit"
+  | "nextVisit";
+
+/** Validate a persisted sort key against the current schema. Old
+ *  entries that still hold "status" (dropped May 27 when the column
+ *  went away) silently fall back to "code". */
+function safeCustomerSortKey(v: unknown): CustomerSortKey {
+  const allowed: CustomerSortKey[] = [
+    "code",
+    "name",
+    "address",
+    "lastVisit",
+    "nextVisit",
+  ];
+  return (allowed as string[]).includes(v as string)
+    ? (v as CustomerSortKey)
+    : "code";
+}
 
 // MapLibre needs `window`; load on client only.
 const CustomersMap = dynamic(
@@ -103,7 +136,9 @@ export default function CustomersPage() {
   );
   const [search, setSearch] = useState(persisted.search ?? "");
   const [sort, setSort] = useState<SortState<CustomerSortKey>>({
-    key: persisted.sortKey ?? "name",
+    // safe-key gate so "status" left in localStorage from before May 27
+    // doesn't break sort.
+    key: safeCustomerSortKey(persisted.sortKey),
     dir: persisted.sortDir ?? "asc",
   });
   // Pagination — 0-indexed. Resets to 0 whenever a filter or sort
@@ -143,6 +178,16 @@ export default function CustomersPage() {
   // "I've seen this" marker both feed the badge state.
   const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
 
+  // Last / Next visit per customer (May 27, late — Gary's redesign).
+  // Computed from a parallel shift fetch covering 180 days back +
+  // 90 days forward — wide enough for a "when did we last visit"
+  // glance + the next upcoming shift. Same client-side filter
+  // pattern as the customer detail page Shifts tab. Empty defaults
+  // to undefined so the column reads "—" not "Invalid Date".
+  const [visitsByCustomer, setVisitsByCustomer] = useState<
+    Map<string, { lastVisit?: string; nextVisit?: string }>
+  >(new Map());
+
   useEffect(() => {
     let cancelled = false;
     const load = () => {
@@ -152,6 +197,37 @@ export default function CustomersPage() {
       void listSeenRepAddedCustomerIds().then((s) => {
         if (!cancelled) setSeenIds(s);
       });
+      // Shifts in the window — completed shifts inform "Last visit",
+      // future scheduled shifts inform "Next visit". 180d back is
+      // far enough to surface long-gap customers; 90d forward
+      // covers typical scheduling horizons.
+      void listShiftsInRange(isoDaysAgo(180), isoDaysAgo(-90)).then(
+        (shifts) => {
+          if (cancelled) return;
+          const today = todayLocalISO();
+          const m = new Map<
+            string,
+            { lastVisit?: string; nextVisit?: string }
+          >();
+          for (const s of shifts) {
+            const cid = s.customer_id;
+            const cur = m.get(cid) || {};
+            if (s.shift_date < today && s.state === "complete") {
+              // Most-recent completed shift wins.
+              if (!cur.lastVisit || s.shift_date > cur.lastVisit) {
+                cur.lastVisit = s.shift_date;
+              }
+            } else if (s.shift_date >= today && s.state === "scheduled") {
+              // Soonest upcoming scheduled shift wins.
+              if (!cur.nextVisit || s.shift_date < cur.nextVisit) {
+                cur.nextVisit = s.shift_date;
+              }
+            }
+            m.set(cid, cur);
+          }
+          setVisitsByCustomer(m);
+        }
+      );
     };
     load();
     // Refresh on customer CRUD from any tab/manager — INSERT, UPDATE,
@@ -227,13 +303,28 @@ export default function CustomersPage() {
           return compareBy(a, b, (c) => c.code, sort.dir);
         case "address":
           return compareBy(a, b, (c) => c.address, sort.dir);
-        case "status":
-          return compareBy(a, b, (c) => (c.active === false ? "inactive" : "active"), sort.dir);
+        case "lastVisit":
+          // Customers with no visit on file sort to the end (asc) /
+          // start (desc) — the manager's "find who I haven't seen
+          // recently" path is sort.dir=asc.
+          return compareBy(
+            a,
+            b,
+            (c) => visitsByCustomer.get(c.id)?.lastVisit || "",
+            sort.dir
+          );
+        case "nextVisit":
+          return compareBy(
+            a,
+            b,
+            (c) => visitsByCustomer.get(c.id)?.nextVisit || "",
+            sort.dir
+          );
       }
     });
     return sorted;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customers, statusFilter, withAddressOnly, search, sort]);
+  }, [customers, statusFilter, withAddressOnly, search, sort, visitsByCustomer]);
 
   return (
     <AdminShell
@@ -339,6 +430,13 @@ export default function CustomersPage() {
           </div>
         </Card>
 
+        {/* Count subtitle — codified in DESIGN.md §8 (gold-standard list
+            page). Pagination shows the same number at the bottom; this
+            line keeps it reachable without scrolling. */}
+        {filtered !== null && (
+          <ListCount visible={filtered.length} total={counts.total} noun="customer" />
+        )}
+
         {/* Body */}
         {filtered === null ? (
           <Card padding={32}>
@@ -404,6 +502,7 @@ export default function CustomersPage() {
               seenIds={seenIds}
               sort={sort}
               onSort={setSort}
+              visitsByCustomer={visitsByCustomer}
             />
             <Pagination
               totalItems={filtered.length}
@@ -557,17 +656,23 @@ function TableView({
   seenIds,
   sort,
   onSort,
+  visitsByCustomer,
 }: {
   customers: Customer[];
   seenIds: Set<string>;
   sort: SortState<CustomerSortKey>;
   onSort: (s: SortState<CustomerSortKey>) => void;
+  visitsByCustomer: Map<string, { lastVisit?: string; nextVisit?: string }>;
 }) {
   const isNew = (c: Customer) =>
     !!c.createdByRepId && !seenIds.has(c.id);
   // Hook lives inside TableView since this is its only consumer.
   // Grid view + Map view don't have columns to resize.
-  const cols = useColumnWidths("customers", CUSTOMERS_COLUMNS);
+  // Key bumped to "customers-v2" (May 27) — column shape changed
+  // when Status was dropped and Last/Next visit added; old saved
+  // widths would land on the wrong columns.
+  const cols = useColumnWidths("customers-v2", CUSTOMERS_COLUMNS);
+  const today = todayLocalISO();
   return (
     <Card padding={0} style={{ overflowX: "auto" }}>
       <div
@@ -587,14 +692,14 @@ function TableView({
         }}
       >
         <div style={{ position: "relative" }}>
-          <SortableHeader k="name" sort={sort} onChange={onSort}>
-            Name
+          <SortableHeader k="code" sort={sort} onChange={onSort}>
+            Code
           </SortableHeader>
           <ColumnResizer index={0} cols={cols} />
         </div>
         <div style={{ position: "relative" }}>
-          <SortableHeader k="code" sort={sort} onChange={onSort}>
-            Code
+          <SortableHeader k="name" sort={sort} onChange={onSort}>
+            Name
           </SortableHeader>
           <ColumnResizer index={1} cols={cols} />
         </div>
@@ -605,100 +710,152 @@ function TableView({
           <ColumnResizer index={2} cols={cols} />
         </div>
         <div style={{ position: "relative" }}>
-          <SortableHeader k="status" sort={sort} onChange={onSort}>
-            Status
+          <SortableHeader k="lastVisit" sort={sort} onChange={onSort}>
+            Last visit
           </SortableHeader>
           <ColumnResizer index={3} cols={cols} />
         </div>
-        <div></div>
+        <SortableHeader k="nextVisit" sort={sort} onChange={onSort}>
+          Next visit
+        </SortableHeader>
       </div>
-      {customers.map((c, i) => (
-        <Link
-          key={c.id}
-          href={`/customers/${c.id}`}
-          style={{ textDecoration: "none", color: "inherit" }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: cols.gridTemplateColumns,
-              gap: 14,
-              alignItems: "center",
-              padding: "12px 16px",
-              borderBottom: i < customers.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-              background: "#fff",
-              opacity: c.active === false ? 0.6 : 1,
-              cursor: "pointer",
-            }}
+      {customers.map((c, i) => {
+        const v = visitsByCustomer.get(c.id);
+        return (
+          <Link
+            key={c.id}
+            href={`/customers/${c.id}`}
+            style={{ textDecoration: "none", color: "inherit" }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-              <CustomerSwatch customer={c} size={28} />
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: cols.gridTemplateColumns,
+                gap: 14,
+                alignItems: "center",
+                padding: "12px 16px",
+                borderBottom: i < customers.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                background: "#fff",
+                opacity: c.active === false ? 0.6 : 1,
+                cursor: "pointer",
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: AC.fontMono,
+                  fontSize: 12,
+                  color: AC.ink2,
+                  fontWeight: 700,
+                }}
+              >
+                #{c.code}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                <CustomerSwatch customer={c} size={28} />
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: AC.ink,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    minWidth: 0,
+                  }}
+                >
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
+                  {isNew(c) && <NewByRepBadge />}
+                </div>
+              </div>
               <div
                 style={{
                   fontFamily: AC.font,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: AC.ink,
+                  fontSize: 12,
+                  color: c.address ? AC.ink2 : AC.mute,
+                  fontWeight: 500,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  minWidth: 0,
                 }}
+                title={c.address || ""}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
-                {isNew(c) && <NewByRepBadge />}
+                {c.address || "—"}
               </div>
+              <VisitCell date={v?.lastVisit} today={today} kind="past" />
+              <VisitCell date={v?.nextVisit} today={today} kind="future" />
             </div>
-            <div
-              style={{
-                fontFamily: AC.fontMono,
-                fontSize: 12,
-                color: AC.ink2,
-                fontWeight: 600,
-              }}
-            >
-              {c.code}
-            </div>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 12,
-                color: c.address ? AC.ink2 : AC.mute,
-                fontWeight: 500,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-              title={c.address || ""}
-            >
-              {c.address || "—"}
-            </div>
-            <div>
-              <span
-                style={{
-                  padding: "2px 8px",
-                  borderRadius: 99,
-                  fontFamily: AC.font,
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  background: c.active === false ? AC.bg : AC.okTint,
-                  color: c.active === false ? AC.mute : "#0F5A38",
-                  border: `1px solid ${c.active === false ? AC.line : AC.okTint}`,
-                }}
-              >
-                ● {c.active === false ? "Inactive" : "Active"}
-              </span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <AGlyph name="chev-r" size={14} color={AC.mute} />
-            </div>
-          </div>
-        </Link>
-      ))}
+          </Link>
+        );
+      })}
     </Card>
+  );
+}
+
+/**
+ * VisitCell — renders a date as either "Today", "3d ago", "in 5d",
+ * or `formatDate(date)` for older / further-out values. Faint dash
+ * when no date is known. Tone goes amber when a customer hasn't
+ * been visited in 30+ days — surfaces stale relationships at a
+ * scan-glance.
+ */
+function VisitCell({
+  date,
+  today,
+  kind,
+}: {
+  date: string | undefined;
+  today: string;
+  kind: "past" | "future";
+}) {
+  if (!date) {
+    return (
+      <span
+        style={{
+          fontFamily: AC.font,
+          fontSize: 12,
+          color: AC.faint,
+        }}
+      >
+        —
+      </span>
+    );
+  }
+  // Day-diff: positive = future, negative = past, 0 = today. Build
+  // from the ISO strings to avoid timezone drift.
+  const dayMs = 24 * 60 * 60 * 1000;
+  const t = Date.parse(date + "T00:00:00");
+  const t0 = Date.parse(today + "T00:00:00");
+  const days = Math.round((t - t0) / dayMs);
+  let label: string;
+  let tone: string = AC.ink2;
+  if (days === 0) {
+    label = "Today";
+    tone = AC.brandDeep;
+  } else if (kind === "past") {
+    const ago = -days;
+    label = ago === 1 ? "Yesterday" : ago < 30 ? `${ago}d ago` : formatDate(date);
+    // Stale customer warning — amber after a month without a visit.
+    if (ago >= 30) tone = AC.warn;
+  } else {
+    label =
+      days === 1 ? "Tomorrow" : days < 30 ? `in ${days}d` : formatDate(date);
+  }
+  return (
+    <span
+      style={{
+        fontFamily: AC.font,
+        fontSize: 12,
+        color: tone,
+        fontWeight: days === 0 ? 700 : 500,
+      }}
+      title={date}
+    >
+      {label}
+    </span>
   );
 }
 

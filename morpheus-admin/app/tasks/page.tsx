@@ -23,6 +23,7 @@ import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AC } from "@/lib/tokens";
 import { listAllTasks, deleteTask, type TaskRow } from "@/lib/tasks-store";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
+import { ListCount } from "@/components/ui/ListCount";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
 
@@ -227,6 +228,9 @@ export default function TasksPage() {
             />
           </div>
         </Card>
+
+        {/* Count subtitle — DESIGN.md §8. */}
+        <ListCount visible={filtered.length} total={rows.length} noun="task" />
 
         <Card padding={0} style={{ overflowX: "auto" }}>
           <div
