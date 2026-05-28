@@ -45,7 +45,11 @@ const CRUMB_HREF: Record<string, string> = {
   // their crumb href — renamed to "Messaging" in the side nav May 13.
   Notifications: "/notify",
   Settings: "/settings",
+  // "Users" kept for legacy breadcrumbs (pre-May-28-later); the
+  // active label is now "Manage users" and that's what new
+  // breadcrumbs pass.
   Users: "/settings/managers",
+  "Manage users": "/settings/managers",
 };
 
 function resolveCrumb(c: Crumb): { label: string; href: string | null } {

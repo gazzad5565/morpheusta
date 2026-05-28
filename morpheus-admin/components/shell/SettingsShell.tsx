@@ -55,10 +55,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: "managers",
     // Section label shown in the sidebar rail / hub tiles / page heading.
-    // Renamed to "Users" because the page covers both reps and managers
-    // (promote / demote / add user / etc). The /settings/managers route
-    // is preserved for existing links + breadcrumbs.
-    label: "Users",
+    // Renamed "Users" → "Manage users" (May 28, later) per Gary —
+    // active verb matches the other action-oriented sections ("Roles
+    // & permissions", "Bulk import") and makes the page's purpose
+    // clearer in the rail. The /settings/managers route is preserved
+    // for existing links + breadcrumbs.
+    label: "Manage users",
     href: "/settings/managers",
     glyph: "reps",
     description: "Reps log into the mobile app. Managers log into this console.",

@@ -22,7 +22,6 @@ import {
   listLibraryFiles,
   uploadLibraryFile,
   deleteLibraryFile,
-  getLibraryDownloadUrl,
   formatFileSize,
   DEFAULT_CATEGORY,
   type LibraryFile,
@@ -148,14 +147,10 @@ export default function LibraryPage() {
     reload();
   };
 
-  const onOpen = async (f: LibraryFile) => {
-    const r = await getLibraryDownloadUrl(f.storagePath);
-    if (!r.ok || !r.url) {
-      alert(`Couldn't generate download link: ${r.error}`);
-      return;
-    }
-    window.open(r.url, "_blank", "noopener,noreferrer");
-  };
+  // The "open file" flow lives on the edit page now (May 28 late) —
+  // Gary's call: clicking a row in the library should go to the file's
+  // detail page first, not blast straight to a download. The list
+  // page is purely for browsing + searching.
 
   const onDelete = async (f: LibraryFile) => {
     if (!confirm(`Delete "${f.name}"? This removes the file from storage.`)) {
@@ -523,7 +518,6 @@ export default function LibraryPage() {
               files={pageItems}
               loaded={loaded}
               hasAnyFiles={files.length > 0}
-              onOpen={onOpen}
             />
           ) : (
           <Card padding={0} style={{ overflowX: "auto" }}>
@@ -564,8 +558,15 @@ export default function LibraryPage() {
               )
             ) : (
               pageItems.map((f) => (
-                <div
+                // Row click → file detail (edit page). May 28 (late) per
+                // Gary: "you shouldn't be able to open the file directly
+                // from View or the Library. You need to go into that
+                // actual file folder first and then from there should be
+                // a view." Matches the clickable-row pattern on every
+                // other list page (customers / reps / tasks / etc).
+                <Link
                   key={f.id}
+                  href={`/library/${f.id}/edit`}
                   style={{
                     display: "grid",
                     gridTemplateColumns: cols.gridTemplateColumns,
@@ -575,8 +576,9 @@ export default function LibraryPage() {
                     borderBottom: `1px solid ${AC.lineDim}`,
                     background: "#fff",
                     cursor: "pointer",
+                    textDecoration: "none",
+                    color: "inherit",
                   }}
-                  onClick={() => onOpen(f)}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                     <div
@@ -660,19 +662,16 @@ export default function LibraryPage() {
                   >
                     {shortDate(f.uploadedAt)}
                   </div>
+                  {/* Edit pencil dropped May 28 (late) — the whole row
+                      now navigates to the edit page, so a separate
+                      pencil is redundant. Same convention as the
+                      /settings/managers Users page. Delete button
+                      stays + stops propagation. */}
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
-                    <Link
-                      href={`/library/${f.id}/edit`}
-                      onClick={(e) => e.stopPropagation()}
-                      title="Edit file metadata"
-                      aria-label="Edit file metadata"
-                      style={iconBtn}
-                    >
-                      <AGlyph name="edit" size={14} color={AC.mute} />
-                    </Link>
                     <button
                       type="button"
                       onClick={(e) => {
+                        e.preventDefault();
                         e.stopPropagation();
                         onDelete(f);
                       }}
@@ -688,7 +687,7 @@ export default function LibraryPage() {
                       <AGlyph name="x" size={14} color={AC.mute} />
                     </button>
                   </div>
-                </div>
+                </Link>
               ))
             )}
           </Card>
@@ -703,8 +702,16 @@ export default function LibraryPage() {
       </div>
 
       {manageCatsOpen && (
+        // Pass the MERGED list (curated + in-use file tags) so the
+        // manager sees every category they recognise from the
+        // sidebar, not just whatever happens to be in
+        // app_settings.library_categories. Saving promotes any
+        // in-use values into the curated list at the same time —
+        // brings the two sources of truth back into sync. (May 28
+        // bug report from Gary: modal showed one category that
+        // didn't even appear in the sidebar.)
         <ManageCategoriesSheet
-          current={categories}
+          current={allCategories}
           onClose={() => setManageCatsOpen(false)}
           onSaved={(next) => {
             setCategories(next);
@@ -739,12 +746,10 @@ function FileGrid({
   files,
   loaded,
   hasAnyFiles,
-  onOpen,
 }: {
   files: LibraryFile[];
   loaded: boolean;
   hasAnyFiles: boolean;
-  onOpen: (f: LibraryFile) => void;
 }) {
   if (!loaded) {
     return (
@@ -771,11 +776,13 @@ function FileGrid({
         gap: 12,
       }}
     >
+      {/* Card click → file detail (edit page). Same pattern as the
+          Table view — file open happens from the detail page now,
+          not from the list. May 28 (late). */}
       {files.map((f) => (
-        <button
+        <Link
           key={f.id}
-          type="button"
-          onClick={() => onOpen(f)}
+          href={`/library/${f.id}/edit`}
           style={{
             background: "#fff",
             border: `1px solid ${AC.line}`,
@@ -788,6 +795,8 @@ function FileGrid({
             textAlign: "left",
             minHeight: 140,
             boxShadow: "0 1px 2px rgba(10,15,30,.03)",
+            textDecoration: "none",
+            color: "inherit",
           }}
         >
           <div
@@ -853,7 +862,7 @@ function FileGrid({
           <div style={{ marginTop: "auto" }}>
             <CustomerCell file={f} />
           </div>
-        </button>
+        </Link>
       ))}
     </div>
   );
@@ -942,8 +951,10 @@ function ManageCategoriesSheet({
               Library categories
             </div>
             <div style={{ fontSize: 12, color: AC.mute, marginTop: 2 }}>
-              Add, rename, or remove the categories shown in the upload form. Files
-              already tagged with a removed category stay visible under their old name.
+              This list controls the categories shown in the upload form
+              and the sidebar. Add, rename, or remove categories — files
+              already tagged with a removed category stay visible under
+              their old name (they don&apos;t get moved or deleted).
             </div>
           </div>
           <button

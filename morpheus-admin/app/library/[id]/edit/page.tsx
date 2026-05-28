@@ -20,6 +20,7 @@ import {
   getLibraryFile,
   updateLibraryFile,
   deleteLibraryFile,
+  getLibraryDownloadUrl,
   formatFileSize,
   listLibraryCategoriesInUse,
   LIBRARY_CATEGORIES,
@@ -57,6 +58,12 @@ export default function EditLibraryFilePage({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "View file" button state (May 28 late) — signing a Supabase
+  // Storage URL takes a network round-trip, so we show a "Loading…"
+  // label + disable the button while it's in flight. Without this
+  // the click feels broken: nothing visible happens for the second
+  // or two before the new tab actually opens. Gary's report.
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,6 +126,23 @@ export default function EditLibraryFilePage({
     router.push("/library");
   };
 
+  // Open the file in a new tab. Generates a short-lived signed URL
+  // via Supabase Storage, opens window.open under the same tap so
+  // popup blockers don't fire. Loading state on the button while
+  // the URL is being signed; clears whether the open succeeds or
+  // fails so a re-click works. Added May 28 late.
+  const onOpenFile = async () => {
+    if (!file || opening) return;
+    setOpening(true);
+    const r = await getLibraryDownloadUrl(file.storagePath);
+    setOpening(false);
+    if (!r.ok || !r.url) {
+      alert(`Couldn't generate download link: ${r.error || "Unknown error"}`);
+      return;
+    }
+    window.open(r.url, "_blank", "noopener,noreferrer");
+  };
+
   const onDelete = async () => {
     if (!file) return;
     if (!confirm(`Delete "${file.name}"? This removes the file from storage.`)) return;
@@ -160,6 +184,22 @@ export default function EditLibraryFilePage({
   return (
     <AdminShell
       breadcrumbs={["Home", "Library", { label: name || "Edit file" }]}
+      actions={
+        // Primary "View file" action — clicking signs a Supabase
+        // Storage URL + opens in a new tab. Loading state on the
+        // button so the manager sees something happen during the
+        // signed-URL round-trip. May 28 late (Gary: "let me know
+        // it's loading because sometimes people don't know what is
+        // going on").
+        <Btn
+          kind="primary"
+          icon="eye"
+          onClick={onOpenFile}
+          disabled={opening || !file}
+        >
+          {opening ? "Loading…" : "View file"}
+        </Btn>
+      }
     >
       <div
         style={{
