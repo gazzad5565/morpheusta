@@ -29,6 +29,7 @@ import { AGlyph } from "@/components/ui/AGlyph";
 import { SettingsShell } from "@/components/shell/SettingsShell";
 import { AC } from "@/lib/tokens";
 import { formatRelative } from "@/lib/format";
+import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import {
   listRecentImports,
   subscribeImportRuns,
@@ -138,9 +139,21 @@ function TabButton({
 function RunPane() {
   const [recent, setRecent] = useState<ImportRunRow[]>([]);
   const [loaded, setLoaded] = useState(false);
+  // Keagan K6 (May 28): Recent imports panel needs to show WHO ran
+  // each import and the absolute timestamp on hover. started_by is
+  // already on import_runs but wasn't being rendered. Map uuid →
+  // profile so the RunRow can show "Sarah Mokoena" instead of a raw
+  // UUID.
+  const [profilesById, setProfilesById] = useState<Map<string, Profile>>(
+    () => new Map()
+  );
 
   useEffect(() => {
     let cancelled = false;
+    void listProfiles().then((ps) => {
+      if (cancelled) return;
+      setProfilesById(new Map(ps.map((p) => [p.id, p])));
+    });
     const refresh = async () => {
       const rows = await listRecentImports(20);
       if (cancelled) return;
@@ -225,7 +238,16 @@ function RunPane() {
         ) : (
           <Card padding={0}>
             {recent.map((r, i) => (
-              <RunRow key={r.id} run={r} isLast={i === recent.length - 1} />
+              <RunRow
+                key={r.id}
+                run={r}
+                isLast={i === recent.length - 1}
+                startedByName={
+                  profilesById.get(r.started_by)
+                    ? displayName(profilesById.get(r.started_by)!)
+                    : null
+                }
+              />
             ))}
           </Card>
         )}
@@ -293,13 +315,36 @@ function EntityCard({ entity }: { entity: EntityType }) {
   );
 }
 
-function RunRow({ run, isLast }: { run: ImportRunRow; isLast: boolean }) {
+function RunRow({
+  run,
+  isLast,
+  startedByName,
+}: {
+  run: ImportRunRow;
+  isLast: boolean;
+  /** Display name of the manager who started the run, or null if we
+   *  couldn't resolve the UUID (deleted account, etc). */
+  startedByName: string | null;
+}) {
   const statusTint = STATUS_TINT[run.status];
+  // Absolute timestamp for the title-tooltip. Localised to the
+  // viewer's browser locale so a manager in Cape Town reads SAST
+  // and a manager in London reads BST.
+  const startedAbsolute = (() => {
+    try {
+      return new Date(run.started_at).toLocaleString();
+    } catch {
+      return run.started_at;
+    }
+  })();
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "160px 1fr 110px 90px",
+        // Added a "Started by" column between filename and counts.
+        // Filename column tightened from 1fr to 1.2fr so the new
+        // 120px column fits without crowding the wider screens.
+        gridTemplateColumns: "160px 1.2fr 140px 110px 90px",
         gap: 12,
         alignItems: "center",
         padding: "12px 16px",
@@ -346,6 +391,19 @@ function RunRow({ run, isLast }: { run: ImportRunRow; isLast: boolean }) {
       >
         {run.source_filename || "(pasted rows)"}
       </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 12,
+          color: AC.ink2,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+        title={startedByName ?? "Unknown user"}
+      >
+        {startedByName ?? <span style={{ color: AC.mute }}>—</span>}
+      </div>
       <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.ink2 }}>
         ✓ {run.created_count} · ↻ {run.updated_count} · ✕ {run.failed_count}
       </div>
@@ -356,6 +414,7 @@ function RunRow({ run, isLast }: { run: ImportRunRow; isLast: boolean }) {
           color: AC.mute,
           textAlign: "right",
         }}
+        title={startedAbsolute}
       >
         {formatRelative(run.started_at, " ago")}
       </div>

@@ -69,6 +69,12 @@ export function TopBar({ title, breadcrumbs, actions, search = true }: Props) {
         gap: 16,
       }}
     >
+      {/* Back chevron — Keagan K7. Sits left of the breadcrumbs and
+          fires router.back(). Breadcrumbs cover *hierarchical* nav
+          ("take me up to /customers"); back covers *history* nav
+          ("take me to whatever I was on before"). Both are useful
+          and they're not redundant. */}
+      <BackButton />
       <div style={{ minWidth: 0 }}>
         {breadcrumbs ? (
           <div
@@ -165,6 +171,57 @@ export function TopBar({ title, breadcrumbs, actions, search = true }: Props) {
 
       {actions}
     </div>
+  );
+}
+
+// ─── Back button ─────────────────────────────────────────────────────────
+
+/**
+ * BackButton — small chevron sitting at the left of the topbar that
+ * fires router.back(). Keagan K7 (May 28). Breadcrumbs handle
+ * hierarchical navigation ("go up to /customers"); back covers
+ * history navigation ("go to whatever I was on before this page").
+ * They're complementary, not redundant — e.g. opening a customer
+ * from a search result, then clicking "Customers" in the breadcrumb
+ * takes you to the LIST, not to the search results.
+ *
+ * Disabled (with a "not available" tooltip + reduced opacity) when
+ * we can detect no history is available — e.g. the page was opened
+ * in a fresh tab. window.history.length is the only signal browsers
+ * give us; it counts ALL same-tab entries including the initial
+ * blank one. length > 1 → safe to call .back().
+ */
+function BackButton() {
+  const router = useRouter();
+  // Track availability in state so the button can re-enable itself
+  // after the first navigation in this tab without a remount.
+  const [canGoBack, setCanGoBack] = React.useState(false);
+  React.useEffect(() => {
+    setCanGoBack(typeof window !== "undefined" && window.history.length > 1);
+  }, []);
+  return (
+    <button
+      type="button"
+      onClick={() => canGoBack && router.back()}
+      disabled={!canGoBack}
+      aria-label="Back"
+      title={canGoBack ? "Back" : "No previous page in this tab"}
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        background: "transparent",
+        border: `1px solid ${AC.line}`,
+        cursor: canGoBack ? "pointer" : "not-allowed",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        opacity: canGoBack ? 1 : 0.45,
+      }}
+    >
+      <AGlyph name="chev-l" size={14} color={AC.ink2} />
+    </button>
   );
 }
 

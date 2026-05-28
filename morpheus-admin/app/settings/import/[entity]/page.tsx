@@ -56,6 +56,23 @@ function isEntity(s: string): s is EntityType {
   return (VALID_ENTITIES as string[]).includes(s);
 }
 
+/**
+ * Where the "View {entity}s" CTA on the Result step routes to.
+ * NULL for entities that don't have a top-level list page:
+ *   - site:    no /sites page — sites live under /customers/[id] (Sites tab)
+ *   - manager: /settings/managers mixes managers + reps; reps adapter
+ *              uses the same page so it's only meaningful for the rep
+ *              importer to deep-link there with role=rep.
+ * Keagan K3 (May 28).
+ */
+const ENTITY_LIST_HREF: Record<EntityType, string | null> = {
+  customer: "/customers",
+  site: null,
+  rep: "/reps",
+  manager: "/settings/managers",
+  shift: "/past-shifts",
+};
+
 export default function EntityImportPage({
   params,
 }: {
@@ -412,6 +429,7 @@ function Wizard({ entity }: { entity: EntityType }) {
 
         {step === "result" && (
           <ResultStep
+            entity={entity}
             result={result}
             commitError={commitError}
             failures={preview.filter((r) => r.predicted === "fail")}
@@ -893,8 +911,12 @@ function MapStep({
                   boxSizing: "border-box",
                 }}
               >
+                {/* Keagan K1 (May 28): "(ignore)" was ambiguous —
+                    he expected it to skip the ROW, not the column.
+                    Rephrased to "(don't import this column)" so
+                    there's no doubt what's being skipped. */}
                 <option value="">
-                  {required ? "— pick a column —" : "(ignore)"}
+                  {required ? "— pick a column —" : "(don't import this column)"}
                 </option>
                 {headers.map((h) => (
                   <option key={h} value={h}>
@@ -1231,11 +1253,13 @@ function PreviewRowDisplay({
 // ─── Step 5: Result ─────────────────────────────────────────────────
 
 function ResultStep({
+  entity,
   result,
   commitError,
   failures,
   allFields,
 }: {
+  entity: EntityType;
   result: { created: number; updated: number; skipped: number; failed: number } | null;
   commitError: string | null;
   failures: PreviewRow[];
@@ -1348,8 +1372,26 @@ function ResultStep({
               Download failures CSV ({failures.length})
             </Btn>
           )}
+          {/* Keagan K3 (May 28): after a successful import the
+              manager wants to land on the entities they just
+              created — not start another import or hunt them down
+              via the nav. Primary CTA jumps to the relevant list
+              page; only renders for entities that have a
+              first-class list surface (sites + managers don't —
+              sites live under their customer's detail tab, managers
+              are mixed into /settings/managers). */}
+          {ENTITY_LIST_HREF[entity] && result.created + result.updated > 0 && (
+            <Link
+              href={ENTITY_LIST_HREF[entity]!}
+              style={{ textDecoration: "none" }}
+            >
+              <Btn kind="primary" icon="chev-r">
+                View {ENTITY_LABEL[entity]}
+              </Btn>
+            </Link>
+          )}
           <Link href="/settings/import" style={{ textDecoration: "none" }}>
-            <Btn kind="primary">Start another import</Btn>
+            <Btn>Start another import</Btn>
           </Link>
         </div>
       </Card>
