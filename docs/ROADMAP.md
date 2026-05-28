@@ -24,10 +24,10 @@ Top of the queue (in priority order):
 
 0a-new-may-28. ✅ **APPLIED May 28 morning** — all three early-May-28 migrations ran (customer_code_text, customer_coords_source, profiles_manager_type). Gary confirmed.
 
-0b-new-may-28-later. **🟡 OPERATOR — two more migrations queued from May 28 LATER** (need to run before the customer-side filters / Customer region picker / Customer group picker actually do anything):
-   - `db/migrations/2026_05_28_drop_wrong_profile_columns.sql` — drops the wrongly-added `profiles.region` + `profiles.group_name` (those were a misread; region + group are CUSTOMER attributes — see Gary's correction in the May 28 chat). Idempotent.
-   - `db/migrations/2026_05_28_customers_customer_group.sql` — adds `customers.customer_group` text NULL. The Customer group dropdown writes here. Without this migration the writes silently no-op the column.
-   Both safe to re-run.
+0b-new-may-28-later. ✅ **APPLIED May 28 late** — Gary confirmed both migrations ran:
+   - `2026_05_28_drop_wrong_profile_columns.sql` — wrong profile columns gone.
+   - `2026_05_28_customers_customer_group.sql` — customer_group column live. The Customer group dropdown on the customer edit page now persists end-to-end.
+   Next step is to populate the tenant vocabularies at Settings → Organisation → Customer regions / Customer groups; the filters + dropdowns light up the moment one entry exists.
 
 0c-feedback-leftovers. **Other top picks from the rep feedback PDFs that DIDN'T ship May 28** (when 0-NEXT is done): G1 (audit-log UI), G9 (schedule month-view drag-drop + bulk move), G10 (library audience reshape). See the May 28 summary message in chat for the combined-prioritised list across all three reviewers.
 
