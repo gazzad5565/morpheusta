@@ -169,6 +169,10 @@ export async function PATCH(req: NextRequest) {
      *  validation against app_settings.rep_types yet (the dropdown
      *  on the edit form is the authoritative source). */
     rep_type?: string | null;
+    /** May 28 — manager type category. Same shape as rep_type; same
+     *  caveat (no server-side validation against the vocabulary —
+     *  client dropdown is authoritative). */
+    manager_type?: string | null;
   };
   try {
     body = await req.json();
@@ -219,6 +223,13 @@ export async function PATCH(req: NextRequest) {
     // anything else so "Sales Rep " doesn't drift from "Sales Rep".
     const v = (body.rep_type ?? "").trim();
     profilePatch.rep_type = v.length > 0 ? v : null;
+  }
+  if (body.manager_type !== undefined) {
+    // Same shape as rep_type. Empty / null = clear back to lenient
+    // default-allow (the manager keeps full access until explicitly
+    // re-assigned).
+    const v = (body.manager_type ?? "").trim();
+    profilePatch.manager_type = v.length > 0 ? v : null;
   }
   if (authPatch.email) profilePatch.email = authPatch.email;
   if (Object.keys(profilePatch).length > 0) {

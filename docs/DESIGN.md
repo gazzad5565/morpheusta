@@ -855,10 +855,14 @@ similar lists — store it as a JSON value in `app_settings`. Pattern
 4. **CRUD UI** — two acceptable shapes (see §8 "Where does
    vocabulary CRUD live?"):
    - **Dedicated rail page** — for vocabularies referenced across
-     many surfaces (e.g. `/settings/custom-fields`).
+     many surfaces (e.g. `/settings/custom-fields`, and as of May
+     28 `/settings/roles` which hosts BOTH rep types AND manager
+     types in two tabs).
    - **Modal on the entity's primary page** — for entity-intrinsic
      vocabularies where the manager is most likely already on that
-     entity's page (e.g. "Manage rep types" on `/settings/managers`).
+     entity's page (e.g. the original "Manage rep types" lived on
+     `/settings/managers` before being consolidated into
+     `/settings/roles`).
    Either shape, inline help text warns when renames don't cascade
    (existing `profiles.rep_type` rows keep the old name and orphan
    if you rename the type). The anti-pattern is burying the vocab
@@ -868,6 +872,69 @@ similar lists — store it as a JSON value in `app_settings`. Pattern
    `profiles.rep_type`, `shifts.claimable_rep_types`). Trade-off:
    rename fragility, but no FK migration needed when vocabulary
    changes.
+
+### Manager capabilities (light-touch RBAC v1 — May 28)
+
+A second admin-managed vocabulary parallel to rep types, this one
+gating ADMIN affordances rather than mobile-rep ones. Stored in
+`app_settings.manager_types`; per-row assignment via
+`profiles.manager_type` (NULL = unrestricted).
+
+Two capability flags ship in v1:
+- `canManageSettings` — gates `/settings/*` (incl. the
+  `/settings/roles` editor itself, organisation, check-in rules,
+  custom fields, bulk imports, and the `/settings/managers` user
+  CRUD page).
+- `canScheduleShifts` — gates `/schedule/new`, `/schedule/manage`,
+  `/shifts/[id]/edit`.
+
+Three seeded types: **Owner** (both true) / **Operations**
+(canScheduleShifts true, canManageSettings false) / **View only**
+(both false).
+
+Same lenient default-allow rules as `repTypeCan`: NULL type, deleted
+type, missing key → returns `true`. Existing managers stay fully
+functional after the migration — no lockouts on the first deploy.
+
+**Plumbing:**
+- `ManagerCapabilitiesProvider` mounts in `AdminShell`. Loads the
+  current user's profile + the manager_types vocab once. Exposes a
+  React Context with `has(cap)`, `profile`, `managerTypes`,
+  `refresh()`. Pattern mirrors `NeedsActionContext`.
+- `<RequireCapability cap="..." action="...">` wraps a page body and
+  renders a polite "you don't have permission" block-screen card
+  when the current manager lacks the capability. Rendering nothing
+  while the context is loading so a real Owner doesn't see a flash
+  of block screen.
+
+**Lockout protection (v1):**
+- The manager-type dropdown on `/settings/managers/[id]/edit` is
+  **disabled when the user is editing their own row** — forces
+  "ask another Owner" for self-demote. Hard guard.
+- The vocabulary editor on `/settings/roles` lets you edit any
+  type's flags including the one currently assigned to you, but
+  the row gets a warn-tinted "this is your current type" hint.
+  Soft guard — accidental own-cap toggles are recoverable by
+  hitting "Save" again with the flag flipped back.
+- Last-resort recovery: `UPDATE profiles SET manager_type = NULL
+  WHERE id = '<owner-uid>';` in Supabase SQL Editor.
+
+**Out of scope for v1 (deferred):**
+- RLS hardening — gates are client-side UX only, same posture as
+  `canCreateCustomers`. A motivated manager could call the
+  underlying API routes directly.
+- More capabilities (canManageWorkforce, canEditCustomers, etc) —
+  add when real demand surfaces. Each new cap is a one-line
+  extension of `ManagerCapability` + the seed.
+- Schedule drag-drop on `/schedule/page.tsx` is NOT gated —
+  viewing the calendar stays open to everyone, but a View-only
+  manager who drags a shift will still persist the move. The
+  `/schedule/new` and `/shifts/[id]/edit` route gates are the
+  primary protection. Tighten the drag handler if this becomes
+  a real complaint.
+- Request approval queue (Live Ops needs-action panel) isn't
+  capability-gated yet — approve/decline still works for any
+  manager. Same v1 limitation as the drag-drop.
 
 ---
 

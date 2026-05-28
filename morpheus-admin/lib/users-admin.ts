@@ -53,6 +53,10 @@ export interface UpdateUserInput {
   /** Rep category (Sales Rep / Merchandiser / Driver / …). Passing
    *  an empty string clears the category. Ignored when role=manager. */
   rep_type?: string | null;
+  /** Manager category (Owner / Operations / View only / …). Empty
+   *  string / null clears the category back to lenient default-allow.
+   *  Ignored when role=rep. May 28. */
+  manager_type?: string | null;
 }
 
 export async function updateUser(

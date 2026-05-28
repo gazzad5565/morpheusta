@@ -14,6 +14,7 @@
 
 ## Quick TOC
 
+- [May 28, 2026 — B5/B4/B6 from rep feedback + manager roles & permissions v1](#todays-session--what-shipped-may-28-2026)
 - [May 27, 2026 (post-very-very-late) — undo rep-types-in-rail, customers columns, managers off /reps, list count at top](#todays-session--what-shipped-may-27-2026-post-very-very-late)
 - [May 27, 2026 (very-very late) — /settings/rep-types page + Users page UX parity](#todays-session--what-shipped-may-27-2026-very-very-late)
 - [May 27, 2026 (very late) — rep_type propagation: chips everywhere reps appear + claimable_rep_types shift restriction](#todays-session--what-shipped-may-27-2026-very-late)
@@ -32,6 +33,170 @@
 - [May 6, 2026 — auto-checkout, organisation settings, indexes](#todays-session--what-shipped-may-6-2026)
 
 ---
+
+### Today's session — what shipped (May 28, 2026)
+
+Two themes for the day: first, top-three bugs from yesterday's rep
+feedback (Mariska + Rayhaan + Keagan PDFs), then a focused build of
+light-touch manager roles & permissions on top of the May 27
+rep_types pattern.
+
+**Cross-platform considered:** B5 + B6 are admin-only changes. B5
+threads through mobile types (display formatter) — verified the
+mobile build runs clean and the three render sites swap from
+inline `#${shift.code}` to `formatCustomerCode(shift.code)` so
+alphanumeric codes render as-is instead of "#SP-001". B4 also
+touches mobile's `setCustomerSiteCoords` to tag pinned coords as
+`rep_pinned`. The manager roles work is admin-only — mobile reps
+see no UI change. iOS PWA + Android Chrome both unaffected.
+
+#### Part 1 — B5/B4/B6 from rep feedback
+
+- **B6 — `884a411` library edit category dropdown unions defaults
+  + manager-curated + in-use.** Mariska's complaint: she uploaded a
+  file under custom category "Brand Guidelines" but couldn't
+  re-save it with that category from the edit page — the dropdown
+  bound to the hardcoded LIBRARY_CATEGORIES constant. Fix: new
+  `listLibraryCategoriesInUse()` helper in library-store, edit
+  page fetches it alongside `getLibraryCategories()` and builds
+  the same union the list page already builds. Swapped the strict
+  Combobox for an `<input list="..."> + <datalist>` so a manager
+  can also type a brand-new category at edit time. ~1 hour.
+
+- **B5 — `ba700e4` customer codes become opaque strings.**
+  Mariska's pain: every real tenant has SKU-style codes (SP-001,
+  ACME-JHB) but the import adapter enforced `/^\d+$/`. Bigger than
+  the feedback implied — `customers.code` was an `integer` column,
+  with `parseInt`, `#0012` padStart formatting, and a denormalised
+  `requested_shifts.customer_code` integer copy. **Migration**:
+  `2026_05_28_customer_code_text.sql` flips both columns to `text`
+  (existing values cast cleanly). New `formatCustomerCode(code)`
+  helper in both apps: pure digits render `#0012`, alphanumeric
+  render as-is. Touched 28 files across both apps — dropped 3
+  import-adapter regexes, rewrote the customer-code normaliser,
+  fixed a pre-existing `##0012` double-prefix bug on every
+  Combobox sublabel that sourced from `listCustomers`, and updated
+  the joined-customer types on shifts-store / tasks-store /
+  requests-store. ~half day.
+
+- **B4 — `f96adde` rep-pinned coords surfaced as "confirm address"
+  chip.** Mariska's example: a customer the rep pinned from the app
+  showed a wrong street ("Acme Apparel" → "197 Bree Avenue,
+  Pietermaritzburg"). Nominatim forward-resolved a vague address
+  to a random plausible street BEFORE the rep dropped the pin; the
+  rep's GPS replaced the coords but the wrong street text
+  lingered. Picked option (b) from the feedback (GPS canonical,
+  address editable suggestion) — no provider switch, no new
+  dependencies. **Migration**: `2026_05_28_customer_coords_source.sql`
+  adds `coords_source text` to `customers` + `customer_sites` with
+  four informal values (NULL, manual, address_geocode, rep_pinned).
+  Mobile `setCustomerSiteCoords` tags `rep_pinned`; cron tags
+  `address_geocode` on success; admin `updateCustomer` flips to
+  `manual` when the address changes. New `CoordsSourceChip`
+  renders a warn-tinted "📍 Pinned by rep — confirm address" only
+  for `rep_pinned` — surfaced on the customer Overview tab.
+  Option (a) — switching reverse-geocode provider to Google/Mapbox
+  for SA accuracy — deferred.
+
+#### Part 2 — Manager roles & permissions v1
+
+Three commits laying the rails for light-touch RBAC on the admin
+console. Mirrors yesterday's `rep_types` pattern: an
+admin-managed vocabulary in `app_settings.manager_types`,
+per-manager assignment via `profiles.manager_type`, lenient
+default-allow at every check site. Two capability flags chosen
+deliberately small — Gary's "not too complicated" framing.
+
+**The decisions** (recorded in case future capabilities or
+behaviour tweaks need to retrace them):
+- Capabilities: `canManageSettings` + `canScheduleShifts` only.
+  Customers / reps / tasks / library / Live Ops view stay
+  un-gated for v1.
+- Seed types: Owner / Operations / View only. Tenants edit.
+- Both rep types AND manager types live on a single new
+  `/settings/roles` rail entry with two tabs (Gary: "reps should
+  be in same place"). The old "Manage rep types" modal on
+  `/settings/managers` is gone — replaced with a "Roles &
+  permissions" link.
+- The /settings/roles page itself is gated by canManageSettings,
+  so only Owners can edit the vocabulary.
+- Self-demote lockout: hard — the manager-type dropdown on the
+  user edit page is disabled when editing your OWN row. Forces
+  another Owner to demote/promote.
+- Lockout recovery: `UPDATE profiles SET manager_type = NULL`
+  in Supabase SQL Editor. Documented in OPS.md.
+- Same RLS posture as `canCreateCustomers` — client-side UX
+  only. Hard RLS gating deferred.
+
+**Commit 1 — `2bbe630` foundation.** Migration
+`2026_05_28_profiles_manager_type.sql` (column + seed vocab),
+settings-store helpers (ManagerTypeConfig + DEFAULT_MANAGER_TYPES
++ parseManagerTypes + getManagerTypes + setManagerTypes +
+managerTypeCan), Profile.manager_type type + SELECT plumbing, new
+`lib/manager-capabilities-context.tsx` (React Context mirroring
+NeedsActionContext shape: loading / profile / managerTypes / has
+/ refresh), new `<RequireCapability>` wrapper for route-level
+gates, mounted the provider in AdminShell above
+NeedsActionProvider.
+
+**Commit 2 — `7ea2fd2` /settings/roles page.** New tabbed page
+hosting both vocab editors inline. `RolesPage` wrapped in
+`<RequireCapability cap="canManageSettings">`. Two new editor
+components: `ManagerTypesEditor` (two capability columns,
+warn-tinted hint on the row matching the current user's
+manager_type) and `RepTypesEditor` (refactor of the old modal's
+content as an inline editor). Deleted
+`ManageRepTypesSheet.tsx` — no longer used. Settings rail gains a
+"Roles & permissions" entry between Users and Check-in rules
+(lock glyph). Existing rep_type filter dropdown on
+/settings/managers continues working from the same vocab read.
+
+**Commit 3 — `<this-commit>` assignment + gates + docs.**
+- Manager-type dropdown on /settings/managers/[id]/edit (mirrors
+  the rep_type dropdown shape but with the canManageSettings /
+  canScheduleShifts inline tooltips), with the dropdown disabled
+  + a tooltip when `id === myId`. Self-demote guard in plain
+  English on the help text.
+- `manager_type` chip per row on the /settings/managers list —
+  small neutral chip next to the role chip, hidden when manager_type
+  is empty (matches DESIGN.md §9 "non-state chips render nothing
+  for uncategorised").
+- Server-side: `UpdateUserInput.manager_type?` added to
+  `lib/users-admin.ts` + handled in `/api/users` PATCH (same shape
+  as rep_type: empty/null clears, trim others).
+- Route gates: `SettingsShell` wraps with
+  `<RequireCapability cap="canManageSettings">` (one line covers
+  every /settings/* page). `/schedule/new`, `/schedule/manage`,
+  `/shifts/[id]/edit` each wrapped with `canScheduleShifts`.
+- Docs: DESIGN.md §12 extended with "Manager capabilities" — the
+  capability list, plumbing, lockout protection details, and the
+  out-of-scope items (RLS, drag-drop on /schedule/page, request
+  approval queue). This SESSIONS entry. OPS.md migration list
+  updated with the new pending migration. README "Latest" bumped.
+
+#### Migrations PENDING (apply before testing)
+
+In Supabase SQL Editor (order doesn't matter — independent files,
+idempotent):
+1. `db/migrations/2026_05_28_customer_code_text.sql` (B5)
+2. `db/migrations/2026_05_28_customer_coords_source.sql` (B4)
+3. `db/migrations/2026_05_28_profiles_manager_type.sql` (manager
+   roles foundation)
+
+#### Acceptance for the roles & permissions work
+
+- ✅ Both apps `next build` clean.
+- ⏳ Apply migration 3 in Supabase.
+- ⏳ Smoke: as Gary (still NULL manager_type post-migration), open
+  /settings/roles → see the three seeded manager types + the rep
+  types in a tab. Toggle a flag on Operations, hit Save → "Manager
+  types saved." appears.
+- ⏳ Edit your own user under /settings/managers/[id]/edit → the
+  manager-type dropdown is disabled with the locked-tooltip
+  visible.
+- ⏳ Pick another user, set them to View only → log in as them →
+  visiting /settings or /schedule/new shows the polite block
+  screen.
 
 ### Today's session — what shipped (May 27, 2026, post-very-very-late)
 

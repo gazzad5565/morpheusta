@@ -22,7 +22,12 @@ import { displayName, type Profile } from "@/lib/profiles-store";
 import { updateUser, deleteUser, randomPassword } from "@/lib/users-admin";
 import { EmailUserModal } from "@/components/users/EmailUserModal";
 import { formatRelative } from "@/lib/format";
-import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
+import {
+  getRepTypes,
+  getManagerTypes,
+  type RepTypeConfig,
+  type ManagerTypeConfig,
+} from "@/lib/settings-store";
 
 function formatJoined(iso: string | undefined): string {
   if (!iso) return "—";
@@ -53,6 +58,12 @@ export default function EditManagerPage({
   // Empty string = uncategorised; only meaningful when role=rep.
   const [repType, setRepType] = useState<string>("");
   const [repTypes, setRepTypes] = useState<RepTypeConfig[]>([]);
+  // May 28 — manager type category (Owner / Operations / View only / …).
+  // Empty string = unrestricted (lenient default); only meaningful
+  // when role=manager. The dropdown is locked for the current user
+  // editing themselves — forces "ask another Owner" for self-demote.
+  const [managerType, setManagerType] = useState<string>("");
+  const [managerTypes, setManagerTypes] = useState<ManagerTypeConfig[]>([]);
   const [newPassword, setNewPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
 
@@ -70,13 +81,14 @@ export default function EditManagerPage({
       }
       const u = await getUser();
       if (!cancelled) setMyId(u?.id ?? null);
-      const [{ data, error: dbErr }, types] = await Promise.all([
+      const [{ data, error: dbErr }, rTypes, mTypes] = await Promise.all([
         supabase
           .from("profiles")
-          .select("id, email, name, role, created_at, rep_type")
+          .select("id, email, name, role, created_at, rep_type, manager_type")
           .eq("id", id)
           .maybeSingle(),
         getRepTypes(),
+        getManagerTypes(),
       ]);
       if (cancelled) return;
       if (dbErr || !data) {
@@ -90,7 +102,9 @@ export default function EditManagerPage({
       setEmail(p.email);
       setRole(p.role === "manager" ? "manager" : "rep");
       setRepType(p.rep_type ?? "");
-      setRepTypes(types);
+      setManagerType(p.manager_type ?? "");
+      setRepTypes(rTypes);
+      setManagerTypes(mTypes);
       setLoading(false);
     })();
     return () => {
@@ -113,6 +127,17 @@ export default function EditManagerPage({
       // Only send rep_type for reps — managers don't have one. Empty
       // string clears the category server-side.
       rep_type: role === "rep" ? repType : null,
+      // Only send manager_type for managers. For managers editing
+      // their OWN row, the dropdown is disabled in the UI — so the
+      // value never changes locally and we'd send the existing value.
+      // Send `undefined` instead so the API doesn't even attempt the
+      // patch — belt-and-braces against a bad UI state.
+      manager_type:
+        role === "manager"
+          ? id === myId
+            ? undefined
+            : managerType
+          : null,
     });
     setBusy(false);
     if (!r.ok) {
@@ -275,11 +300,78 @@ export default function EditManagerPage({
                   }}
                 >
                   Drives which mobile-app affordances this rep sees. Edit the
-                  vocabulary + per-type capabilities from{" "}
+                  vocabulary + per-type capabilities under{" "}
                   <b style={{ color: AC.ink2 }}>
-                    Manage rep types
-                  </b>{" "}
-                  on the Users page.
+                    Settings → Roles &amp; permissions
+                  </b>
+                  .
+                </div>
+              </Field>
+            )}
+
+            {role === "manager" && (
+              <Field label="Manager type">
+                {/* Self-demote lockout: the dropdown is disabled when
+                    the manager is editing their own row — prevents
+                    the one-click "I turned off my own access" footgun
+                    Gary flagged. Demotion has to go through another
+                    Owner. */}
+                <select
+                  value={managerType}
+                  onChange={(e) => setManagerType(e.target.value)}
+                  disabled={id === myId}
+                  title={
+                    id === myId
+                      ? "You can't change your own manager type. Ask another Owner to do it for you."
+                      : undefined
+                  }
+                  style={{
+                    ...inputStyle,
+                    cursor: id === myId ? "not-allowed" : "pointer",
+                    opacity: id === myId ? 0.6 : 1,
+                  }}
+                >
+                  <option value="">— Unrestricted (allow all) —</option>
+                  {managerTypes.map((t) => {
+                    const caps: string[] = [];
+                    if (!t.canManageSettings) caps.push("no settings");
+                    if (!t.canScheduleShifts) caps.push("no scheduling");
+                    return (
+                      <option key={t.name} value={t.name}>
+                        {t.name}
+                        {caps.length > 0 ? ` · ${caps.join(", ")}` : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+                <div
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 11.5,
+                    color: AC.mute,
+                    marginTop: 6,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {id === myId ? (
+                    <>
+                      <b style={{ color: AC.warn }}>Locked for your own account.</b>{" "}
+                      Ask another manager with full access to update your type
+                      in <b style={{ color: AC.ink2 }}>Settings → Roles &amp;
+                      permissions</b>.
+                    </>
+                  ) : (
+                    <>
+                      Gates this manager&apos;s access to{" "}
+                      <b style={{ color: AC.ink2 }}>Settings</b> and{" "}
+                      <b style={{ color: AC.ink2 }}>Scheduling</b>. Edit the
+                      vocabulary + per-type capabilities under{" "}
+                      <b style={{ color: AC.ink2 }}>
+                        Settings → Roles &amp; permissions
+                      </b>
+                      .
+                    </>
+                  )}
                 </div>
               </Field>
             )}

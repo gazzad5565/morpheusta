@@ -21,6 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
+import { RequireCapability } from "@/components/ui/RequireCapability";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { ListCount } from "@/components/ui/ListCount";
@@ -184,6 +185,7 @@ export default function ManageShiftsPage() {
         </Link>
       }
     >
+      <RequireCapability cap="canScheduleShifts" action="manage shifts">
       {loading && <LoadingBar />}
       <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
@@ -497,6 +499,7 @@ export default function ManageShiftsPage() {
           }}
         />
       )}
+      </RequireCapability>
     </AdminShell>
   );
 }

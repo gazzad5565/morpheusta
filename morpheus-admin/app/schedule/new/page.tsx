@@ -15,6 +15,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
+import { RequireCapability } from "@/components/ui/RequireCapability";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
@@ -690,6 +691,7 @@ function NewShiftPage() {
 
   return (
     <AdminShell breadcrumbs={["Home", "Schedule", "New shift"]}>
+      <RequireCapability cap="canScheduleShifts" action="schedule a shift">
       <div
         style={{
           padding: 20,
@@ -1438,6 +1440,7 @@ function NewShiftPage() {
           </div>
         </Card>
       </div>
+      </RequireCapability>
     </AdminShell>
   );
 }

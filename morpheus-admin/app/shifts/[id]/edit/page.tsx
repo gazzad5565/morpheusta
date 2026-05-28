@@ -22,6 +22,7 @@ import { use, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AdminShell } from "@/components/shell/AdminShell";
+import { RequireCapability } from "@/components/ui/RequireCapability";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
@@ -394,6 +395,7 @@ export default function EditShiftPage({
         { label: customer?.name || "Edit shift" },
       ]}
     >
+      <RequireCapability cap="canScheduleShifts" action="edit this shift">
       <div
         style={{
           padding: 20,
@@ -931,6 +933,7 @@ export default function EditShiftPage({
           </Card>
         </div>
       </div>
+      </RequireCapability>
     </AdminShell>
   );
 }

@@ -497,6 +497,31 @@ export default function ManagersPage() {
                   >
                     {p.role === "manager" ? "Manager" : "Rep"}
                   </span>
+                  {/* Manager-type chip — only renders when the user
+                      IS a manager AND has a type assigned. Hidden for
+                      unrestricted managers (the default), matching the
+                      rep_type chip's hide-when-empty behaviour and
+                      DESIGN.md §9 ("renders nothing for uncategorised
+                      reps so empty chips never appear"). May 28. */}
+                  {p.role === "manager" && p.manager_type && (
+                    <span
+                      title={`Manager type: ${p.manager_type}`}
+                      style={{
+                        padding: "3px 9px",
+                        borderRadius: 99,
+                        background: AC.bg,
+                        color: AC.ink3,
+                        border: `1px solid ${AC.line}`,
+                        fontFamily: AC.font,
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        letterSpacing: 0.3,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {p.manager_type}
+                    </span>
+                  )}
                 </div>
                 <div
                   style={{

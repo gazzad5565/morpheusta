@@ -20,11 +20,27 @@
 
 ### Migrations applied today (cloud status)
 
-**Status as of end of May 25 session:**
+**Status as of end of May 28 session:**
 - May 21 and earlier — all applied.
 - **Pending — run before next test pass:**
   - `db/migrations/2026_05_25_import_runs_and_geocode_status.sql` (Phase A — Import hub foundation: new `import_runs` table, `geocode_status` + `geocode_attempted_at` on customers + customer_sites with backfill, partial indexes for the cron work queue, `app_settings` seed for the two import defaults)
   - `db/migrations/2026_05_25_profiles_last_credentials_sent_at.sql` (Phase B — adds `profiles.last_credentials_sent_at timestamptz NULL` so the "Email this user" modal can show "Last sent: X ago")
+  - `db/migrations/2026_05_27_profiles_rep_type.sql` (rep types + canCreateCustomers vocabulary — May 27)
+  - `db/migrations/2026_05_27_shifts_claimable_rep_types.sql` (per-shift rep-type restriction — May 27)
+  - `db/migrations/2026_05_28_customer_code_text.sql` (B5 — customers.code + requested_shifts.customer_code become text so SP-001 / ACME-JHB imports work)
+  - `db/migrations/2026_05_28_customer_coords_source.sql` (B4 — `coords_source` column on customers + customer_sites so the admin can see when a row's coords came from a rep pin)
+  - `db/migrations/2026_05_28_profiles_manager_type.sql` (manager roles foundation — `profiles.manager_type` + seeded `app_settings.manager_types` with Owner / Operations / View only)
+
+**Lockout recovery for the manager roles work:** if a manager
+accidentally locks themselves out by saving a restrictive
+`manager_type` for their own account (the dropdown guard PREVENTS
+this in the UI, but a future code path or direct API call could
+bypass), the recovery is one SQL line:
+```sql
+UPDATE public.profiles SET manager_type = NULL WHERE id = '<their-uid>';
+```
+Lenient defaults at every check site mean a NULL manager_type
+restores full access immediately.
 
 Each file is idempotent — safe to re-run.
 

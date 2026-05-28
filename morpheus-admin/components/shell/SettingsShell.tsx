@@ -24,6 +24,7 @@
 
 import { AdminShell } from "@/components/shell/AdminShell";
 import { type GlyphName } from "@/components/ui/AGlyph";
+import { RequireCapability } from "@/components/ui/RequireCapability";
 import { AC } from "@/lib/tokens";
 
 export interface SettingsSection {
@@ -144,40 +145,51 @@ export function SettingsShell({
       breadcrumbs={["Home", "Settings", current.label]}
       actions={actions}
     >
-      {/* Settings page body — no sticky rail anymore (sidebar drawer
-          handles inter-section nav). Just a heading + the section's
-          own content. Max-width keeps long pages readable on wide
-          desktops without forcing every page to set its own. */}
-      <div style={{ padding: 20, maxWidth: 1080 }}>
-        <div style={{ marginBottom: 18 }}>
-          <div
-            style={{
-              fontFamily: AC.font,
-              fontSize: 22,
-              fontWeight: 700,
-              color: AC.ink,
-              letterSpacing: -0.4,
-            }}
-          >
-            {heading}
-          </div>
-          {sub && (
+      {/* canManageSettings gate — every /settings/* page lives inside
+          SettingsShell, so wrapping here covers them all with one
+          line. Managers without the capability hit the polite
+          block-screen card and the actions slot above is still
+          rendered (so the rail is visible but the page body is
+          locked). The /settings/roles page used to wrap itself
+          too; redundant now, kept anyway as a defence-in-depth in
+          case SettingsShell is ever skipped. Light-touch RBAC v1
+          — May 28. */}
+      <RequireCapability cap="canManageSettings" action="open Settings">
+        {/* Settings page body — no sticky rail anymore (sidebar drawer
+            handles inter-section nav). Just a heading + the section's
+            own content. Max-width keeps long pages readable on wide
+            desktops without forcing every page to set its own. */}
+        <div style={{ padding: 20, maxWidth: 1080 }}>
+          <div style={{ marginBottom: 18 }}>
             <div
               style={{
                 fontFamily: AC.font,
-                fontSize: 12.5,
-                color: AC.mute,
-                marginTop: 4,
-                lineHeight: 1.5,
-                maxWidth: 720,
+                fontSize: 22,
+                fontWeight: 700,
+                color: AC.ink,
+                letterSpacing: -0.4,
               }}
             >
-              {sub}
+              {heading}
             </div>
-          )}
+            {sub && (
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  color: AC.mute,
+                  marginTop: 4,
+                  lineHeight: 1.5,
+                  maxWidth: 720,
+                }}
+              >
+                {sub}
+              </div>
+            )}
+          </div>
+          {children}
         </div>
-        {children}
-      </div>
+      </RequireCapability>
     </AdminShell>
   );
 }

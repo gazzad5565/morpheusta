@@ -15,7 +15,15 @@
 
 Top of the queue (in priority order):
 
-0a. **🟡 OPERATOR — set `RESEND_FROM` env var in Vercel so user-credential emails actually deliver.** This is **the first thing** Gary needs to do when he picks up tomorrow (May 28). Background: the EmailUserModal on /settings/managers/[id]/edit and /reps/[id] uses Resend's `onboarding@resend.dev` sandbox sender by default, which only allows sending to the Resend account holder's own email. Without changing this, every "Email this user" click on any other recipient fails with "You can only send testing emails to your own email address (gazzad@mac.com)." All the OTHER causes are ruled out:
+0a-new. **🟡 OPERATOR — apply the THREE pending May 28 migrations in Supabase SQL Editor.** Without them, B5's alphanumeric customer-code imports still fail at INSERT, B4's "Pinned by rep" chip never fires, and the manager roles `/settings/roles` page shows the seeded vocab but assigning a `manager_type` to anyone silently writes to a non-existent column. All three are idempotent and order-independent:
+   1. `db/migrations/2026_05_28_customer_code_text.sql`
+   2. `db/migrations/2026_05_28_customer_coords_source.sql`
+   3. `db/migrations/2026_05_28_profiles_manager_type.sql`
+   Smoke after applying — see the bottom of each `.sql` file. After this Gary can start assigning real manager types; recommended first move is to assign himself to "Owner" (or leave NULL — lenient default-allow keeps full access).
+
+0b-new. **Top three from the rep feedback PDFs that DIDN'T ship May 28** (in case anyone wants to keep moving down Mariska's list): G1 (audit-log UI), G2 (region/group on profile + filter chain), and G9 (schedule month-view drag-drop + bulk move). See the May 28 summary message in chat for the combined-prioritised list across all three reviewers.
+
+0a-old. **🟡 OPERATOR — set `RESEND_FROM` env var in Vercel so user-credential emails actually deliver.** Still outstanding from May 27 night. Background: the EmailUserModal on /settings/managers/[id]/edit and /reps/[id] uses Resend's `onboarding@resend.dev` sandbox sender by default, which only allows sending to the Resend account holder's own email. Without changing this, every "Email this user" click on any other recipient fails with "You can only send testing emails to your own email address (gazzad@mac.com)." All the OTHER causes are ruled out:
    - ✅ `@react-email/render` installed (commit `e179539`, May 27 late) — fixed the "Failed to render React component" crash.
    - ✅ send-credentials route has diagnostic prefixes + top-level try/catch (commit `e7757fa`).
    - ✅ Sending domain (`morpheusops.app`) is already verified in Gary's Resend dashboard.
