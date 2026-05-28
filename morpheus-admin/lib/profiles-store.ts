@@ -36,21 +36,63 @@ export interface Profile {
   manager_type?: string | null;
 }
 
-/** All profiles, optionally filtered by role. */
+// SELECT column lists for profile reads.
+//
+// FULL = every column the latest code knows about. Includes columns
+// added by post-Phase-4 migrations (last_credentials_sent_at,
+// rep_type, manager_type) which may not yet exist on a Supabase
+// project that hasn't run the corresponding `.sql` files yet.
+//
+// SAFE = the pre-May-25 column set. Guaranteed to exist on every
+// project that's at least at Phase 4. Used as a fallback when the
+// FULL select hits Postgres error 42703 ("column does not exist") —
+// keeps the admin functional even when a deploy has raced ahead of
+// a migration. May 28 (post-rep-vanish incident).
+const PROFILE_COLS_FULL =
+  "id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type, manager_type";
+const PROFILE_COLS_SAFE =
+  "id, email, name, role, avatar_url, created_at";
+
+/** Detect Postgres' "column does not exist" error so we can fall
+ *  back to a narrower SELECT. PostgREST surfaces the underlying
+ *  Postgres code in `error.code`; 42703 is `undefined_column`. */
+function isUndefinedColumnError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: unknown };
+  return e.code === "42703";
+}
+
+/** All profiles, optionally filtered by role. Falls back to the safe
+ *  column set when a post-Phase-4 migration hasn't been applied yet
+ *  — see PROFILE_COLS_FULL note above. */
 export async function listProfiles(opts?: { role?: string }): Promise<Profile[]> {
   if (!isSupabaseConfigured() || !supabase) return [];
-  let q = supabase
-    .from("profiles")
-    .select("id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type, manager_type")
-    .order("name", { ascending: true, nullsFirst: false });
-  if (opts?.role) q = q.eq("role", opts.role);
-  const { data, error } = await q;
+  const sb = supabase;
+
+  async function run(cols: string) {
+    let q = sb.from("profiles").select(cols).order("name", { ascending: true, nullsFirst: false });
+    if (opts?.role) q = q.eq("role", opts.role);
+    return q;
+  }
+
+  let { data, error } = await run(PROFILE_COLS_FULL);
+  if (error && isUndefinedColumnError(error)) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[profiles] listProfiles: FULL select failed (likely a pending migration). Falling back to the SAFE column set. Apply pending migrations from docs/OPS.md to restore optional columns.",
+      error.message
+    );
+    ({ data, error } = await run(PROFILE_COLS_SAFE));
+  }
   if (error) {
     // eslint-disable-next-line no-console
     console.warn("[profiles] list:", error.message);
     return [];
   }
-  return data as Profile[];
+  // supabase-js can't infer the row type from a runtime SELECT string;
+  // cast through unknown since both branches return a row shape we
+  // already type via the Profile interface.
+  return ((data as unknown) as Profile[]) || [];
 }
 
 /** Helper for displaying a profile's name in UI — falls back to email if name unset. */
@@ -67,17 +109,29 @@ export function displayName(p: Profile): string {
  */
 export async function getProfileById(id: string): Promise<Profile | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type, manager_type")
-    .eq("id", id)
-    .maybeSingle();
+  const sb = supabase;
+
+  async function run(cols: string) {
+    return sb.from("profiles").select(cols).eq("id", id).maybeSingle();
+  }
+
+  let { data, error } = await run(PROFILE_COLS_FULL);
+  if (error && isUndefinedColumnError(error)) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[profiles] getProfileById: FULL select failed (likely a pending migration). Falling back to the SAFE column set.",
+      error.message
+    );
+    ({ data, error } = await run(PROFILE_COLS_SAFE));
+  }
   if (error) {
     // eslint-disable-next-line no-console
     console.warn("[profiles] getById:", error.message);
     return null;
   }
-  return (data as Profile | null) ?? null;
+  // Cast via unknown — supabase-js can't infer the row type from a
+  // runtime SELECT string.
+  return ((data as unknown) as Profile | null) ?? null;
 }
 
 /**
