@@ -344,6 +344,31 @@ export default function CustomerDetailPage() {
                 </div>
               )}
 
+              {/* Customer's own phone line (Rayhaan R7) — the outlet's
+                  main number, tappable. Separate from the primary
+                  CONTACT's phone below (a named person). */}
+              {c.phone && (
+                <div style={{ marginTop: 8 }}>
+                  <a
+                    href={`tel:${c.phone.replace(/\s+/g, "")}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      fontFamily: AC.font,
+                      fontSize: 12.5,
+                      color: AC.brandInk,
+                      textDecoration: "none",
+                      fontWeight: 600,
+                    }}
+                    title="Call this customer"
+                  >
+                    <AGlyph name="phone" size={11} color={AC.brandDeep} />
+                    {c.phone}
+                  </a>
+                </div>
+              )}
+
               {/* Primary contact — R7's "surface primary contact + phone
                   in the hero". Pulled from the customer_contacts row the
                   manager starred (ContactsTab); falls back to nothing

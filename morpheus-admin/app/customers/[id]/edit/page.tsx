@@ -79,6 +79,8 @@ export default function EditCustomerPage() {
   const [initials, setInitials] = useState("");
   const [initialsTouched, setInitialsTouched] = useState(false);
   const [color, setColor] = useState(SWATCHES[0]);
+  // Customer/outlet main phone (Rayhaan R7). Free text.
+  const [phone, setPhone] = useState("");
   const [region, setRegion] = useState<Customer["region"]>("North");
   // Mariska G5a (May 28 later) — Customer region + Customer group
   // are tenant-managed vocabularies. Loaded from app_settings.regions
@@ -141,6 +143,7 @@ export default function EditCustomerPage() {
         setCode(c.code ?? "");
         setInitials(c.initials ?? deriveInitials(c.name ?? ""));
         setColor(c.color ?? SWATCHES[0]);
+        setPhone(c.phone ?? "");
         setRegion((c.region as Customer["region"]) ?? "North");
         setCustomerGroup(c.customerGroup ?? "");
         setStoreType(c.storeType ?? "");
@@ -257,6 +260,7 @@ export default function EditCustomerPage() {
       region,
       customer_group: customerGroup || null,
       store_type: storeType || null,
+      phone: phone.trim() || null,
       address: trimmed || null,
       latitude,
       longitude,
@@ -459,6 +463,20 @@ export default function EditCustomerPage() {
                 />
               </Field>
             </div>
+
+            {/* Customer phone — Rayhaan R7. The store's own line; shows
+                as a tappable number on the customer header. Distinct
+                from a contact person's phone (managed on the Contacts
+                tab). */}
+            <Field label="Phone" hint="The customer / outlet's main line. Optional.">
+              <input
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+27 21 555 0123"
+                inputMode="tel"
+                style={inputStyle}
+              />
+            </Field>
 
             <Field label="Avatar colour">
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

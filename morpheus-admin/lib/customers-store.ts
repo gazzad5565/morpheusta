@@ -57,6 +57,8 @@ interface DbRow {
    *  Vocabulary in app_settings.store_types. NULL = unassigned.
    *  Rayhaan R7, May 28. */
   store_type?: string | null;
+  /** Customer/outlet main phone (free text). Rayhaan R7, May 28. */
+  phone?: string | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -84,6 +86,7 @@ function rowToCustomer(row: DbRow): Customer {
     coordsSource: row.coords_source ?? null,
     customerGroup: row.customer_group ?? null,
     storeType: row.store_type ?? null,
+    phone: row.phone ?? null,
   };
 }
 
@@ -132,6 +135,8 @@ export interface NewCustomer {
   /** Tenant store classification. Vocabulary in
    *  app_settings.store_types. Optional at creation time. May 28. */
   store_type?: string;
+  /** Customer/outlet main phone. Optional at creation time. May 28. */
+  phone?: string;
   city?: string;
   address?: string;
   latitude?: number;
@@ -163,6 +168,7 @@ export async function createCustomer(
     region: c.region || null,
     customer_group: c.customer_group || null,
     store_type: c.store_type || null,
+    phone: c.phone || null,
     city: c.city || null,
     address: c.address || null,
     latitude: c.latitude ?? null,
@@ -220,6 +226,8 @@ export interface CustomerPatch {
   /** Tenant store classification. Empty string / null clears it.
    *  Vocabulary lives in app_settings.store_types. May 28. */
   store_type?: string | null;
+  /** Customer/outlet main phone. Empty string / null clears it. May 28. */
+  phone?: string | null;
 }
 
 /**

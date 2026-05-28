@@ -30,6 +30,10 @@ export interface Customer {
    *  "Spaza", "Pharmacy"). Vocabulary in app_settings.store_types.
    *  NULL = unassigned. Rayhaan R7, May 28. */
   storeType?: string | null;
+  /** Customer/outlet main phone (free text). Distinct from a
+   *  contact person's phone — this is the store's own line.
+   *  Tappable on the customer header. Rayhaan R7, May 28. */
+  phone?: string | null;
   sites: number;
   geofence: number;
   shiftsThisWeek: number;

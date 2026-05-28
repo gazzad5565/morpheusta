@@ -48,13 +48,25 @@ const DEFAULT_COLOUR = "#15B4D6";
 export const CUSTOMER_ADAPTER: ImportAdapter = {
   entity: "customer",
   requiredFields: ["code", "name"],
-  optionalFields: ["initials", "color", "region", "city", "address"],
+  optionalFields: [
+    "initials",
+    "color",
+    "region",
+    "customer_group",
+    "store_type",
+    "phone",
+    "city",
+    "address",
+  ],
   fieldLabels: {
     code: "Customer code (any text — e.g. 0012, SP-001, ACME-JHB)",
     name: "Customer name",
     initials: "Initials (2-3 chars — auto from name if blank)",
     color: "Brand colour (hex like #15B4D6 — defaults to cyan if blank)",
-    region: "Region",
+    region: "Customer region (free text — e.g. Gauteng)",
+    customer_group: "Customer group (free text — e.g. Premium, Spaza)",
+    store_type: "Store type (free text — e.g. Supermarket, Pharmacy)",
+    phone: "Phone (the outlet's main line)",
     city: "City",
     address: "Address (text — geocoded asynchronously)",
   },
@@ -95,6 +107,9 @@ export const CUSTOMER_ADAPTER: ImportAdapter = {
     if (!color.startsWith("#")) color = `#${color}`;
     const address = (row.address || "").trim() || null;
     const region = (row.region || "").trim() || null;
+    const customerGroup = (row.customer_group || "").trim() || null;
+    const storeType = (row.store_type || "").trim() || null;
+    const phone = (row.phone || "").trim() || null;
     const city = (row.city || "").trim() || null;
 
     // Dedup check — existing customer with this code?
@@ -109,7 +124,17 @@ export const CUSTOMER_ADAPTER: ImportAdapter = {
       if (mode === "skip") return "skipped";
       const { error: updErr } = await supabase
         .from("customers")
-        .update({ name, initials, color, region, city, address })
+        .update({
+          name,
+          initials,
+          color,
+          region,
+          customer_group: customerGroup,
+          store_type: storeType,
+          phone,
+          city,
+          address,
+        })
         .eq("id", (existing as { id: string }).id);
       if (updErr) throw new Error(updErr.message);
       return "updated";
@@ -124,6 +149,9 @@ export const CUSTOMER_ADAPTER: ImportAdapter = {
       initials,
       color,
       region,
+      customer_group: customerGroup,
+      store_type: storeType,
+      phone,
       city,
       address,
       latitude: null,
