@@ -15,9 +15,21 @@
 
 Top of the queue (in priority order):
 
-0a-new. ✅ **APPLIED May 28** — all three migrations ran in Supabase SQL Editor (Gary confirmed). `customers.code` is now opaque text (B5 alphanumeric imports work), `customers.coords_source` + `customer_sites.coords_source` exist (B4 "Pinned by rep" chip lights up on rep-pinned coords), `profiles.manager_type` exists (Roles & permissions assignments persist + the Add user modal's Manager type selector writes through). Recommended first move now that the column exists: assign yourself to "Owner" via `/settings/managers/[id]/edit` (or leave NULL — lenient default-allow keeps full access).
+0-NEXT. **🟢 SURFACE customer region + group + the rest of R7/G5 on the Customer Overview hero.** Gary's request at end-of-day May 28: "where do I see the group in the region in the customer page? It should be on the main page overview." Currently region + group only show on the EDIT page's Location tab — they need to land on the Overview tab next to name / address / status. Bundle with Rayhaan's R7 ask while we're touching the hero:
+   - **Already on Overview**: name, code, region (just the value, not labelled clearly), address, contacts
+   - **Needs surfacing** (this commit): Customer region · Customer group · store_type (future) · phone · primary contact pinned to top
+   - **Files to touch**: `morpheus-admin/components/customers/OverviewTab.tsx` (line 42-158 hero area). Likely add a small "Tags" row showing the region + group as pill chips, alongside or below the address.
+   - **Empty-state etiquette**: hide each chip when the value is NULL so an un-tagged customer doesn't show "Region: —" everywhere.
+   - **No DB changes needed** for region + group (already exist after the May 28 customer_group migration). store_type + customer phone + primary_contact_id are the larger pieces from R7 and can be a separate follow-up.
 
-0b-new. **Top three from the rep feedback PDFs that DIDN'T ship May 28** (in case anyone wants to keep moving down Mariska's list): G1 (audit-log UI), G2 (region/group on profile + filter chain), and G9 (schedule month-view drag-drop + bulk move). See the May 28 summary message in chat for the combined-prioritised list across all three reviewers.
+0a-new-may-28. ✅ **APPLIED May 28 morning** — all three early-May-28 migrations ran (customer_code_text, customer_coords_source, profiles_manager_type). Gary confirmed.
+
+0b-new-may-28-later. **🟡 OPERATOR — two more migrations queued from May 28 LATER** (need to run before the customer-side filters / Customer region picker / Customer group picker actually do anything):
+   - `db/migrations/2026_05_28_drop_wrong_profile_columns.sql` — drops the wrongly-added `profiles.region` + `profiles.group_name` (those were a misread; region + group are CUSTOMER attributes — see Gary's correction in the May 28 chat). Idempotent.
+   - `db/migrations/2026_05_28_customers_customer_group.sql` — adds `customers.customer_group` text NULL. The Customer group dropdown writes here. Without this migration the writes silently no-op the column.
+   Both safe to re-run.
+
+0c-feedback-leftovers. **Other top picks from the rep feedback PDFs that DIDN'T ship May 28** (when 0-NEXT is done): G1 (audit-log UI), G9 (schedule month-view drag-drop + bulk move), G10 (library audience reshape). See the May 28 summary message in chat for the combined-prioritised list across all three reviewers.
 
 0a-old. **🟡 OPERATOR — set `RESEND_FROM` env var in Vercel so user-credential emails actually deliver.** Still outstanding from May 27 night. Background: the EmailUserModal on /settings/managers/[id]/edit and /reps/[id] uses Resend's `onboarding@resend.dev` sandbox sender by default, which only allows sending to the Resend account holder's own email. Without changing this, every "Email this user" click on any other recipient fails with "You can only send testing emails to your own email address (gazzad@mac.com)." All the OTHER causes are ruled out:
    - ✅ `@react-email/render` installed (commit `e179539`, May 27 late) — fixed the "Failed to render React component" crash.

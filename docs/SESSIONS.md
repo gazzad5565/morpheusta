@@ -34,6 +34,86 @@
 
 ---
 
+### Today's session — what shipped (May 28, 2026, late)
+
+End-of-day wave on top of the morning's B5/B4/B6 + manager roles.
+Three main pieces: a misread + correction loop on Region/Group/
+Hire date (committed to profiles, reverted, re-committed to
+customers); a Settings rail consolidation pass (combined Check-in
+rules + Messaging into one tabbed entry, made Organisation a
+tabbed page); and a Library polish round (clickable rows go to
+detail page, "View file" with loading state, category-modal
+mismatch fixed).
+
+Key commits in order:
+  - `9845cb0` — Make rep GPS pin canonical (Mariska B4 finish):
+    geocode cron skips coords_source='rep_pinned' rows; mobile
+    sets geocode_status='done' on pin; admin updateCustomer /
+    updateSite preserve pinned coords on address-only edits.
+  - `b9a3164` — Rename Import buttons to "Bulk import {entity}".
+  - `56e635d` — Tasks drawer auto-closes on exit; Settings rail
+    reorder (Organisation first).
+  - `f3a8032` — "Last active" column on /reps + hero row
+    (Rayhaan R5).
+  - **Mistake & correction loop** — `499050a` / `b743041` /
+    `b25b9c4` shipped region/group on PROFILES based on a
+    misread of Mariska G2. Gary corrected same day: region +
+    group are CUSTOMER attributes; hire_date stays on profiles.
+    - `931c36f` — Full revert: dropped profiles.region +
+      profiles.group_name (new migration), reverted all UI
+      wiring (modal, edit, filters on /reps + /notify, roles
+      tabs). Kept hire_date everywhere.
+    - `d2b50d4` — Consolidate Settings rail: combined Check-in
+      rules + Messaging into one "Check-ins & messaging" entry
+      with a shared <RulesTabBar> at the top of both pages.
+      8 → 7 rail entries.
+    - `84bf1a9` — Sprint 2a CORRECT: customer_group migration
+      + Customer region (vocab-backed) + Customer group on
+      customer edit + filters on /customers list. Labels
+      explicitly "Customer region" / "Customer group" per Gary.
+    - `55a25d2` — Sprint 2b: /settings/organisation becomes
+      a tabbed page (Details · Customer regions · Customer
+      groups). StringListEditor reused for the two vocab tabs.
+  - `c139cdf` — Library polish + "Manage users" rename:
+    - Library category modal now seeded with the MERGED
+      (curated + in-use) list. Gary's bug: modal showed one
+      curated entry that wasn't visible in the sidebar; the
+      sidebar was unioning in-use file tags but the modal
+      wasn't.
+    - Library row click (Table + Grid) navigates to
+      /library/[id]/edit instead of opening the file blob.
+      Same convention as customers / reps / tasks.
+    - File detail page gains a primary "View file" button with
+      "Loading…" state during the Supabase signed-URL
+      round-trip (Gary's "let me know it's loading because
+      sometimes people don't know what is going on").
+    - Settings rail "Users" → "Manage users". Breadcrumb
+      compat in TopBar.
+  - `2fad126` — Diagnostic marker commit. Vercel was serving an
+    old deployment for hours after several merges to main.
+    Touching SettingsShell.tsx with a dated comment forced a
+    fresh build. Production rolled forward to
+    dpl_26oCc6a9LZSHfafXLha8K244rYLA shortly after — confirmed
+    via curl that the new bundle contains "Manage users",
+    "Check-ins & messaging", "Bulk import".
+
+Operator state at end of session:
+  - ✅ Sprint 2a/2b migrations PENDING — both idempotent,
+    listed at ROADMAP item 0b-new-may-28-later.
+  - 🟡 RESEND_FROM env var STILL outstanding (item 0a-old).
+  - 🟢 Region + Group dropdowns in admin work the moment the
+    tenant goes to Settings → Organisation → Customer regions /
+    Customer groups and adds the first entry. Until then the
+    filters self-hide (no dead UI).
+
+Open thread Gary parked for tomorrow:
+  - Surface Customer region + Customer group on the Customer
+    OVERVIEW tab (currently only visible on the edit page's
+    Location tab). Bundle with Rayhaan's R7 ask (phone, primary
+    contact, store_type pinned to hero). ROADMAP item 0-NEXT.
+
+---
+
 ### Today's session — what shipped (May 28, 2026)
 
 Two themes for the day: first, top-three bugs from yesterday's rep
