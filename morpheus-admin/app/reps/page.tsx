@@ -36,10 +36,14 @@ import { AC } from "@/lib/tokens";
 // Default column widths for /reps Table view. localStorage takes
 // over once the user resizes (key `morpheus.cols.reps.v1`). Grid
 // view doesn't use these — it has no column layout to resize.
-const REPS_COLUMNS = [260, 260, 110, 140, 130] as const;
+// May 28: Last active column appended (Rayhaan R5). Adding at the
+// end (vs inserting mid-list) keeps any saved widths in localStorage
+// pointing at the right column — the hook fills in the new index
+// from defaults rather than blowing up.
+const REPS_COLUMNS = [260, 260, 110, 140, 130, 150] as const;
 import { listProfiles, subscribeProfiles, displayName, type Profile } from "@/lib/profiles-store";
-import { listShifts } from "@/lib/shifts-store";
-import { initialsFromNameOrEmail, formatDate } from "@/lib/format";
+import { listShifts, getLastActivityByRep } from "@/lib/shifts-store";
+import { initialsFromNameOrEmail, formatDate, formatRelative } from "@/lib/format";
 import type { CSSProperties } from "react";
 
 interface RepWithStats extends Profile {
@@ -48,11 +52,18 @@ interface RepWithStats extends Profile {
   joinedLabel: string;
   joinedTs: number; // numeric timestamp for sorting
   shiftsToday: number;
+  /** Last activity = most-recent shift check-in (Rayhaan R5). Null
+   *  when the rep has never checked into a shift. Used for the new
+   *  "Last active" column + sort key. */
+  lastActiveAt: string | null;
+  /** Numeric mirror for sort comparisons. 0 = never (sorts last
+   *  when DESC, first when ASC — same convention as joinedTs). */
+  lastActiveTs: number;
 }
 
 type StatusFilter = "all" | "with-shifts" | "no-shifts";
 type ViewMode = "Grid" | "Table";
-type RepSortKey = "name" | "email" | "role" | "joined" | "shiftsToday";
+type RepSortKey = "name" | "email" | "role" | "joined" | "shiftsToday" | "lastActive";
 
 export default function RepsPage() {
   const [reps, setReps] = useState<RepWithStats[] | null>(null);
@@ -89,8 +100,15 @@ export default function RepsPage() {
     // this filter at the store level keeps managers off the page
     // entirely (no role chip, no filter, no row).
     const load = () =>
-      Promise.all([listProfiles({ role: "rep" }), listShifts()]).then(
-        ([profiles, shifts]) => {
+      Promise.all([
+        listProfiles({ role: "rep" }),
+        listShifts(),
+        // Rayhaan R5 (May 28): "Last active" derived from the most-
+        // recent shift check-in per rep. Fetched in parallel so the
+        // rep list paint stays fast.
+        getLastActivityByRep(),
+      ]).then(
+        ([profiles, shifts, lastActivity]) => {
         if (cancelled) return;
         const shiftsByRep = new Map<string, number>();
         for (const s of shifts) {
@@ -98,14 +116,19 @@ export default function RepsPage() {
             shiftsByRep.set(s.rep_id, (shiftsByRep.get(s.rep_id) || 0) + 1);
           }
         }
-        const enriched: RepWithStats[] = profiles.map((p) => ({
-          ...p,
-          displayName: displayName(p),
-          initials: initialsFromNameOrEmail(p.name, p.email),
-          joinedLabel: formatDate(p.created_at?.slice(0, 10) || ""),
-          joinedTs: p.created_at ? new Date(p.created_at).getTime() : 0,
-          shiftsToday: shiftsByRep.get(p.id) || 0,
-        }));
+        const enriched: RepWithStats[] = profiles.map((p) => {
+          const lastActiveAt = lastActivity.get(p.id) || null;
+          return {
+            ...p,
+            displayName: displayName(p),
+            initials: initialsFromNameOrEmail(p.name, p.email),
+            joinedLabel: formatDate(p.created_at?.slice(0, 10) || ""),
+            joinedTs: p.created_at ? new Date(p.created_at).getTime() : 0,
+            shiftsToday: shiftsByRep.get(p.id) || 0,
+            lastActiveAt,
+            lastActiveTs: lastActiveAt ? new Date(lastActiveAt).getTime() : 0,
+          };
+        });
         setReps(enriched);
       }
     );
@@ -164,6 +187,8 @@ export default function RepsPage() {
           return compareBy(a, b, (r) => r.joinedTs, sort.dir);
         case "shiftsToday":
           return compareBy(a, b, (r) => r.shiftsToday, sort.dir);
+        case "lastActive":
+          return compareBy(a, b, (r) => r.lastActiveTs, sort.dir);
       }
     });
     return sorted;
@@ -358,6 +383,49 @@ function Centered({ children }: { children: React.ReactNode }) {
     <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.mute, textAlign: "center" }}>
       {children}
     </div>
+  );
+}
+
+/**
+ * LastActiveCell — shows "3h ago" / "2 days ago" / "Never" for a
+ * rep's most recent shift check-in (Rayhaan R5).
+ *
+ * Defines "active" as the last time the rep CHECKED INTO a shift.
+ * That's the best proxy we have server-side — auth.users.last_sign_
+ * in_at isn't surfaced through our PostgREST layer, and task
+ * completion timestamps live within the same shift. Cell tooltip
+ * carries the absolute time for forensic checks.
+ */
+function LastActiveCell({ ts }: { ts: string | null }) {
+  if (!ts) {
+    return (
+      <span style={{ fontFamily: AC.font, fontSize: 12, color: AC.faint }}>
+        Never
+      </span>
+    );
+  }
+  const absolute = (() => {
+    try {
+      return new Date(ts).toLocaleString();
+    } catch {
+      return ts;
+    }
+  })();
+  return (
+    <span
+      title={`Last check-in: ${absolute}`}
+      style={{
+        fontFamily: AC.font,
+        fontSize: 12.5,
+        color: AC.ink2,
+        fontWeight: 500,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      }}
+    >
+      {formatRelative(ts, " ago")}
+    </span>
   );
 }
 
@@ -578,8 +646,14 @@ function TableView({
           </SortableHeader>
           <ColumnResizer index={3} cols={cols} />
         </div>
-        <SortableHeader k="shiftsToday" sort={sort} onChange={onSort}>
-          Shifts today
+        <div style={{ position: "relative" }}>
+          <SortableHeader k="shiftsToday" sort={sort} onChange={onSort}>
+            Shifts today
+          </SortableHeader>
+          <ColumnResizer index={4} cols={cols} />
+        </div>
+        <SortableHeader k="lastActive" sort={sort} onChange={onSort}>
+          Last active
         </SortableHeader>
       </div>
 
@@ -642,6 +716,7 @@ function TableView({
           <div>
             <ShiftsTodayPill count={r.shiftsToday} />
           </div>
+          <LastActiveCell ts={r.lastActiveAt} />
         </Link>
       ))}
     </Card>

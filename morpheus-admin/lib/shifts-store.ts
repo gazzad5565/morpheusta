@@ -169,6 +169,48 @@ export async function listPastShifts(opts: {
   return data as ShiftRow[];
 }
 
+/**
+ * Per-rep last-activity timestamps — Rayhaan R5.
+ *
+ * "Last active" is currently derived from shifts.check_in_at since
+ * that's the only timestamp-per-rep we capture server-side. Task
+ * completion uses the same shift's timeline; "app session" isn't
+ * reliably timestamped (no auth.users.last_sign_in_at exposure
+ * through the PostgREST layer in current schema).
+ *
+ * Returned as Map<rep_id, ISO timestamp> so the caller can do an
+ * O(1) lookup per row when rendering a list. Reps with no check-ins
+ * yet are simply absent from the map (caller renders "—" or
+ * "Never").
+ *
+ * Cheap to compute: one SELECT, group client-side. Swap to a
+ * proper aggregate (max(check_in_at) group by rep_id, server-side)
+ * if this list grows past ~5k shifts. May 28.
+ */
+export async function getLastActivityByRep(): Promise<Map<string, string>> {
+  if (!isSupabaseConfigured() || !supabase) return new Map();
+  const { data, error } = await supabase
+    .from("shifts")
+    .select("rep_id, check_in_at")
+    .not("check_in_at", "is", null)
+    .not("rep_id", "is", null)
+    .order("check_in_at", { ascending: false })
+    .limit(5000);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] getLastActivityByRep:", error.message);
+    return new Map();
+  }
+  const out = new Map<string, string>();
+  for (const row of (data || []) as { rep_id: string; check_in_at: string }[]) {
+    // We ordered DESC by check_in_at, so the FIRST entry per rep_id
+    // is the most-recent one. Skip subsequent entries for the same
+    // rep — they're older.
+    if (!out.has(row.rep_id)) out.set(row.rep_id, row.check_in_at);
+  }
+  return out;
+}
+
 export interface NewShift {
   customer_id: string;
   /**

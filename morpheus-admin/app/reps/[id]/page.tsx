@@ -18,7 +18,7 @@ import {
   setCustomersForRep,
 } from "@/lib/assignments-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
-import { initialsFromNameOrEmail, formatTimeRange } from "@/lib/format";
+import { initialsFromNameOrEmail, formatTimeRange, formatRelative } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 import { EmailUserModal } from "@/components/users/EmailUserModal";
 
@@ -252,6 +252,23 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
             >
               <DetailRow icon="mail" label="Email" value={profile.email} />
               <DetailRow icon="cal" label="Joined" value={formatJoined(profile.created_at)} />
+              {/* Rayhaan R5 (May 28): "Last active" = most recent
+                  shift check-in for this rep. Computed inline from
+                  the already-loaded shifts array (no extra fetch).
+                  Falls back to "Never" when the rep hasn't checked
+                  into any shift yet. */}
+              <DetailRow
+                icon="clock"
+                label="Last active"
+                value={(() => {
+                  const ts = shifts
+                    .map((s) => s.check_in_at)
+                    .filter((x): x is string => !!x)
+                    .sort()
+                    .pop();
+                  return ts ? formatRelative(ts, " ago") : "Never";
+                })()}
+              />
               <DetailRow
                 icon="info"
                 label="Role"
