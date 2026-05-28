@@ -29,6 +29,7 @@ import { useEffect, useState } from "react";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { SettingsShell } from "@/components/shell/SettingsShell";
+import { RulesTabBar } from "@/components/settings/RulesTabBar";
 import { AC } from "@/lib/tokens";
 import {
   getPushNotificationsEnabled,
@@ -94,9 +95,11 @@ export default function NotificationsSettingsPage() {
 
   return (
     <SettingsShell
-      section="notifications"
+      section="rules"
+      title="Check-ins & messaging"
       description="Org-wide on/off for every Web Push notification. Reps still subscribe / unsubscribe from /profile on the mobile app; this just controls whether the server actually delivers."
     >
+      <RulesTabBar active="messaging" />
       <Card padding={20} style={{ marginBottom: 14 }}>
         <ToggleRow
           title="Send push notifications"

@@ -74,12 +74,20 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     available: true,
   },
   {
-    id: "check-in-rules",
-    label: "Check-in rules",
+    // Combined check-in rules + messaging (May 28 later — Gary:
+    // "combine check-in rules and messaging it's kind of the same
+    // thing... each in a tab"). Both pages still live at their
+    // existing URLs (no redirects, no deep-link breakage) and
+    // share a top-of-page <RulesTabBar /> for in-page switching;
+    // the Settings rail just shows ONE entry now. Default landing
+    // is /settings/check-in-rules — the tab bar surfaces
+    // Messaging from there.
+    id: "rules",
+    label: "Check-ins & messaging",
     href: "/settings/check-in-rules",
     glyph: "clock",
     description:
-      "Thresholds that gate when the mobile app shows an exception card on check-in / check-out.",
+      "Check-in / out exception thresholds and org-wide messaging policies. Two tabs in one place.",
     available: true,
   },
   {
@@ -89,15 +97,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     glyph: "tasks",
     description:
       "Add your own fields to any entity (customers, reps, shifts, tasks, library files).",
-    available: true,
-  },
-  {
-    id: "notifications",
-    // Renamed from "Notifications" May 13 — see lib/mock-data.ts NAV_ITEMS.
-    label: "Messaging",
-    href: "/settings/notifications",
-    glyph: "send",
-    description: "Org-wide push notifications on/off. Auto-checkout is independent.",
     available: true,
   },
   {

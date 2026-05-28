@@ -15,6 +15,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { TimeCombobox } from "@/components/ui/TimeCombobox";
 import { SettingsShell } from "@/components/shell/SettingsShell";
+import { RulesTabBar } from "@/components/settings/RulesTabBar";
 import { AC } from "@/lib/tokens";
 import {
   getLateGraceMinutes,
@@ -202,9 +203,11 @@ export default function CheckInRulesPage() {
 
   return (
     <SettingsShell
-      section="check-in-rules"
+      section="rules"
+      title="Check-ins & messaging"
       description="Thresholds that gate when the mobile app shows an exception card on check-in / check-out. Below each threshold no exception UI appears and the rep can proceed straight away."
     >
+      <RulesTabBar active="check-ins" />
       {/* Exception toggles — quietest, biggest-blast-radius setting,
           so they sit at the very top. Each toggle is a per-org master
           switch; per-customer overrides on the customer's Address tab
