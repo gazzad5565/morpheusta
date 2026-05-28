@@ -344,23 +344,45 @@ export async function updateCustomer(
       cleanPatch.code = normalised;
     }
   }
-  // Phase E: if the manager changed the address, flip the row back to
-  // geocode_status='pending' so the every-minute cron re-resolves it.
-  // Without this a row that landed as 'failed' would stay failed
-  // forever even after the manager fixed the address.
+  // Read the current coords_source up front so we know whether the
+  // row was pinned by a rep — needed below to decide if an address-
+  // only edit should retrigger geocoding. Cheap (one row, one column).
+  let currentCoordsSource: string | null = null;
+  {
+    const { data: current } = await supabase
+      .from("customers")
+      .select("coords_source")
+      .eq("id", id)
+      .maybeSingle();
+    currentCoordsSource =
+      (current as { coords_source?: string | null } | null)?.coords_source ??
+      null;
+  }
+  const wasRepPinned = currentCoordsSource === "rep_pinned";
+
+  // Phase E + Mariska B4 "pin canonical" (May 28):
+  //   - Non-pinned row, manager edits address only → flip to pending
+  //     so the every-minute cron re-resolves it. Without this a
+  //     'failed' row would stay failed forever even after a fix.
+  //   - Rep-pinned row, manager edits address only → leave coords
+  //     alone. The rep's GPS pin is authoritative — the manager is
+  //     just labelling the pin with a proper street, not asking us
+  //     to relocate the customer. This is the core "pin canonical"
+  //     guarantee Mariska needs.
   if (
     patch.address !== undefined &&
     patch.latitude === undefined &&
-    patch.longitude === undefined
+    patch.longitude === undefined &&
+    !wasRepPinned
   ) {
     cleanPatch.geocode_status = "pending";
     cleanPatch.geocode_attempted_at = null;
   }
-  // Mariska B4 (May 28): any time the manager touches address or
-  // coords from admin, that's a curated value — flip coords_source
-  // to 'manual' so the "Pinned by rep — confirm address" chip
-  // clears. If the cron later re-resolves the address it'll
-  // overwrite this back to 'address_geocode' on the next tick.
+  // Any address / coords touch from admin = acknowledgement. Flip
+  // coords_source to 'manual' so the "Pinned by rep — confirm
+  // address" chip clears. The pin's coords themselves stay intact
+  // (we never overwrite latitude/longitude unless the manager
+  // explicitly supplied new values in the patch).
   if (
     patch.address !== undefined ||
     patch.latitude !== undefined ||

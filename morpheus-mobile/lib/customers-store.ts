@@ -425,7 +425,19 @@ export async function setCustomerSiteCoords(args: {
   // Mariska B4 (May 28): tag where these coords came from so the
   // admin UI can show a "Pinned by rep — confirm address" chip and
   // managers know the street text may not match the GPS pin.
-  if (source === "gps") siteUpdate.coords_source = "rep_pinned";
+  // Also flip geocode_status to 'done' so the every-minute
+  // background geocoder cron leaves these coords alone — pin
+  // canonical (May 28 follow-up). Even though the cron now
+  // explicitly skips coords_source='rep_pinned' rows (see
+  // morpheus-admin/app/api/cron/geocode-queue/route.ts), marking
+  // the row 'done' is belt-and-braces: a pending row that was
+  // queued *before* this write would still get processed if the
+  // cron read it just before our write committed.
+  if (source === "gps") {
+    siteUpdate.coords_source = "rep_pinned";
+    siteUpdate.geocode_status = "done";
+    siteUpdate.geocode_attempted_at = new Date().toISOString();
+  }
   // Pull the existing site row first so we only overwrite address /
   // name when they're empty — never stomp a manager's curated value.
   const { data: existing } = await supabase
@@ -468,8 +480,13 @@ export async function setCustomerSiteCoords(args: {
   //    so the customer-level "no address" tile fills in too.
   const customerUpdate: Record<string, unknown> = { latitude, longitude };
   if (!hasExistingAddress) customerUpdate.address = syntheticAddress;
-  // Same tag on the parent customer row when we touch its coords.
-  if (source === "gps") customerUpdate.coords_source = "rep_pinned";
+  // Same tag + 'done' geocode_status on the parent customer row
+  // when we touch its coords. Mirrors the site-row block above.
+  if (source === "gps") {
+    customerUpdate.coords_source = "rep_pinned";
+    customerUpdate.geocode_status = "done";
+    customerUpdate.geocode_attempted_at = new Date().toISOString();
+  }
   await supabase
     .from("customers")
     .update(customerUpdate)

@@ -161,25 +161,45 @@ export async function updateSite(
     return { ok: false, error: "Database not configured" };
   }
   // Read the row first so the audit log can include the human-friendly
-  // site name + customer id without an extra round-trip after the update.
+  // site name + customer id without an extra round-trip after the
+  // update. Pull coords_source too — needed below for the B4 "pin
+  // canonical" rule.
   const { data: before } = await supabase
     .from("customer_sites")
-    .select("name, customer_id")
+    .select("name, customer_id, coords_source")
     .eq("id", id)
     .maybeSingle();
-  // Phase E: if the manager changed address WITHOUT also supplying
-  // lat/lng, flip geocode_status back to 'pending' so the every-
-  // minute cron re-resolves the new address. Without this, a row
-  // that landed as 'failed' would stay failed forever even after
-  // the manager fixed the address.
+  const wasRepPinned =
+    (before as { coords_source?: string | null } | null)?.coords_source ===
+    "rep_pinned";
+
+  // Phase E + Mariska B4 "pin canonical" (May 28):
+  //   - Non-pinned site, manager edits address only → flip to
+  //     pending so the cron re-resolves the new address.
+  //   - Rep-pinned site, manager edits address only → leave coords
+  //     alone. The rep's GPS pin is authoritative; the manager is
+  //     just labelling it. Matches the parallel rule in
+  //     updateCustomer.
   const cleanPatch: Record<string, unknown> = { ...patch };
   if (
     patch.address !== undefined &&
     patch.latitude === undefined &&
-    patch.longitude === undefined
+    patch.longitude === undefined &&
+    !wasRepPinned
   ) {
     cleanPatch.geocode_status = "pending";
     cleanPatch.geocode_attempted_at = null;
+  }
+  // Any address / coords touch from admin = acknowledgement → clear
+  // the "Pinned by rep — confirm address" chip by flipping
+  // coords_source to 'manual'. The actual lat/lng stays unless the
+  // manager explicitly supplied new values.
+  if (
+    patch.address !== undefined ||
+    patch.latitude !== undefined ||
+    patch.longitude !== undefined
+  ) {
+    cleanPatch.coords_source = "manual";
   }
   const { error } = await supabase
     .from("customer_sites")

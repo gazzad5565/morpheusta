@@ -76,6 +76,30 @@ export async function GET(req: NextRequest) {
   // table starves the other if both have backlogs. 25 each.
   const half = Math.ceil(BATCH_LIMIT / 2);
 
+  // Mariska B4 — "pin canonical" (May 28).
+  //
+  // The cron MUST NOT overwrite a rep's GPS pin with whatever
+  // Nominatim returns for the street-address text. The original
+  // bug: a rep pins "Acme Apparel" from /active → coords saved
+  // with coords_source='rep_pinned'. Later, something (a manager
+  // address edit, an import re-trigger) flips geocode_status to
+  // 'pending'. The cron picks it up, geocodes the address
+  // "Pinned location · rep GPS" → Nominatim returns gibberish →
+  // the rep's correct coords get blown away.
+  //
+  // Fix: rep-pinned rows are NEVER picked up by the cron. Their
+  // GPS coords are authoritative until a manager explicitly
+  // overrides them via the admin edit form.
+  //
+  // The `.or("coords_source.is.null,coords_source.neq.rep_pinned")`
+  // pattern includes legacy NULL rows AND rows where the source is
+  // anything other than 'rep_pinned'. Postgres' three-valued logic
+  // means a plain `.neq("coords_source", "rep_pinned")` would
+  // silently EXCLUDE NULL rows too — that would break the queue
+  // for any pre-migration data, so the explicit OR is required.
+  const REP_PIN_EXCLUDE_FILTER =
+    "coords_source.is.null,coords_source.neq.rep_pinned";
+
   const [{ data: custRows, error: custErr }, { data: siteRows, error: siteErr }] =
     await Promise.all([
       sb
@@ -83,6 +107,7 @@ export async function GET(req: NextRequest) {
         .select("id, address")
         .eq("geocode_status", "pending")
         .not("address", "is", null)
+        .or(REP_PIN_EXCLUDE_FILTER)
         .order("geocode_attempted_at", { ascending: true, nullsFirst: true })
         .limit(half),
       sb
@@ -90,6 +115,7 @@ export async function GET(req: NextRequest) {
         .select("id, address")
         .eq("geocode_status", "pending")
         .not("address", "is", null)
+        .or(REP_PIN_EXCLUDE_FILTER)
         .order("geocode_attempted_at", { ascending: true, nullsFirst: true })
         .limit(half),
     ]);
