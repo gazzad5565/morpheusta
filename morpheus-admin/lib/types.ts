@@ -26,6 +26,10 @@ export interface Customer {
    *  attributes, not user attributes — the column on profiles was
    *  reverted same day). */
   customerGroup?: string | null;
+  /** Tenant-defined store classification (e.g. "Supermarket",
+   *  "Spaza", "Pharmacy"). Vocabulary in app_settings.store_types.
+   *  NULL = unassigned. Rayhaan R7, May 28. */
+  storeType?: string | null;
   sites: number;
   geofence: number;
   shiftsThisWeek: number;

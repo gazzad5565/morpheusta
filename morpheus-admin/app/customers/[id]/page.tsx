@@ -56,6 +56,10 @@ import {
 import { listShiftsInRange, type ShiftRow } from "@/lib/shifts-store";
 import { isoDaysAgo, todayLocalISO } from "@/lib/format";
 import { listSitesForCustomer, type CustomerSite } from "@/lib/sites-store";
+import {
+  listCustomerContacts,
+  type CustomerContact,
+} from "@/lib/customer-contacts-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
 
@@ -98,6 +102,11 @@ export default function CustomerDetailPage() {
   // Sites feed the SitesTab. Owning the fetch here means re-opening
   // the tab after CRUD doesn't re-hit the API.
   const [sites, setSites] = useState<CustomerSite[] | null>(null);
+  // Primary contact for the header card (Rayhaan R7). The manager
+  // stars it on the Contacts tab; null when none is marked.
+  const [primaryContact, setPrimaryContact] = useState<CustomerContact | null>(
+    null
+  );
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -114,19 +123,31 @@ export default function CustomerDetailPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [customerRow, reps, repIds, taskRows, fileRows, shiftRows, siteRows] =
-        await Promise.all([
-          getCustomer(id),
-          listProfiles({ role: "rep" }),
-          listRepsForCustomer(id),
-          listTasksForCustomer(id),
-          listLibraryFilesForCustomer(id),
-          // Shifts: last 90 days back through one year forward — wide
-          // enough to cover Past + Today + Upcoming filters on the
-          // ShiftsTab without an unbounded scan.
-          listShiftsInRange(isoDaysAgo(90), isoDaysAgo(-365)),
-          listSitesForCustomer(id, { includeInactive: true }),
-        ]);
+      const [
+        customerRow,
+        reps,
+        repIds,
+        taskRows,
+        fileRows,
+        shiftRows,
+        siteRows,
+        contactRows,
+      ] = await Promise.all([
+        getCustomer(id),
+        listProfiles({ role: "rep" }),
+        listRepsForCustomer(id),
+        listTasksForCustomer(id),
+        listLibraryFilesForCustomer(id),
+        // Shifts: last 90 days back through one year forward — wide
+        // enough to cover Past + Today + Upcoming filters on the
+        // ShiftsTab without an unbounded scan.
+        listShiftsInRange(isoDaysAgo(90), isoDaysAgo(-365)),
+        listSitesForCustomer(id, { includeInactive: true }),
+        // Contacts fetched here (not just in the OverviewTab) so the
+        // header card can surface the primary contact on every tab.
+        // listCustomerContacts already floats is_primary to index 0.
+        listCustomerContacts(id),
+      ]);
       if (cancelled) return;
       setC(customerRow);
       setAllReps(reps);
@@ -135,6 +156,7 @@ export default function CustomerDetailPage() {
       setFiles(fileRows);
       setShifts(shiftRows.filter((s) => s.customer_id === id));
       setSites(siteRows);
+      setPrimaryContact(contactRows.find((ct) => ct.is_primary) ?? null);
       setLoading(false);
 
       // Mark this rep-added customer as "seen" by the current
@@ -299,8 +321,81 @@ export default function CustomerDetailPage() {
               <div
                 style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute, marginTop: 2 }}
               >
-                Account #{c.code} · {c.region || "—"}
+                Account #{c.code}
               </div>
+
+              {/* Classification chips — region / customer group / store
+                  type (Rayhaan R7, May 28). These are the "what kind of
+                  customer is this" facts; surfaced on the header card so
+                  they're visible on EVERY tab, not buried on the edit
+                  page. Each chip only renders when the value is set, so
+                  an un-tagged customer shows nothing here (no "—" noise).
+                  Set them via Edit → Location; vocabularies live at
+                  Settings → Organisation. */}
+              {(c.region || c.customerGroup || c.storeType) && (
+                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                  {c.region && <MetaChip glyph="pin" label="Region" value={c.region} />}
+                  {c.customerGroup && (
+                    <MetaChip glyph="customer" label="Group" value={c.customerGroup} />
+                  )}
+                  {c.storeType && (
+                    <MetaChip glyph="building" label="Store" value={c.storeType} />
+                  )}
+                </div>
+              )}
+
+              {/* Primary contact — R7's "surface primary contact + phone
+                  in the hero". Pulled from the customer_contacts row the
+                  manager starred (ContactsTab); falls back to nothing
+                  when none is marked. */}
+              {primaryContact && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 8,
+                    fontFamily: AC.font,
+                    fontSize: 12.5,
+                    color: AC.ink2,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      fontWeight: 600,
+                      color: AC.ink,
+                    }}
+                  >
+                    <span style={{ color: AC.brandDeep }}>★</span>
+                    {primaryContact.name}
+                  </span>
+                  {primaryContact.role_label && (
+                    <span style={{ color: AC.mute }}>· {primaryContact.role_label}</span>
+                  )}
+                  {primaryContact.phone && (
+                    <a
+                      href={`tel:${primaryContact.phone.replace(/\s+/g, "")}`}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        color: AC.brandInk,
+                        textDecoration: "none",
+                        fontWeight: 500,
+                      }}
+                      title={`Call ${primaryContact.name}`}
+                    >
+                      <AGlyph name="phone" size={11} color={AC.brandDeep} />
+                      {primaryContact.phone}
+                    </a>
+                  )}
+                </div>
+              )}
+
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                 <Pill
                   bg={isActive ? AC.okTint : AC.bg}
@@ -423,3 +518,53 @@ export default function CustomerDetailPage() {
   );
 }
 
+
+/**
+ * MetaChip — a small labelled classification chip for the customer
+ * header card (Region / Customer group / Store type). Rayhaan R7,
+ * May 28. The label is a faint uppercase prefix so a manager can
+ * tell which dimension the value belongs to at a glance.
+ */
+function MetaChip({
+  glyph,
+  label,
+  value,
+}: {
+  glyph: GlyphName;
+  label: string;
+  value: string;
+}) {
+  return (
+    <span
+      title={`${label}: ${value}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "3px 9px",
+        borderRadius: 99,
+        background: AC.bg,
+        border: `1px solid ${AC.line}`,
+        fontFamily: AC.font,
+        fontSize: 11.5,
+        color: AC.ink2,
+        fontWeight: 600,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <AGlyph name={glyph} size={11} color={AC.mute} />
+      <span
+        style={{
+          fontSize: 9.5,
+          fontWeight: 700,
+          letterSpacing: 0.4,
+          textTransform: "uppercase",
+          color: AC.mute,
+        }}
+      >
+        {label}
+      </span>
+      {value}
+    </span>
+  );
+}

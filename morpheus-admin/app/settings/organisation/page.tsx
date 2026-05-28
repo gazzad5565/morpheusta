@@ -30,6 +30,8 @@ import {
   setRegions,
   getGroups,
   setGroups,
+  getStoreTypes,
+  setStoreTypes,
 } from "@/lib/settings-store";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import { CustomerAddressMap } from "@/components/CustomerAddressMap";
@@ -61,19 +63,25 @@ export default function OrganisationSettingsPage() {
   // is local — not persisted to URL — since the typical flow is
   // "open the section, edit one thing, leave." Bookmarkable tabs
   // can come later if managers ask.
-  const [tab, setTab] = useState<"details" | "regions" | "groups">("details");
-  // Vocab state for the two new tabs. null = loading; the
+  const [tab, setTab] = useState<
+    "details" | "regions" | "groups" | "store-types"
+  >("details");
+  // Vocab state for the three vocab tabs. null = loading; the
   // StringListEditor needs a non-null array so we wait.
   const [regions, setRegionsState] = useState<string[] | null>(null);
   const [groups, setGroupsState] = useState<string[] | null>(null);
+  const [storeTypes, setStoreTypesState] = useState<string[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([getRegions(), getGroups()]).then(([r, g]) => {
-      if (cancelled) return;
-      setRegionsState(r);
-      setGroupsState(g);
-    });
+    void Promise.all([getRegions(), getGroups(), getStoreTypes()]).then(
+      ([r, g, s]) => {
+        if (cancelled) return;
+        setRegionsState(r);
+        setGroupsState(g);
+        setStoreTypesState(s);
+      }
+    );
     return () => {
       cancelled = true;
     };
@@ -296,6 +304,7 @@ export default function OrganisationSettingsPage() {
           { id: "details" as const, label: "Details" },
           { id: "regions" as const, label: "Customer regions" },
           { id: "groups" as const, label: "Customer groups" },
+          { id: "store-types" as const, label: "Store types" },
         ].map((t) => {
           const isActive = tab === t.id;
           return (
@@ -359,6 +368,25 @@ export default function OrganisationSettingsPage() {
               addPlaceholder="e.g. Premium, Spaza, Wholesale…"
               onSave={setGroups}
               onSaved={(next) => setGroupsState(next)}
+            />
+          )}
+        </div>
+      )}
+
+      {tab === "store-types" && (
+        <div style={{ maxWidth: 760 }}>
+          {storeTypes === null ? (
+            <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
+              Loading store types…
+            </div>
+          ) : (
+            <StringListEditor
+              current={storeTypes}
+              noun="store type"
+              hint="How you classify a customer's outlet (e.g. 'Supermarket', 'Spaza', 'Pharmacy', 'Wholesale'). Shows on the customer header + drives the Store type filter on /customers."
+              addPlaceholder="e.g. Supermarket, Spaza, Pharmacy…"
+              onSave={setStoreTypes}
+              onSaved={(next) => setStoreTypesState(next)}
             />
           )}
         </div>

@@ -28,6 +28,10 @@ export interface CustomerContact {
   notes: string | null;
   sort_order: number;
   active: boolean;
+  /** Exactly one contact per customer should be the primary — the
+   *  headline contact surfaced on the customer Overview hero.
+   *  Rayhaan R7, May 28. setPrimaryContact() keeps it singular. */
+  is_primary: boolean;
 }
 
 interface DbRow {
@@ -41,6 +45,7 @@ interface DbRow {
   notes: string | null;
   sort_order: number;
   active: boolean;
+  is_primary?: boolean | null;
 }
 
 function rowToContact(r: DbRow): CustomerContact {
@@ -55,6 +60,7 @@ function rowToContact(r: DbRow): CustomerContact {
     notes: r.notes,
     sort_order: r.sort_order,
     active: r.active,
+    is_primary: r.is_primary ?? false,
   };
 }
 
@@ -76,7 +82,15 @@ export async function listCustomerContacts(
     console.warn("[customer-contacts] list error:", error.message);
     return [];
   }
-  return (data as DbRow[]).map(rowToContact);
+  // Float the primary contact to the top CLIENT-SIDE rather than via
+  // an .order("is_primary") clause — the column is added by the May 28
+  // R7 migration and ordering by a not-yet-existing column would error
+  // the whole query (the "rep vanish" failure mode). SELECT * simply
+  // omits the column pre-migration and rowToContact maps it to false,
+  // so this is a no-op until the migration runs, then sorts correctly.
+  const rows = (data as DbRow[]).map(rowToContact);
+  rows.sort((a, b) => Number(b.is_primary) - Number(a.is_primary));
+  return rows;
 }
 
 export interface NewContact {
@@ -177,6 +191,51 @@ export async function updateContact(
       message: "Updated a contact",
     });
   }
+  notifySaved("customer");
+  return { ok: true };
+}
+
+/**
+ * Mark one contact as the customer's primary (the headline contact
+ * on the Overview hero). Clears is_primary on every OTHER contact for
+ * the same customer first, then sets it on the target — so exactly
+ * one is ever primary. Pass the same id that's already primary to
+ * toggle it OFF (clears all). Rayhaan R7, May 28.
+ */
+export async function setPrimaryContact(
+  customerId: string,
+  contactId: string | null
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { ok: false, error: "Database not configured" };
+  }
+  // Clear all primaries for this customer first. Scoping by
+  // customer_id keeps the write cheap + RLS-safe.
+  const { error: clearErr } = await supabase
+    .from("customer_contacts")
+    .update({ is_primary: false })
+    .eq("customer_id", customerId)
+    .eq("is_primary", true);
+  if (clearErr) {
+    notifySaveError(clearErr.message, "customer");
+    return { ok: false, error: clearErr.message };
+  }
+  // Null contactId = "no primary" (toggle-off) — we're done.
+  if (contactId) {
+    const { error: setErr } = await supabase
+      .from("customer_contacts")
+      .update({ is_primary: true })
+      .eq("id", contactId);
+    if (setErr) {
+      notifySaveError(setErr.message, "customer");
+      return { ok: false, error: setErr.message };
+    }
+  }
+  await logEvent({
+    event_type: "customer.updated",
+    customer_id: customerId,
+    message: contactId ? "Set a primary contact" : "Cleared the primary contact",
+  });
   notifySaved("customer");
   return { ok: true };
 }

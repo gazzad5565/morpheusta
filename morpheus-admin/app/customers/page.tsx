@@ -39,7 +39,7 @@ import { CustomerSwatch } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { FilterChip } from "@/components/ui/Filters";
 import { AGlyph } from "@/components/ui/AGlyph";
-import { getRegions, getGroups } from "@/lib/settings-store";
+import { getRegions, getGroups, getStoreTypes } from "@/lib/settings-store";
 import {
   SortableHeader,
   compareBy,
@@ -157,8 +157,11 @@ export default function CustomersPage() {
   // filters. Empty = "all". Vocabularies load from app_settings.
   const [regionFilter, setRegionFilter] = useState<string>("");
   const [groupFilter, setGroupFilter] = useState<string>("");
+  // Store type filter — Rayhaan R7, May 28. Mirrors region/group.
+  const [storeTypeFilter, setStoreTypeFilter] = useState<string>("");
   const [regionVocab, setRegionVocab] = useState<string[]>([]);
   const [groupVocab, setGroupVocab] = useState<string[]>([]);
+  const [storeTypeVocab, setStoreTypeVocab] = useState<string[]>([]);
   const [sort, setSort] = useState<SortState<CustomerSortKey>>({
     // safe-key gate so "status" left in localStorage from before May 27
     // doesn't break sort.
@@ -174,7 +177,15 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setPage(0);
-  }, [statusFilter, withAddressOnly, search, sort, regionFilter, groupFilter]);
+  }, [
+    statusFilter,
+    withAddressOnly,
+    search,
+    sort,
+    regionFilter,
+    groupFilter,
+    storeTypeFilter,
+  ]);
 
   // Persist any of the above on change. Write is debounced behind
   // React's batching — every update lands on a single tick.
@@ -224,11 +235,14 @@ export default function CustomersPage() {
       // Vocab fetch — drives the Customer region + Customer group
       // filter dropdowns. Empty arrays = vocab not populated yet;
       // the dropdowns hide themselves in that case.
-      void Promise.all([getRegions(), getGroups()]).then(([r, g]) => {
-        if (cancelled) return;
-        setRegionVocab(r);
-        setGroupVocab(g);
-      });
+      void Promise.all([getRegions(), getGroups(), getStoreTypes()]).then(
+        ([r, g, s]) => {
+          if (cancelled) return;
+          setRegionVocab(r);
+          setGroupVocab(g);
+          setStoreTypeVocab(s);
+        }
+      );
       // Shifts in the window — completed shifts inform "Last visit",
       // future scheduled shifts inform "Next visit". 180d back is
       // far enough to surface long-gap customers; 90d forward
@@ -318,6 +332,12 @@ export default function CustomersPage() {
           (c.customerGroup || "").toLowerCase() === groupFilter.toLowerCase()
       );
     }
+    if (storeTypeFilter) {
+      out = out.filter(
+        (c) =>
+          (c.storeType || "").toLowerCase() === storeTypeFilter.toLowerCase()
+      );
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       out = out.filter(
@@ -367,7 +387,7 @@ export default function CustomersPage() {
     });
     return sorted;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customers, statusFilter, withAddressOnly, search, sort, visitsByCustomer, regionFilter, groupFilter]);
+  }, [customers, statusFilter, withAddressOnly, search, sort, visitsByCustomer, regionFilter, groupFilter, storeTypeFilter]);
 
   return (
     <AdminShell
@@ -453,6 +473,21 @@ export default function CustomersPage() {
                 {groupVocab.map((g) => (
                   <option key={g} value={g}>
                     {g}
+                  </option>
+                ))}
+              </select>
+            )}
+            {storeTypeVocab.length > 0 && (
+              <select
+                value={storeTypeFilter}
+                onChange={(e) => setStoreTypeFilter(e.target.value)}
+                title="Filter by store type"
+                style={customerFilterSelectStyle(storeTypeFilter)}
+              >
+                <option value="">All store types</option>
+                {storeTypeVocab.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
                   </option>
                 ))}
               </select>

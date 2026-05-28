@@ -327,6 +327,21 @@ function ContactRow({
           }}
         >
           {contact.name}
+          {contact.is_primary && (
+            <span
+              style={{
+                marginLeft: 6,
+                fontFamily: AC.font,
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                color: AC.brandDeep,
+              }}
+              title="Primary contact"
+            >
+              ★ PRIMARY
+            </span>
+          )}
         </div>
         {contact.role_label && (
           <div

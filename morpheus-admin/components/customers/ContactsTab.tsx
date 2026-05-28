@@ -15,6 +15,7 @@ import {
   createContact,
   updateContact,
   removeContact,
+  setPrimaryContact,
   type CustomerContact,
   type ContactPatch,
 } from "@/lib/customer-contacts-store";
@@ -24,7 +25,9 @@ import { iconBtn } from "./tabStyles";
 //   Name (+ optional role pill + notes one-liner) | Phone | Email | actions
 // Slight extra weight on Name so a long display name + role pill don't
 // crowd the phone column.
-const CONTACT_COLS = "1.6fr 1.2fr 1.4fr 60px";
+// Last column widened from 60px → 96px May 28 to fit the new
+// "set primary" star alongside edit + delete (Rayhaan R7).
+const CONTACT_COLS = "1.6fr 1.2fr 1.4fr 96px";
 
 /**
  * Customer contacts — inline CRUD. "Add contact" opens an inline form
@@ -96,6 +99,22 @@ export function ContactsTab({ customerId }: { customerId: string }) {
       return;
     }
     setEditingId(null);
+    await reload();
+  }
+
+  // Toggle the primary (headline) contact. Clicking the star on the
+  // current primary clears it; clicking another sets it (the store
+  // helper clears the previous one). The Overview hero reads this.
+  // Rayhaan R7, May 28.
+  async function onTogglePrimary(c: CustomerContact) {
+    setBusyId(c.id);
+    const r = await setPrimaryContact(customerId, c.is_primary ? null : c.id);
+    setBusyId(null);
+    if (!r.ok) {
+      console.warn("[contacts] set-primary failed:", r.error);
+      alert("Couldn't update the primary contact — please retry.");
+      return;
+    }
     await reload();
   }
 
@@ -238,6 +257,11 @@ export function ContactsTab({ customerId }: { customerId: string }) {
                       >
                         {c.name}
                       </span>
+                      {c.is_primary && (
+                        <Pill bg={AC.brandSoft} fg={AC.brandInk}>
+                          ★ Primary
+                        </Pill>
+                      )}
                       {c.role_label && <Pill variant="outline">{c.role_label}</Pill>}
                       {expandable && <ExpandChevron expanded={expanded} />}
                     </div>
@@ -300,6 +324,38 @@ export function ContactsTab({ customerId }: { customerId: string }) {
                     )}
                   </div>
                   <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTogglePrimary(c);
+                      }}
+                      disabled={busyId === c.id}
+                      title={
+                        c.is_primary
+                          ? "Remove as primary contact"
+                          : "Set as primary contact (shows on the customer hero)"
+                      }
+                      style={{
+                        ...iconBtn,
+                        color: c.is_primary ? AC.brandDeep : AC.mute,
+                        cursor: busyId === c.id ? "not-allowed" : "pointer",
+                        opacity: busyId === c.id ? 0.4 : 1,
+                      }}
+                    >
+                      {/* Filled-feel star when primary, outline pin otherwise.
+                          No dedicated star glyph in the registry, so use
+                          a literal ★ / ☆ for clarity. */}
+                      <span
+                        style={{
+                          fontSize: 15,
+                          lineHeight: 1,
+                          color: c.is_primary ? AC.brandDeep : AC.hint,
+                        }}
+                      >
+                        {c.is_primary ? "★" : "☆"}
+                      </span>
+                    </button>
                     <button
                       type="button"
                       onClick={(e) => {

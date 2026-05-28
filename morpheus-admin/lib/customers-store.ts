@@ -53,6 +53,10 @@ interface DbRow {
    *  Mariska G5a, after Gary's correction that region + group are
    *  customer attributes, not user attributes. */
   customer_group?: string | null;
+  /** Tenant store classification (Supermarket / Spaza / Pharmacy …).
+   *  Vocabulary in app_settings.store_types. NULL = unassigned.
+   *  Rayhaan R7, May 28. */
+  store_type?: string | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -79,6 +83,7 @@ function rowToCustomer(row: DbRow): Customer {
     geocodeStatus: row.geocode_status ?? null,
     coordsSource: row.coords_source ?? null,
     customerGroup: row.customer_group ?? null,
+    storeType: row.store_type ?? null,
   };
 }
 
@@ -124,6 +129,9 @@ export interface NewCustomer {
   /** Tenant customer-cohort tag (e.g. "Premium"). Vocabulary in
    *  app_settings.groups. Optional at creation time. May 28. */
   customer_group?: string;
+  /** Tenant store classification. Vocabulary in
+   *  app_settings.store_types. Optional at creation time. May 28. */
+  store_type?: string;
   city?: string;
   address?: string;
   latitude?: number;
@@ -154,6 +162,7 @@ export async function createCustomer(
     code: c.code,
     region: c.region || null,
     customer_group: c.customer_group || null,
+    store_type: c.store_type || null,
     city: c.city || null,
     address: c.address || null,
     latitude: c.latitude ?? null,
@@ -208,6 +217,9 @@ export interface CustomerPatch {
   /** Tenant customer-cohort tag. Empty string / null clears it.
    *  Vocabulary lives in app_settings.groups. May 28. */
   customer_group?: string | null;
+  /** Tenant store classification. Empty string / null clears it.
+   *  Vocabulary lives in app_settings.store_types. May 28. */
+  store_type?: string | null;
 }
 
 /**

@@ -933,3 +933,20 @@ export async function setGroups(
   const clean = parseStringList(list);
   return writeSetting("groups", clean, "groups");
 }
+
+// Store types — third customer vocabulary (Rayhaan R7, May 28).
+// Same plain-string-tag shape as regions + groups: a manager-
+// editable list of customer classifications (Supermarket, Spaza,
+// Pharmacy, Wholesale, …). Stored at app_settings.store_types;
+// written onto customers.store_type as plain text.
+export async function getStoreTypes(): Promise<string[]> {
+  const v = await readSetting<unknown>("store_types", null);
+  return parseStringList(v);
+}
+
+export async function setStoreTypes(
+  list: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  const clean = parseStringList(list);
+  return writeSetting("store_types", clean, "store types");
+}

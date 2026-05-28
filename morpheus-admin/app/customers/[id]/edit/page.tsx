@@ -18,7 +18,7 @@ import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import { CustomerAddressMap } from "@/components/CustomerAddressMap";
 import { Combobox } from "@/components/ui/Combobox";
 import { inputStyle } from "@/components/ui/Filters";
-import { getRegions, getGroups } from "@/lib/settings-store";
+import { getRegions, getGroups, getStoreTypes } from "@/lib/settings-store";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { Pill } from "@/components/ui/Pill";
 import { AC } from "@/lib/tokens";
@@ -86,8 +86,11 @@ export default function EditCustomerPage() {
   // back to LEGACY_REGIONS for Region and shows the current value +
   // an "Unassigned" option for Group.
   const [customerGroup, setCustomerGroup] = useState<string>("");
+  // Store type — third customer vocabulary (Rayhaan R7, May 28).
+  const [storeType, setStoreType] = useState<string>("");
   const [regionVocab, setRegionVocab] = useState<string[]>([]);
   const [groupVocab, setGroupVocab] = useState<string[]>([]);
+  const [storeTypeVocab, setStoreTypeVocab] = useState<string[]>([]);
   const [address, setAddress] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -122,14 +125,16 @@ export default function EditCustomerPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [c, regs, grps] = await Promise.all([
+      const [c, regs, grps, stypes] = await Promise.all([
         getCustomer(id),
         getRegions(),
         getGroups(),
+        getStoreTypes(),
       ]);
       if (cancelled) return;
       setRegionVocab(regs);
       setGroupVocab(grps);
+      setStoreTypeVocab(stypes);
       setOriginal(c);
       if (c) {
         setName(c.name ?? "");
@@ -138,6 +143,7 @@ export default function EditCustomerPage() {
         setColor(c.color ?? SWATCHES[0]);
         setRegion((c.region as Customer["region"]) ?? "North");
         setCustomerGroup(c.customerGroup ?? "");
+        setStoreType(c.storeType ?? "");
         setAddress(c.address ?? "");
         if (c.latitude != null && c.longitude != null) {
           setCoords({ lat: c.latitude, lng: c.longitude });
@@ -250,6 +256,7 @@ export default function EditCustomerPage() {
       color,
       region,
       customer_group: customerGroup || null,
+      store_type: storeType || null,
       address: trimmed || null,
       latitude,
       longitude,
@@ -636,6 +643,29 @@ export default function EditCustomerPage() {
                       }));
                     }
                     return groupVocab.map((g) => ({ value: g, label: g }));
+                  })()}
+                />
+              </Field>
+            )}
+
+            {/* Store type — Rayhaan R7. Same vocab-or-current-value
+                gating as Customer group. */}
+            {(storeTypeVocab.length > 0 || storeType) && (
+              <Field label="Store type">
+                <Combobox
+                  value={storeType || null}
+                  onChange={(v) => setStoreType(v ?? "")}
+                  triggerIcon="building"
+                  clearable
+                  options={(() => {
+                    const set = new Set(storeTypeVocab);
+                    if (storeType && !set.has(storeType)) {
+                      return [storeType, ...storeTypeVocab].map((s) => ({
+                        value: s,
+                        label: s,
+                      }));
+                    }
+                    return storeTypeVocab.map((s) => ({ value: s, label: s }));
                   })()}
                 />
               </Field>
