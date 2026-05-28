@@ -34,6 +34,55 @@
 
 ---
 
+### Today's session — what shipped (May 28, 2026, evening rapid-fire)
+
+Gary fired off ~8 feedback items in quick succession. All shipped
+in 4 commits. Cross-platform: all admin-only; mobile untouched.
+
+1. **R7 customer hero** (`cf7d400`, earlier) — region / group /
+   store-type chips + primary contact on the customer header card;
+   store_type vocab; customer_contacts.is_primary. (Its own
+   migration — see ROADMAP.)
+2. **Rail renames** (`cd94b46`) — "Check-ins & messaging" →
+   "Check-in & messaging rules"; "Bulk import" → "Bulk imports".
+3. **`FilterSelect`** (`cd94b46`) — new pill-styled filter dropdown
+   in Filters.tsx matching the FilterChip family (Gary: the
+   region/group/store selects "don't look like the buttons I
+   like"). Swapped in on /customers + /reps. /notify's optgroup
+   select left as-is. DESIGN §6 documents it as canonical.
+4. **/customers cleanups** (`cd94b46`) — removed the "Inactive"
+   filter chip (stale persisted value coerces to "all") + removed
+   the inactive opacity-dimming on map markers ("no value").
+5. **Column-resize affordance** (`cd94b46`) — ColumnResizer now
+   shows a faint 2-bar grip at rest (was invisible-until-hover),
+   brightening on hover/drag. DESIGN updated.
+6. **Customer email-at-a-glance** (`cd94b46`) — header primary-
+   contact line gained a clickable mailto: alongside the phone.
+7. **Rep detail assigned-customers** (`2b198fd`) — defaults to the
+   ASSIGNED view (was: full 200-customer roster), Assigned/All
+   FilterChip toggle, a search box, empty states. "All customers"
+   is the assign-more mode.
+8. **Site settings hub** (`009df4a`) — the tabbed Organisation
+   page became "Site settings": Details · Customer regions ·
+   Customer groups · Store types · Custom fields. Custom-fields
+   list extracted into components/settings/CustomFieldsManager.tsx
+   + folded in as a tab; standalone "Custom fields" rail entry
+   removed; /settings/custom-fields → redirect to
+   ?tab=custom-fields. Rail 7 → 6 entries.
+   - **IA DECISION (note for next session):** I made "Site
+     settings" a RENAME of Organisation (org details = first tab)
+     rather than a brand-new entry alongside Organisation. Lowest
+     churn + reuses the tabbed page. If Gary wanted Organisation
+     kept as its own top-level entry, splitting them is a small
+     follow-up (move the 3 vocab tabs + custom-fields tab into a
+     new /settings/site page, revert Organisation to Details-only).
+
+Operator note unchanged: RESEND_FROM env var still outstanding;
+R7 migration (2026_05_28_customer_store_type_and_primary_contact)
+still needs running for store_type + is_primary to persist.
+
+---
+
 ### Today's session — what shipped (May 28, 2026, late)
 
 End-of-day wave on top of the morning's B5/B4/B6 + manager roles.
