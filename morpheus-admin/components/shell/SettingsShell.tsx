@@ -51,6 +51,15 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     available: true,
   },
   {
+    id: "roles",
+    label: "Roles & permissions",
+    href: "/settings/roles",
+    glyph: "lock",
+    description:
+      "Manager + rep types — categorise users and gate what each type can do. Only managers with full Settings access can edit.",
+    available: true,
+  },
+  {
     id: "check-in-rules",
     label: "Check-in rules",
     href: "/settings/check-in-rules",

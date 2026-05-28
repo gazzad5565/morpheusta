@@ -33,7 +33,6 @@ import {
 import { createUser, deleteUser, randomPassword } from "@/lib/users-admin";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
-import { ManageRepTypesSheet } from "@/components/users/ManageRepTypesSheet";
 
 const deriveInitials = (p: Profile) => initialsFromNameOrEmail(p.name, p.email);
 
@@ -65,13 +64,13 @@ export default function ManagersPage() {
 
   // Add-user modal
   const [addOpen, setAddOpen] = useState(false);
-  // Live rep-types vocabulary — read for the type-filter dropdown +
-  // the "Manage rep types" modal. The modal sits on this page (not
-  // in a separate Settings rail entry) because rep types are
-  // intrinsically a property of users — managing them while
-  // looking at users is the natural place. See DESIGN.md sec 8.
+  // Live rep-types vocabulary — read for the type-filter dropdown
+  // only. The CRUD editor moved to /settings/roles on May 28 (so
+  // manager + rep types live in one place). The state is still
+  // loaded here so the existing filter dropdown can show the
+  // current vocabulary; if the vocab is edited on /settings/roles
+  // the next time this page mounts it'll re-read fresh.
   const [repTypes, setRepTypesState] = useState<RepTypeConfig[]>([]);
-  const [repTypesOpen, setRepTypesOpen] = useState(false);
 
   useEffect(() => {
     getRepTypes().then(setRepTypesState);
@@ -163,9 +162,15 @@ export default function ManagersPage() {
       section="managers"
       actions={
         <div style={{ display: "flex", gap: 8 }}>
-          <Btn size="sm" icon="tasks" onClick={() => setRepTypesOpen(true)}>
-            Manage rep types
-          </Btn>
+          {/* Rep-types CRUD moved to /settings/roles (May 28) so
+              manager + rep vocabularies live in one place. The
+              dropdown to ASSIGN a rep_type to a user stays on the
+              user edit page below. */}
+          <Link href="/settings/roles" style={{ textDecoration: "none" }}>
+            <Btn icon="lock" size="sm" title="Manage types + capabilities">
+              Roles &amp; permissions
+            </Btn>
+          </Link>
           <Link href="/settings/import" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
               Import
@@ -556,17 +561,10 @@ export default function ManagersPage() {
           }}
         />
       )}
-
-      {repTypesOpen && (
-        <ManageRepTypesSheet
-          current={repTypes}
-          onClose={() => setRepTypesOpen(false)}
-          onSaved={(next) => {
-            setRepTypesState(next);
-            setRepTypesOpen(false);
-          }}
-        />
-      )}
+      {/* Rep-types CRUD lives at /settings/roles since May 28 — the
+          modal that used to live here is gone. The repTypes state
+          above is still loaded so the type-filter dropdown can show
+          the current vocabulary. */}
     </SettingsShell>
   );
 }
