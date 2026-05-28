@@ -48,6 +48,11 @@ interface DbRow {
   geocode_status?: "pending" | "done" | "failed" | "skipped" | null;
   /** Why this row has its current lat/lng. Added May 28 — Mariska B4. */
   coords_source?: "manual" | "address_geocode" | "rep_pinned" | null;
+  /** Tenant customer-cohort tag (e.g. "Premium", "Spaza"). Vocabulary
+   *  in app_settings.groups. NULL = unassigned. Added May 28 (later) —
+   *  Mariska G5a, after Gary's correction that region + group are
+   *  customer attributes, not user attributes. */
+  customer_group?: string | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -73,6 +78,7 @@ function rowToCustomer(row: DbRow): Customer {
     createdAt: row.created_at ?? undefined,
     geocodeStatus: row.geocode_status ?? null,
     coordsSource: row.coords_source ?? null,
+    customerGroup: row.customer_group ?? null,
   };
 }
 
@@ -115,6 +121,9 @@ export interface NewCustomer {
    *  constraint at the DB level. Pre-May-28 this was `number`. */
   code: string;
   region?: string;
+  /** Tenant customer-cohort tag (e.g. "Premium"). Vocabulary in
+   *  app_settings.groups. Optional at creation time. May 28. */
+  customer_group?: string;
   city?: string;
   address?: string;
   latitude?: number;
@@ -144,6 +153,7 @@ export async function createCustomer(
     color: c.color,
     code: c.code,
     region: c.region || null,
+    customer_group: c.customer_group || null,
     city: c.city || null,
     address: c.address || null,
     latitude: c.latitude ?? null,
@@ -195,6 +205,9 @@ export interface CustomerPatch {
   timing_exceptions_enabled?: boolean | null;
   /** Base64 data URL or null to clear. See compressCustomerLogo. */
   logo_url?: string | null;
+  /** Tenant customer-cohort tag. Empty string / null clears it.
+   *  Vocabulary lives in app_settings.groups. May 28. */
+  customer_group?: string | null;
 }
 
 /**

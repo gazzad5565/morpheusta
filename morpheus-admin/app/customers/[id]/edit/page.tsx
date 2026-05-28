@@ -18,6 +18,7 @@ import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import { CustomerAddressMap } from "@/components/CustomerAddressMap";
 import { Combobox } from "@/components/ui/Combobox";
 import { inputStyle } from "@/components/ui/Filters";
+import { getRegions, getGroups } from "@/lib/settings-store";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { Pill } from "@/components/ui/Pill";
 import { AC } from "@/lib/tokens";
@@ -52,7 +53,14 @@ const SWATCHES = [
   "#1FA971",
   "#5B7DC2",
 ];
-const REGIONS: Customer["region"][] = ["North", "South", "East", "West"];
+// Legacy hardcoded fallback. The customer-region vocabulary is now
+// tenant-managed (app_settings.regions, edited at Settings →
+// Organisation → Customer regions). These four values still show up
+// as fallback options ONLY when the tenant hasn't populated their
+// own vocabulary yet — without that, the form would render an empty
+// dropdown which breaks the "save without making any change"
+// expectation for legacy customers carrying region="North" / etc.
+const LEGACY_REGIONS = ["North", "South", "East", "West"];
 
 // Local deriveInitials removed — wraps shared helper from lib/format.ts.
 const deriveInitials = (name: string) => initialsFromNameOrEmail(name, "");
@@ -72,6 +80,14 @@ export default function EditCustomerPage() {
   const [initialsTouched, setInitialsTouched] = useState(false);
   const [color, setColor] = useState(SWATCHES[0]);
   const [region, setRegion] = useState<Customer["region"]>("North");
+  // Mariska G5a (May 28 later) — Customer region + Customer group
+  // are tenant-managed vocabularies. Loaded from app_settings.regions
+  // / .groups. Empty array = vocab not populated yet; dropdown falls
+  // back to LEGACY_REGIONS for Region and shows the current value +
+  // an "Unassigned" option for Group.
+  const [customerGroup, setCustomerGroup] = useState<string>("");
+  const [regionVocab, setRegionVocab] = useState<string[]>([]);
+  const [groupVocab, setGroupVocab] = useState<string[]>([]);
   const [address, setAddress] = useState("");
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -106,8 +122,14 @@ export default function EditCustomerPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const c = await getCustomer(id);
+      const [c, regs, grps] = await Promise.all([
+        getCustomer(id),
+        getRegions(),
+        getGroups(),
+      ]);
       if (cancelled) return;
+      setRegionVocab(regs);
+      setGroupVocab(grps);
       setOriginal(c);
       if (c) {
         setName(c.name ?? "");
@@ -115,6 +137,7 @@ export default function EditCustomerPage() {
         setInitials(c.initials ?? deriveInitials(c.name ?? ""));
         setColor(c.color ?? SWATCHES[0]);
         setRegion((c.region as Customer["region"]) ?? "North");
+        setCustomerGroup(c.customerGroup ?? "");
         setAddress(c.address ?? "");
         if (c.latitude != null && c.longitude != null) {
           setCoords({ lat: c.latitude, lng: c.longitude });
@@ -226,6 +249,7 @@ export default function EditCustomerPage() {
       initials: (initials || deriveInitials(name)).trim().toUpperCase(),
       color,
       region,
+      customer_group: customerGroup || null,
       address: trimmed || null,
       latitude,
       longitude,
@@ -566,15 +590,56 @@ export default function EditCustomerPage() {
           {/* ───── 2. Location ───────────────────────────────────── */}
           {tab === "location" && (
           <Card padding={20}>
-            <Field label="Region">
+            {/* Customer region — vocabulary lives in
+                app_settings.regions, edited at Settings →
+                Organisation → Customer regions. Falls back to the
+                legacy hardcoded list when the tenant hasn't
+                populated their own vocab yet. We always include the
+                CURRENT saved value as an option (even if it's not
+                in the vocab) so a legacy "North"/"South"/etc. row
+                doesn't get blank-out on save. May 28 (Mariska G5a). */}
+            <Field label="Customer region">
               <Combobox
                 value={region}
-                onChange={(v) => setRegion((v ?? REGIONS[0]) as Customer["region"])}
+                onChange={(v) => setRegion((v ?? "") as Customer["region"])}
                 triggerIcon="pin"
                 clearable={false}
-                options={REGIONS.map((r) => ({ value: r as string, label: r as string }))}
+                options={(() => {
+                  const base = regionVocab.length > 0 ? regionVocab : LEGACY_REGIONS;
+                  const set = new Set(base);
+                  // Preserve the current saved value even if it's
+                  // not in the active vocabulary.
+                  if (region && !set.has(region)) {
+                    return [region, ...base].map((r) => ({ value: r, label: r }));
+                  }
+                  return base.map((r) => ({ value: r, label: r }));
+                })()}
               />
             </Field>
+
+            {/* Customer group — new May 28 column. Hidden when the
+                tenant has no group vocab yet AND the customer has
+                no saved value (i.e. nothing useful to show). */}
+            {(groupVocab.length > 0 || customerGroup) && (
+              <Field label="Customer group">
+                <Combobox
+                  value={customerGroup || null}
+                  onChange={(v) => setCustomerGroup(v ?? "")}
+                  triggerIcon="customer"
+                  clearable
+                  options={(() => {
+                    const set = new Set(groupVocab);
+                    if (customerGroup && !set.has(customerGroup)) {
+                      return [customerGroup, ...groupVocab].map((g) => ({
+                        value: g,
+                        label: g,
+                      }));
+                    }
+                    return groupVocab.map((g) => ({ value: g, label: g }));
+                  })()}
+                />
+              </Field>
+            )}
 
             <Field
               label="Address"

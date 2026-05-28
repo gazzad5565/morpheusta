@@ -39,6 +39,7 @@ import { CustomerSwatch } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { FilterChip } from "@/components/ui/Filters";
 import { AGlyph } from "@/components/ui/AGlyph";
+import { getRegions, getGroups } from "@/lib/settings-store";
 import {
   SortableHeader,
   compareBy,
@@ -64,6 +65,23 @@ type CustomerSortKey =
 /** Validate a persisted sort key against the current schema. Old
  *  entries that still hold "status" (dropped May 27 when the column
  *  went away) silently fall back to "code". */
+/** Brand-tinted-when-active styling for the Customer region +
+ *  Customer group filter dropdowns. Matches the equivalent style
+ *  on /reps so the two list pages feel consistent. May 28. */
+function customerFilterSelectStyle(active: string): React.CSSProperties {
+  return {
+    padding: "6px 10px",
+    borderRadius: 8,
+    border: `1px solid ${active ? AC.brandDeep : AC.line}`,
+    background: active ? AC.brandSoft : "#fff",
+    color: active ? AC.brandInk : AC.ink2,
+    fontFamily: AC.font,
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+  };
+}
+
 function safeCustomerSortKey(v: unknown): CustomerSortKey {
   const allowed: CustomerSortKey[] = [
     "code",
@@ -135,6 +153,12 @@ export default function CustomersPage() {
     persisted.withAddressOnly ?? false
   );
   const [search, setSearch] = useState(persisted.search ?? "");
+  // Mariska G5a (May 28 later) — Customer region + Customer group
+  // filters. Empty = "all". Vocabularies load from app_settings.
+  const [regionFilter, setRegionFilter] = useState<string>("");
+  const [groupFilter, setGroupFilter] = useState<string>("");
+  const [regionVocab, setRegionVocab] = useState<string[]>([]);
+  const [groupVocab, setGroupVocab] = useState<string[]>([]);
   const [sort, setSort] = useState<SortState<CustomerSortKey>>({
     // safe-key gate so "status" left in localStorage from before May 27
     // doesn't break sort.
@@ -150,7 +174,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setPage(0);
-  }, [statusFilter, withAddressOnly, search, sort]);
+  }, [statusFilter, withAddressOnly, search, sort, regionFilter, groupFilter]);
 
   // Persist any of the above on change. Write is debounced behind
   // React's batching — every update lands on a single tick.
@@ -196,6 +220,14 @@ export default function CustomersPage() {
       });
       void listSeenRepAddedCustomerIds().then((s) => {
         if (!cancelled) setSeenIds(s);
+      });
+      // Vocab fetch — drives the Customer region + Customer group
+      // filter dropdowns. Empty arrays = vocab not populated yet;
+      // the dropdowns hide themselves in that case.
+      void Promise.all([getRegions(), getGroups()]).then(([r, g]) => {
+        if (cancelled) return;
+        setRegionVocab(r);
+        setGroupVocab(g);
       });
       // Shifts in the window — completed shifts inform "Last visit",
       // future scheduled shifts inform "Next visit". 180d back is
@@ -275,6 +307,17 @@ export default function CustomersPage() {
     if (statusFilter === "inactive") out = out.filter((c) => c.active === false);
     if (statusFilter === "new") out = out.filter(isRecentlyAdded);
     if (withAddressOnly) out = out.filter((c) => c.latitude != null && c.longitude != null);
+    if (regionFilter) {
+      out = out.filter(
+        (c) => (c.region || "").toLowerCase() === regionFilter.toLowerCase()
+      );
+    }
+    if (groupFilter) {
+      out = out.filter(
+        (c) =>
+          (c.customerGroup || "").toLowerCase() === groupFilter.toLowerCase()
+      );
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       out = out.filter(
@@ -324,7 +367,7 @@ export default function CustomersPage() {
     });
     return sorted;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customers, statusFilter, withAddressOnly, search, sort, visitsByCustomer]);
+  }, [customers, statusFilter, withAddressOnly, search, sort, visitsByCustomer, regionFilter, groupFilter]);
 
   return (
     <AdminShell
@@ -380,6 +423,40 @@ export default function CustomersPage() {
             >
               On the map · {counts.withAddr}
             </FilterChip>
+            {/* Mariska G5a (May 28 later) — Customer region + group
+                filters. Hide when the tenant hasn't populated the
+                vocabulary; encourages going to Settings →
+                Organisation → Customer regions / groups first. */}
+            {regionVocab.length > 0 && (
+              <select
+                value={regionFilter}
+                onChange={(e) => setRegionFilter(e.target.value)}
+                title="Filter by customer region"
+                style={customerFilterSelectStyle(regionFilter)}
+              >
+                <option value="">All customer regions</option>
+                {regionVocab.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            )}
+            {groupVocab.length > 0 && (
+              <select
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value)}
+                title="Filter by customer group"
+                style={customerFilterSelectStyle(groupFilter)}
+              >
+                <option value="">All customer groups</option>
+                {groupVocab.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            )}
             <div style={{ flex: 1 }} />
             <div
               style={{

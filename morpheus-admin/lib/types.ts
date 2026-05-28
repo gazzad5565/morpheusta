@@ -15,7 +15,17 @@ export interface Customer {
   name: string;
   initials: string;
   code: string;
+  /** Tenant-defined region tag (e.g. "Gauteng"). Vocabulary in
+   *  app_settings.regions. Pre-Phase-4 rows may carry legacy values
+   *  like "North" / "South" that aren't in the current vocab — the
+   *  edit form preserves them so they don't get blown away on save. */
   region: string;
+  /** Tenant-defined customer cohort tag (e.g. "Premium", "Spaza").
+   *  Vocabulary in app_settings.groups. NULL = unassigned. Mariska
+   *  G5a, May 28 (Gary's correction: region + group are CUSTOMER
+   *  attributes, not user attributes — the column on profiles was
+   *  reverted same day). */
+  customerGroup?: string | null;
   sites: number;
   geofence: number;
   shiftsThisWeek: number;
