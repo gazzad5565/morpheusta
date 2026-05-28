@@ -23,6 +23,14 @@ export interface CreateUserInput {
   password: string;
   name: string;
   role: "manager" | "rep";
+  /** Optional rep category at creation time (Sales Rep / Merchandiser
+   *  / …). Empty string / null means "uncategorised — allow all". Only
+   *  applied when role=rep; ignored server-side otherwise. May 28. */
+  rep_type?: string | null;
+  /** Optional manager category at creation time (Owner / Operations /
+   *  View only / …). Empty string / null means "unrestricted". Only
+   *  applied when role=manager. May 28. */
+  manager_type?: string | null;
 }
 
 export async function createUser(

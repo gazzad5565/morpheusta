@@ -98,6 +98,13 @@ export async function POST(req: NextRequest) {
     password?: string;
     name?: string;
     role?: string;
+    /** May 28 — optional rep_type set at creation time so the manager
+     *  can pick the category in the Add user modal without a follow-up
+     *  edit. Ignored when role=manager (the field doesn't apply). */
+    rep_type?: string | null;
+    /** May 28 — optional manager_type set at creation time. Same
+     *  semantics as rep_type but for managers. Ignored when role=rep. */
+    manager_type?: string | null;
   };
   try {
     body = await req.json();
@@ -109,6 +116,15 @@ export async function POST(req: NextRequest) {
   const password = body.password;
   const name = body.name?.trim() || null;
   const role = body.role === "manager" ? "manager" : "rep";
+
+  // Normalise type values: trim, treat empty string as null. Only the
+  // type matching the chosen role gets persisted — the other one is
+  // forced to null so the row doesn't carry stale state if the
+  // manager flips the role mid-form.
+  const repType =
+    role === "rep" ? ((body.rep_type ?? "").trim() || null) : null;
+  const managerType =
+    role === "manager" ? ((body.manager_type ?? "").trim() || null) : null;
 
   if (!email) {
     return NextResponse.json({ ok: false, error: "email required" }, { status: 400 });
@@ -136,8 +152,8 @@ export async function POST(req: NextRequest) {
 
   // The handle_new_user() trigger will insert into profiles, but it
   // looks at raw_user_meta_data. Belt-and-braces: upsert the profile
-  // row here to guarantee name + role are correct even if the trigger
-  // is ever disabled.
+  // row here to guarantee name + role + type are correct even if the
+  // trigger is ever disabled.
   if (data.user) {
     await sb.from("profiles").upsert(
       {
@@ -145,6 +161,8 @@ export async function POST(req: NextRequest) {
         email,
         name,
         role,
+        rep_type: repType,
+        manager_type: managerType,
       },
       { onConflict: "id" }
     );

@@ -32,7 +32,12 @@ import {
 } from "@/lib/profiles-store";
 import { createUser, deleteUser, randomPassword } from "@/lib/users-admin";
 import { initialsFromNameOrEmail } from "@/lib/format";
-import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
+import {
+  getRepTypes,
+  getManagerTypes,
+  type RepTypeConfig,
+  type ManagerTypeConfig,
+} from "@/lib/settings-store";
 
 const deriveInitials = (p: Profile) => initialsFromNameOrEmail(p.name, p.email);
 
@@ -611,6 +616,22 @@ function AddUserModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState(false);
+  // May 28 — pick the user's type at creation time so the manager
+  // doesn't have to follow up with a second edit. Independent state
+  // per role so flipping the Role toggle preserves whatever was
+  // already chosen on each side. Empty string = "uncategorised
+  // (allow all)". Vocabularies load once on mount.
+  const [repType, setRepType] = useState<string>("");
+  const [managerType, setManagerType] = useState<string>("");
+  const [repTypes, setRepTypes] = useState<RepTypeConfig[]>([]);
+  const [managerTypes, setManagerTypes] = useState<ManagerTypeConfig[]>([]);
+
+  useEffect(() => {
+    Promise.all([getRepTypes(), getManagerTypes()]).then(([r, m]) => {
+      setRepTypes(r);
+      setManagerTypes(m);
+    });
+  }, []);
 
   const onSubmit = async () => {
     if (busy) return;
@@ -624,6 +645,11 @@ function AddUserModal({
       password,
       name: name.trim(),
       role,
+      // Only send the type matching the selected role. The opposite
+      // side stays in state for the user's convenience if they toggle
+      // back, but never gets written to the row.
+      rep_type: role === "rep" ? repType : null,
+      manager_type: role === "manager" ? managerType : null,
     });
     setBusy(false);
     if (!r.ok) {
@@ -752,6 +778,57 @@ function AddUserModal({
                   />
                 </div>
               </ModalField>
+
+              {/* Type — swaps with the role above. Both fields are
+                  optional (empty = "uncategorised / unrestricted",
+                  matches the edit page's default). Vocabulary lives
+                  in app_settings.{rep_types,manager_types} and is
+                  edited at Settings → Roles & permissions. May 28. */}
+              {role === "rep" ? (
+                <ModalField
+                  label="Rep type"
+                  hint="Drives which mobile-app affordances this rep sees. Edit the vocabulary at Settings → Roles & permissions."
+                >
+                  <select
+                    value={repType}
+                    onChange={(e) => setRepType(e.target.value)}
+                    style={{ ...modalInputStyle, cursor: "pointer" }}
+                  >
+                    <option value="">— Uncategorised (allow all) —</option>
+                    {repTypes.map((t) => (
+                      <option key={t.name} value={t.name}>
+                        {t.name}
+                        {t.canCreateCustomers ? "" : " · can't add customers"}
+                      </option>
+                    ))}
+                  </select>
+                </ModalField>
+              ) : (
+                <ModalField
+                  label="Manager type"
+                  hint="Controls which parts of the admin console this manager can use. Edit the vocabulary at Settings → Roles & permissions."
+                >
+                  <select
+                    value={managerType}
+                    onChange={(e) => setManagerType(e.target.value)}
+                    style={{ ...modalInputStyle, cursor: "pointer" }}
+                  >
+                    <option value="">— Unrestricted (allow all) —</option>
+                    {managerTypes.map((t) => {
+                      const caps: string[] = [];
+                      if (!t.canManageSettings) caps.push("no settings");
+                      if (!t.canScheduleShifts) caps.push("no scheduling");
+                      return (
+                        <option key={t.name} value={t.name}>
+                          {t.name}
+                          {caps.length > 0 ? ` · ${caps.join(", ")}` : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </ModalField>
+              )}
+
               <ModalField
                 label="Initial password"
                 hint="You'll share this with the user. They can change it themselves later."
