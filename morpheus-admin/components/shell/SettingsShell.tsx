@@ -38,7 +38,20 @@ export interface SettingsSection {
   available: boolean;
 }
 
+// Order (May 28 late): Gary's directive — Organisation first
+// (org branding is the first thing a new tenant configures),
+// Users second (managers + reps live there together), then the
+// rest in their existing relative order. Routes / ids unchanged
+// so every existing link + breadcrumb keeps working.
 export const SETTINGS_SECTIONS: SettingsSection[] = [
+  {
+    id: "organisation",
+    label: "Organisation",
+    href: "/settings/organisation",
+    glyph: "building",
+    description: "Org name and logo, shown in the sidebar and on receipts.",
+    available: true,
+  },
   {
     id: "managers",
     // Section label shown in the sidebar rail / hub tiles / page heading.
@@ -76,14 +89,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     glyph: "tasks",
     description:
       "Add your own fields to any entity (customers, reps, shifts, tasks, library files).",
-    available: true,
-  },
-  {
-    id: "organisation",
-    label: "Organisation",
-    href: "/settings/organisation",
-    glyph: "building",
-    description: "Org name and logo, shown in the sidebar and on receipts.",
     available: true,
   },
   {

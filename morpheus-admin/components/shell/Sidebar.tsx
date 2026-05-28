@@ -67,24 +67,23 @@ export function Sidebar() {
   const [tasksExpanded, setTasksExpanded] = useState<boolean>(() =>
     typeof window !== "undefined" && window.location.pathname.startsWith("/tasks")
   );
-  // Auto-open when the user navigates INTO /tasks from elsewhere.
-  // We don't auto-close when they leave — leaves room for the
-  // "I'm planning a Tasks visit" reading where the sub-nav stays
-  // visible after they nav away. Cheap to expand back on return.
+  // Open while on /tasks/*, close on every navigation away —
+  // symmetric with the Settings drawer (May 28). Was previously
+  // open-on-enter only; Gary's call on May 28: drawers should not
+  // linger on unrelated pages. Click-toggle while ON /tasks still
+  // works via preventDefault below.
   useEffect(() => {
-    if (pathname.startsWith("/tasks")) setTasksExpanded(true);
+    setTasksExpanded(pathname.startsWith("/tasks"));
   }, [pathname]);
 
-  // Settings sub-nav — same expand/collapse pattern as Tasks but with
-  // symmetric auto-close. Gary's directive (May 27 late):
+  // Settings sub-nav — same expand/collapse pattern as Tasks.
+  // Gary's directive (May 27 late):
   //   - clicking Settings navigates to /settings AND opens the drawer
   //   - while on /settings/* the drawer stays open
   //   - the moment the user navigates OUT of /settings/* the drawer
   //     auto-closes (no stale duplicate of nav lingering on customer
   //     / rep / etc pages)
-  // Tasks doesn't auto-close — that's intentional asymmetry: Settings
-  // is a top-level section the user enters and exits; Tasks is a
-  // section with sub-modes the user often returns to.
+  // Tasks drawer now matches this symmetric behaviour too (May 28).
   const [settingsExpanded, setSettingsExpanded] = useState<boolean>(() =>
     typeof window !== "undefined" && window.location.pathname.startsWith("/settings")
   );
