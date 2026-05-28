@@ -6,6 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { AC } from "@/lib/tokens";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { listCustomers } from "@/lib/customers-store";
+import { formatCustomerCode } from "@/lib/format";
 import {
   listRepLocations,
   subscribeRepLocations,
@@ -516,7 +517,7 @@ function buildRepPopupHTML(
             font-weight:600;color:${AC.ink};font-size:12.5px;letter-spacing:-.1px;
             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
           ">${escapeHtml(customer.name)}</div>
-          <div style="color:${AC.mute};font-size:11px;margin-top:1px;">#${escapeHtml(String(customer.code))}${window ? ` · ${escapeHtml(window)}` : ""}</div>
+          <div style="color:${AC.mute};font-size:11px;margin-top:1px;">${escapeHtml(formatCustomerCode(customer.code))}${window ? ` · ${escapeHtml(window)}` : ""}</div>
         </div>
       </div>
 

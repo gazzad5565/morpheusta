@@ -6,7 +6,7 @@ import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { CustomerSwatch } from "@/components/ui/Avatars";
-import { initialsFromNameOrEmail } from "@/lib/format";
+import { initialsFromNameOrEmail, formatCustomerCode } from "@/lib/format";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
 import { Combobox } from "@/components/ui/Combobox";
@@ -61,7 +61,7 @@ export default function NewCustomerPage() {
     name: name || "Customer name",
     initials: initials || "??",
     color,
-    code: `#${code.padStart(4, "0")}`,
+    code: formatCustomerCode(code) || "—",
     region,
     sites: 1,
     geofence: 75,
@@ -75,8 +75,11 @@ export default function NewCustomerPage() {
     setGeocodeNote(null);
     if (!name.trim()) return setError("Name is required.");
     if (!initials.trim()) return setError("Initials are required.");
-    const codeNum = parseInt(code, 10);
-    if (Number.isNaN(codeNum)) return setError("Code must be a number.");
+    // Code is opaque text since May 28 (Mariska B5). Strip a leading
+    // `#` so a manager who types "#0012" doesn't double up the chrome.
+    const codeClean = code.trim().replace(/^#/, "").trim();
+    if (!codeClean) return setError("Code is required.");
+    if (codeClean.length > 64) return setError("Code is too long (max 64 chars).");
 
     setBusy(true);
 
@@ -107,7 +110,7 @@ export default function NewCustomerPage() {
       name: name.trim(),
       initials: initials.trim().slice(0, 3).toUpperCase(),
       color,
-      code: codeNum,
+      code: codeClean,
       region,
       city: city.trim() || undefined,
       address: trimmedAddress || undefined,

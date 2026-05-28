@@ -833,7 +833,9 @@ export default function SchedulePage() {
                 ...customers.map((c) => ({
                   value: c.id,
                   label: c.name,
-                  sublabel: `#${c.code}`,
+                  // c.code is already formatted by formatCustomerCode
+                  // ("#0012" or "SP-001") — don't add another `#`.
+                  sublabel: c.code,
                   renderLeading: () => <CustomerSwatch customer={c} size={22} />,
                 })),
               ]}

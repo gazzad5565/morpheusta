@@ -26,6 +26,7 @@ import {
 } from "@/lib/settings-store";
 import { logEvent } from "@/lib/events-store";
 import { haversineMeters, formatDistanceMeters as formatDistance } from "@/lib/geo";
+import { formatCustomerCode } from "@/lib/format";
 import type { Customer } from "@/lib/mock-data";
 
 function formatLateness(minutes: number): string {
@@ -600,7 +601,7 @@ function CheckInPage() {
             </div>
             <div style={{ fontFamily: MC.font, fontSize: 12.5, color: MC.mute, marginTop: 2 }}>
               {shift
-                ? `Scheduled ${shift.start} – ${shift.end} · Code #${shift.code}`
+                ? `Scheduled ${shift.start} – ${shift.end} · Code ${formatCustomerCode(shift.code)}`
                 : "Loading shift…"}
             </div>
           </div>

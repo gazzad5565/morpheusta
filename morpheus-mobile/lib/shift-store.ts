@@ -117,7 +117,8 @@ interface DbRow {
   customer_name: string;
   customer_initials: string;
   customer_color: string;
-  customer_code: number;
+  /** Text since admin migration 2026_05_28_customer_code_text.sql (B5). */
+  customer_code: string;
   rep_id: string | null;
   status: string;
   requested_at: string;

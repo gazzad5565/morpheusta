@@ -19,7 +19,8 @@ interface DbRow {
   name: string;
   initials: string;
   color: string;
-  code: number;
+  /** Opaque text — see admin migration 2026_05_28_customer_code_text.sql (B5). */
+  code: string;
   region: string | null;
   city: string | null;
   latitude: number | null;

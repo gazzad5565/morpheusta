@@ -6,6 +6,7 @@ import { MC } from "@/lib/tokens";
 import { type Customer } from "@/lib/mock-data";
 import { addRequestedShift, listRequestedShifts } from "@/lib/shift-store";
 import { listAllCustomers } from "@/lib/customers-store";
+import { formatCustomerCode } from "@/lib/format";
 import {
   listMyShiftsToday,
   selfCreateImmediateShift,
@@ -259,7 +260,7 @@ export default function AddShiftPage() {
                     marginTop: 2,
                   }}
                 >
-                  #{c.code} · {c.region} · {c.city}
+                  {formatCustomerCode(c.code)} · {c.region} · {c.city}
                 </div>
               </div>
               {onToday ? (

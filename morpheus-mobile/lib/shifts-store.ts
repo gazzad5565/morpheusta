@@ -70,7 +70,8 @@ interface ShiftRow {
     name: string;
     initials: string;
     color: string;
-    code: number;
+    /** Opaque text since admin migration 2026_05_28_customer_code_text.sql (B5). */
+    code: string;
     /** Base64 data URL of the customer logo, set from admin. The
      *  rep-side avatar tile shows this in place of the coloured
      *  initials when populated. Added by 2026_05_11_customers_logo. */
@@ -186,7 +187,7 @@ function rowToShift(row: ShiftRow): ShiftWithMeta {
     name: c?.name || "Unknown customer",
     initials: c?.initials || "??",
     color: c?.color || "#888",
-    code: c?.code || 0,
+    code: c?.code || "",
     logoUrl: c?.logo_url ?? null,
     start: formatTimeLabel(row.start_time),
     end: formatTimeLabel(row.end_time),

@@ -7,6 +7,34 @@
  * Anything that's not page-specific lives here.
  */
 
+// ─── Customer codes ────────────────────────────────────────────────────
+
+/**
+ * Display formatter for `customers.code`. The column was changed from
+ * integer to text on May 28 (Mariska's B5) so codes can carry the
+ * SKU-style values real tenants use (e.g. SP-001, ACME-JHB). To
+ * preserve the existing UI for pre-migration customers — every
+ * existing tenant's codes are pure integers like 12, 47 — we keep the
+ * `#0012` zero-padded look ONLY when the code is purely numeric.
+ * Alphanumeric codes render as-is.
+ *
+ *   formatCustomerCode("12")        → "#0012"
+ *   formatCustomerCode("0012")      → "#0012"
+ *   formatCustomerCode("SP-001")    → "SP-001"
+ *   formatCustomerCode("ACME-JHB")  → "ACME-JHB"
+ *   formatCustomerCode("")          → ""
+ *   formatCustomerCode(null)        → ""
+ */
+export function formatCustomerCode(code: string | null | undefined): string {
+  if (code == null) return "";
+  const trimmed = String(code).trim();
+  if (!trimmed) return "";
+  if (/^\d+$/.test(trimmed)) {
+    return `#${trimmed.padStart(4, "0")}`;
+  }
+  return trimmed;
+}
+
 // ─── Dates ──────────────────────────────────────────────────────────────
 
 /**

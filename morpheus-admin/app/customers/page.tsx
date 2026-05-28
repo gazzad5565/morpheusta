@@ -748,7 +748,10 @@ function TableView({
                   fontWeight: 700,
                 }}
               >
-                #{c.code}
+                {/* c.code is already formatted by formatCustomerCode
+                    (e.g. "#0012" or "SP-001") — don't add a second
+                    inline `#`, which historically gave "##0012". */}
+                {c.code}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                 <CustomerSwatch customer={c} size={28} />

@@ -9,6 +9,7 @@
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent } from "./events-store";
 import { notifySaved, notifySaveError } from "./save-status";
+import { formatCustomerCode } from "./format";
 import type { Customer } from "./types";
 
 interface DbRow {
@@ -16,7 +17,10 @@ interface DbRow {
   name: string;
   initials: string;
   color: string;
-  code: number;
+  /** Opaque tenant-supplied identifier. Was `integer` pre-May-28
+   *  (Mariska B5); now `text` to accommodate SKU-style codes like
+   *  SP-001, ACME-JHB. The DB still enforces NOT NULL + UNIQUE. */
+  code: string;
   region: string | null;
   city: string | null;
   address: string | null;
@@ -50,7 +54,7 @@ function rowToCustomer(row: DbRow): Customer {
     name: row.name,
     initials: row.initials,
     color: row.color,
-    code: `#${String(row.code).padStart(4, "0")}`,
+    code: formatCustomerCode(row.code),
     region: (row.region as Customer["region"]) || "North",
     sites: 1,
     geofence: row.geofence_radius_m ?? 100,
@@ -102,7 +106,11 @@ export interface NewCustomer {
   name: string;
   initials: string;
   color: string;
-  code: number;
+  /** Opaque string code. Accepts SKU-style values (SP-001, ACME-JHB)
+   *  as well as legacy numeric codes ("12"). Required + unique
+   *  per-tenant — enforced by the customers.code NOT NULL + UNIQUE
+   *  constraint at the DB level. Pre-May-28 this was `number`. */
+  code: string;
   region?: string;
   city?: string;
   address?: string;
@@ -165,13 +173,12 @@ export async function createCustomer(
 
 export interface CustomerPatch {
   name?: string;
-  /** The DB column is `integer`. Accept either a parsed number OR the
-   *  display string (with or without a leading `#` and leading zeros)
-   *  — updateCustomer normalises before writing. Anything that can't
-   *  be parsed is dropped from the patch so the rest of the save
-   *  still succeeds. Earlier this was typed as `string`, which let
-   *  the edit form round-trip "#0012" straight to Postgres and fail
-   *  with `invalid input syntax for type integer: "#0012"`. */
+  /** Opaque text code. The DB column is `text` (was `integer`
+   *  pre-May-28 — Mariska B5). The edit form may round-trip the
+   *  display value (`#0012`) and earlier-numeric callers may pass
+   *  a raw `number`. updateCustomer normalises both before writing.
+   *  Empty string = explicit clear (drops to null is rejected by
+   *  NOT NULL — caller must keep it non-empty). */
   code?: string | number;
   initials?: string;
   color?: string;
@@ -188,27 +195,28 @@ export interface CustomerPatch {
 }
 
 /**
- * Coerce a customer-code patch value to a Postgres-integer-safe
- * number. The admin UI renders codes as "#0012" for display, the
- * input lets managers type "12", "0012", "#12" etc., and we accept
- * raw numbers too. Returns:
- *   - the parsed int when the input cleans to a non-empty digit run
- *   - null when the input was an explicit clear (empty string)
- *   - undefined when the input was nonsense, signalling the caller
- *     to drop the field from the patch entirely (Postgres would
- *     otherwise reject the whole UPDATE)
+ * Coerce a customer-code patch value to the opaque text the DB column
+ * now expects. The admin UI renders codes as "#0012" for display
+ * (numeric codes) or "SP-001" (alphanumeric); the edit input lets
+ * managers type any of those, and we still accept raw numbers from
+ * historical numeric callers. Returns:
+ *   - the cleaned text when the input has non-whitespace content
+ *   - undefined when the input is undefined OR an empty string —
+ *     drop the field from the patch entirely so Postgres doesn't
+ *     reject a NULL on a NOT NULL column.
+ *
+ * Cleaning rules: trim, strip a leading `#` (display chrome, not
+ * payload). NO digit-strip — that was the pre-May-28 behaviour when
+ * the column was integer; alphanumeric codes are now valid.
  */
-function normaliseCustomerCode(value: string | number | undefined): number | null | undefined {
+function normaliseCustomerCode(value: string | number | undefined): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "number") {
-    return Number.isFinite(value) ? Math.trunc(value) : undefined;
+    return Number.isFinite(value) ? String(Math.trunc(value)) : undefined;
   }
-  const trimmed = value.trim();
-  if (trimmed === "") return null; // explicit clear
-  const digits = trimmed.replace(/[^0-9]/g, "");
-  if (digits === "") return undefined; // nonsense — drop from patch
-  const n = parseInt(digits, 10);
-  return Number.isFinite(n) ? n : undefined;
+  const trimmed = value.trim().replace(/^#/, "").trim();
+  if (trimmed === "") return undefined; // drop — column is NOT NULL
+  return trimmed;
 }
 
 /**
@@ -313,16 +321,17 @@ export async function updateCustomer(
     return { ok: false, error: "Database not configured" };
   }
   // Normalise the customer-code patch value before talking to Postgres.
-  // The admin UI renders codes as "#0012" for display and the edit
-  // input round-trips that exact string. Postgres' `code` column is
-  // an integer though, so a raw string write fails with:
-  //   invalid input syntax for type integer: "#0012"
-  // and the entire UPDATE rolls back — meaning the manager loses
-  // every other change in the same save (name, address, geofence,
-  // exception toggles, …). The helper strips the # / leading zeros,
-  // parses to int, and decides per-input whether to write a number,
-  // write null (explicit clear), or drop the field from the patch
-  // entirely (nonsense input → don't kill the rest of the save).
+  // The admin UI renders codes as "#0012" for display (numeric) or
+  // "SP-001" (alphanumeric); the edit input round-trips that exact
+  // string. The helper strips the leading `#` and decides whether to
+  // write the cleaned text (single source of truth) or drop the field
+  // entirely (nonsense / empty input → don't kill the rest of the
+  // save with a NOT NULL violation).
+  //
+  // Pre-May-28 this column was `integer` and the helper parseInt'd
+  // and stripped non-digits — see git log for that history. The
+  // column is now `text`; we keep the helper but stop mangling
+  // alphanumeric codes.
   const cleanPatch: Record<string, unknown> = { ...patch };
   if ("code" in cleanPatch) {
     const normalised = normaliseCustomerCode(patch.code);

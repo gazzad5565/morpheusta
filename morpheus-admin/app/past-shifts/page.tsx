@@ -34,7 +34,7 @@ import {
 } from "@/lib/shifts-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import { listPhotoCountsForShifts } from "@/lib/photos-store";
-import { todayLocalISO, isoDaysAgo } from "@/lib/format";
+import { todayLocalISO, isoDaysAgo, formatCustomerCode } from "@/lib/format";
 
 type Period = "7" | "30" | "90" | "all";
 type ViewMode = "Table" | "Grid";
@@ -102,7 +102,7 @@ export default function PastShiftsPage() {
         return {
           shift: s,
           customerName: s.customers?.name || "Unknown",
-          customerCode: s.customers?.code != null ? `#${s.customers.code}` : "",
+          customerCode: formatCustomerCode(s.customers?.code),
           rep,
           repName: rep
             ? displayName(rep)

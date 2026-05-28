@@ -40,7 +40,8 @@ export interface ShiftRow {
     name: string;
     initials: string;
     color: string;
-    code: number;
+    /** Opaque text — see 2026_05_28_customer_code_text.sql (B5). */
+    code: string;
   } | null;
   /** Attention overlay — when not null + not resolved, the shift
    *  surfaces in Live Ops "Needs action". See the 2026-05-11

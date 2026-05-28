@@ -288,7 +288,7 @@ function SearchBox() {
         kind: "customer",
         id: c.id,
         label: c.name,
-        sublabel: `#${c.code}${c.address ? ` · ${c.address}` : ""}`,
+        sublabel: `${c.code}${c.address ? ` · ${c.address}` : ""}`,
         href: `/customers/${c.id}`,
         glyph: "customer",
       }));

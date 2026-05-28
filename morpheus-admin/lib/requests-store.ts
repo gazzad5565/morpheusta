@@ -20,7 +20,8 @@ export interface PendingRequest {
   customerName: string;
   customerInitials: string;
   customerColor: string;
-  customerCode: number;
+  /** Opaque text — was `number` pre-May-28 (Mariska B5). */
+  customerCode: string;
   repId: string;
   repName: string;
   repEmail: string;
@@ -34,7 +35,8 @@ interface RequestRow {
   customer_name: string;
   customer_initials: string;
   customer_color: string;
-  customer_code: number;
+  /** Text column since 2026_05_28_customer_code_text.sql. */
+  customer_code: string;
   rep_id: string | null;
   status: string;
   requested_at: string;

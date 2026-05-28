@@ -13,7 +13,8 @@ export interface Shift {
   name: string;
   initials: string;
   color: string;
-  code: number;
+  /** Opaque customer-code text. Was number pre-May-28 (Mariska B5). */
+  code: string;
   start: string;
   end: string;
   distance: string;
@@ -29,7 +30,8 @@ export interface Customer {
   name: string;
   initials: string;
   color: string;
-  code: number;
+  /** Opaque customer-code text. Was number pre-May-28 (Mariska B5). */
+  code: string;
   region: string;
   city: string;
   latitude?: number | null;

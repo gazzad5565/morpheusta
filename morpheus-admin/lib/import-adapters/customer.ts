@@ -1,10 +1,14 @@
 /**
- * Customer import adapter (Phase D, May 25).
+ * Customer import adapter (Phase D, May 25 — updated May 28 for B5).
  *
- * Dedup key: customer code (integer). Importing the same code twice
- * in skip mode is a no-op; in update mode it overwrites the existing
- * row's name / initials / colour / region / city / address (but does
- * NOT delete sites — those are managed via the Sites tab).
+ * Dedup key: customer code (opaque string). Pre-May-28 codes were
+ * integers; the May 28 migration `2026_05_28_customer_code_text.sql`
+ * relaxed the column to text so real-world SKU-style codes like
+ * SP-001 / ACME-JHB import cleanly (Mariska's B5). Importing the
+ * same code twice in skip mode is a no-op; in update mode it
+ * overwrites the existing row's name / initials / colour / region /
+ * city / address (but does NOT delete sites — those are managed via
+ * the Sites tab).
  *
  * Address comes in as plain text. Lat/lng are left NULL and
  * geocode_status defaults to 'pending' from the Phase A migration,
@@ -46,7 +50,7 @@ export const CUSTOMER_ADAPTER: ImportAdapter = {
   requiredFields: ["code", "name"],
   optionalFields: ["initials", "color", "region", "city", "address"],
   fieldLabels: {
-    code: "Customer code (integer account number)",
+    code: "Customer code (any text — e.g. 0012, SP-001, ACME-JHB)",
     name: "Customer name",
     initials: "Initials (2-3 chars — auto from name if blank)",
     color: "Brand colour (hex like #15B4D6 — defaults to cyan if blank)",
@@ -67,8 +71,12 @@ export const CUSTOMER_ADAPTER: ImportAdapter = {
     const errs: string[] = [];
     const code = (row.code || "").trim();
     if (!code) errs.push("code is required");
-    else if (!/^\d+$/.test(code)) {
-      errs.push(`code must be an integer (got "${code}")`);
+    // No format check beyond non-empty — see file header. Length cap
+    // is generous; the DB column has no explicit cap but a 64-char
+    // ceiling here catches accidental row-bleed (e.g. someone pasted
+    // the address column into the code column).
+    else if (code.length > 64) {
+      errs.push(`code is too long (max 64 chars, got ${code.length})`);
     }
     if (!row.name || !row.name.trim()) errs.push("name is required");
     if (row.color && !/^#?[0-9a-f]{6}$/i.test(row.color.trim())) {
@@ -79,7 +87,8 @@ export const CUSTOMER_ADAPTER: ImportAdapter = {
   upsert: async (row: RawRow, mode: DuplicateMode): Promise<UpsertOutcome> => {
     if (!supabase) throw new Error("Supabase not configured");
 
-    const code = parseInt(row.code.trim(), 10);
+    // Code is opaque text post-May-28. Trim only; no parseInt.
+    const code = row.code.trim();
     const name = row.name.trim();
     const initials = (row.initials || "").trim() || deriveInitials(name);
     let color = (row.color || "").trim() || DEFAULT_COLOUR;

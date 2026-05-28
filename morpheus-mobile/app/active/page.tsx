@@ -52,7 +52,8 @@ interface ShiftData {
   name: string;
   initials: string;
   color: string;
-  code: number;
+  /** Opaque text since admin migration 2026_05_28_customer_code_text.sql (B5). */
+  code: string;
   /** Customer logo (base64 data URL), when uploaded by admin. Lets
    *  the active-shift hero swap the coloured-initials tile for the
    *  customer's branding. */

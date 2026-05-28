@@ -4,6 +4,24 @@
  * independently — no monorepo shared package layer yet.
  */
 
+// ─── Customer codes ────────────────────────────────────────────────────
+
+/**
+ * Display formatter for `customers.code`. Mirror of the admin helper
+ * (see morpheus-admin/lib/format.ts for the full rationale). Pure
+ * digits render as `#0012`; SKU-style codes (SP-001, ACME-JHB) render
+ * as-is. Migrated May 28 — Mariska's B5.
+ */
+export function formatCustomerCode(code: string | null | undefined): string {
+  if (code == null) return "";
+  const trimmed = String(code).trim();
+  if (!trimmed) return "";
+  if (/^\d+$/.test(trimmed)) {
+    return `#${trimmed.padStart(4, "0")}`;
+  }
+  return trimmed;
+}
+
 // ─── Dates ──────────────────────────────────────────────────────────────
 
 /**

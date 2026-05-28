@@ -23,7 +23,7 @@ export const SITE_ADAPTER: ImportAdapter = {
   requiredFields: ["customer_code", "site_name"],
   optionalFields: ["address", "city", "region"],
   fieldLabels: {
-    customer_code: "Customer code (integer — customer must already exist)",
+    customer_code: "Customer code (any text — customer must already exist)",
     site_name: "Site name (e.g. 'Head office', 'Warehouse')",
     address: "Address (text — geocoded asynchronously)",
     city: "City",
@@ -47,8 +47,11 @@ export const SITE_ADAPTER: ImportAdapter = {
     const errs: string[] = [];
     const code = (row.customer_code || "").trim();
     if (!code) errs.push("customer_code is required");
-    else if (!/^\d+$/.test(code)) {
-      errs.push(`customer_code must be an integer (got "${code}")`);
+    // customer_code is opaque text since May 28 (Mariska B5) — no
+    // integer check. The upsert step verifies it resolves to an
+    // existing customer.
+    else if (code.length > 64) {
+      errs.push(`customer_code is too long (max 64 chars)`);
     }
     if (!row.site_name || !row.site_name.trim()) {
       errs.push("site_name is required");
@@ -58,7 +61,8 @@ export const SITE_ADAPTER: ImportAdapter = {
   upsert: async (row: RawRow, mode: DuplicateMode): Promise<UpsertOutcome> => {
     if (!supabase) throw new Error("Supabase not configured");
 
-    const code = parseInt(row.customer_code.trim(), 10);
+    // customer_code is text — pass as-is, no parseInt.
+    const code = row.customer_code.trim();
     const siteName = row.site_name.trim();
     const address = (row.address || "").trim() || null;
 
@@ -71,7 +75,7 @@ export const SITE_ADAPTER: ImportAdapter = {
     if (custErr) throw new Error(custErr.message);
     if (!customer) {
       throw new Error(
-        `customer with code=${code} not found — import the customer first or add a row with this code to the customers import`
+        `customer with code="${code}" not found — import the customer first or add a row with this code to the customers import`
       );
     }
     const customerId = (customer as { id: string }).id;

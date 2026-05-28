@@ -177,7 +177,7 @@ export default function EditTaskPage({
                 ...customers.map((c) => ({
                   value: c.id,
                   label: c.name,
-                  sublabel: `#${c.code}`,
+                  sublabel: c.code,
                   renderLeading: () => <CustomerSwatch customer={c} size={22} />,
                 })),
               ]}

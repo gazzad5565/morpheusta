@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MC } from "@/lib/tokens";
 import { type Shift } from "@/lib/mock-data";
-import { formatRelativeShort, formatShiftCountdown } from "@/lib/format";
+import { formatRelativeShort, formatShiftCountdown, formatCustomerCode } from "@/lib/format";
 import {
   listRequestedShifts,
   removeRequestedShift,
@@ -508,12 +508,12 @@ export default function ShiftsListPage() {
   // case-insensitive across customer name, customer code, and the
   // distance label (whatever the rep is most likely to be skimming
   // for). Empty search returns the original arrays untouched.
-  const matchSearch = (s: { name: string; code: number | string; distance?: string }) => {
+  const matchSearch = (s: { name: string; code: string; distance?: string }) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return (
       s.name.toLowerCase().includes(q) ||
-      String(s.code).includes(q) ||
+      s.code.toLowerCase().includes(q) ||
       (s.distance || "").toLowerCase().includes(q)
     );
   };
@@ -1516,7 +1516,7 @@ function ShiftRow({
                 letterSpacing: 0.3,
               }}
             >
-              #{shift.code}
+              {formatCustomerCode(shift.code)}
             </span>
             {unscheduled ? (
               <>
