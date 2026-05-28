@@ -15,11 +15,7 @@
 
 Top of the queue (in priority order):
 
-0a-new. **🟡 OPERATOR — apply the THREE pending May 28 migrations in Supabase SQL Editor.** Without them, B5's alphanumeric customer-code imports still fail at INSERT, B4's "Pinned by rep" chip never fires, and the manager roles `/settings/roles` page shows the seeded vocab but assigning a `manager_type` to anyone silently writes to a non-existent column. All three are idempotent and order-independent:
-   1. `db/migrations/2026_05_28_customer_code_text.sql`
-   2. `db/migrations/2026_05_28_customer_coords_source.sql`
-   3. `db/migrations/2026_05_28_profiles_manager_type.sql`
-   Smoke after applying — see the bottom of each `.sql` file. After this Gary can start assigning real manager types; recommended first move is to assign himself to "Owner" (or leave NULL — lenient default-allow keeps full access).
+0a-new. ✅ **APPLIED May 28** — all three migrations ran in Supabase SQL Editor (Gary confirmed). `customers.code` is now opaque text (B5 alphanumeric imports work), `customers.coords_source` + `customer_sites.coords_source` exist (B4 "Pinned by rep" chip lights up on rep-pinned coords), `profiles.manager_type` exists (Roles & permissions assignments persist + the Add user modal's Manager type selector writes through). Recommended first move now that the column exists: assign yourself to "Owner" via `/settings/managers/[id]/edit` (or leave NULL — lenient default-allow keeps full access).
 
 0b-new. **Top three from the rep feedback PDFs that DIDN'T ship May 28** (in case anyone wants to keep moving down Mariska's list): G1 (audit-log UI), G2 (region/group on profile + filter chain), and G9 (schedule month-view drag-drop + bulk move). See the May 28 summary message in chat for the combined-prioritised list across all three reviewers.
 
