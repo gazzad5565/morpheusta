@@ -28,6 +28,39 @@ export const LIBRARY_CATEGORIES = [
 export type LibraryCategory = (typeof LIBRARY_CATEGORIES)[number];
 export const DEFAULT_CATEGORY: LibraryCategory = "Documents";
 
+/**
+ * Distinct, non-null category strings currently set on at least one
+ * library file in this tenant. Cheap single-column query — used to
+ * build the category dropdown's option list as a union of:
+ *   - the manager-managed list from `app_settings.library_categories`
+ *   - whatever categories already exist on files (which may include
+ *     custom values typed at upload time before the manager added
+ *     them to the canonical list).
+ *
+ * Mariska's B6: before this, the edit page bound to LIBRARY_CATEGORIES
+ * only, so a file uploaded under "Brand Guidelines" couldn't be
+ * re-saved with the same category from the edit page — the dropdown
+ * didn't list it.
+ */
+export async function listLibraryCategoriesInUse(): Promise<string[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const { data, error } = await supabase
+    .from("library_files")
+    .select("category")
+    .not("category", "is", null);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[library] in-use categories:", error.message);
+    return [];
+  }
+  const seen = new Set<string>();
+  for (const r of (data as { category: string | null }[]) || []) {
+    const c = (r.category || "").trim();
+    if (c) seen.add(c);
+  }
+  return Array.from(seen).sort((a, b) => a.localeCompare(b));
+}
+
 export interface LibraryFile {
   id: string;
   name: string;

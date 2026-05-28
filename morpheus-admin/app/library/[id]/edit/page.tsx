@@ -14,7 +14,6 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
-import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
 import {
@@ -22,10 +21,12 @@ import {
   updateLibraryFile,
   deleteLibraryFile,
   formatFileSize,
+  listLibraryCategoriesInUse,
   LIBRARY_CATEGORIES,
   DEFAULT_CATEGORY,
   type LibraryFile,
 } from "@/lib/library-store";
+import { getLibraryCategories } from "@/lib/settings-store";
 import { CustomerScopePicker, type CustomerScope } from "@/components/ui/CustomerScopePicker";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import type { Customer } from "@/lib/types";
@@ -46,13 +47,25 @@ export default function EditLibraryFilePage({
   const [name, setName] = useState("");
   const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
   const [scope, setScope] = useState<CustomerScope>(null);
+  // Dynamic category options — union of the hardcoded defaults, the
+  // manager-curated list (`app_settings.library_categories`), and any
+  // free-text categories already in use on files in this tenant.
+  // Same shape the /library list page uses; Mariska's B6.
+  const [categoryOptions, setCategoryOptions] = useState<string[]>(
+    () => [...LIBRARY_CATEGORIES]
+  );
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listCustomers(), getLibraryFile(id)]).then(([cs, f]) => {
+    Promise.all([
+      listCustomers(),
+      getLibraryFile(id),
+      getLibraryCategories(),
+      listLibraryCategoriesInUse(),
+    ]).then(([cs, f, managed, inUse]) => {
       if (cancelled) return;
       setCustomers(cs);
       if (!f) {
@@ -64,6 +77,17 @@ export default function EditLibraryFilePage({
       setName(f.name);
       setCategory(f.category || DEFAULT_CATEGORY);
       setScope(f.customerIds);
+      // Build the union: defaults + manager-curated + in-use. Sort +
+      // dedupe. Whatever the file's current category is is guaranteed
+      // to be in `inUse` so it's selectable.
+      const union = new Set<string>([
+        ...LIBRARY_CATEGORIES,
+        ...managed,
+        ...inUse,
+      ]);
+      setCategoryOptions(
+        Array.from(union).sort((a, b) => a.localeCompare(b))
+      );
       setLoading(false);
     });
     return () => {
@@ -75,6 +99,8 @@ export default function EditLibraryFilePage({
     if (busy) return;
     setError(null);
     if (!name.trim()) return setError("Give the file a name.");
+    const trimmedCategory = category.trim();
+    if (!trimmedCategory) return setError("Pick or type a category.");
     if (scope !== null && scope.length === 0) {
       return setError("Pick at least one customer, or switch to 'Shared with all'.");
     }
@@ -82,7 +108,7 @@ export default function EditLibraryFilePage({
     setBusy(true);
     const r = await updateLibraryFile(id, {
       name: name.trim(),
-      category,
+      category: trimmedCategory,
       customerIds: scope,
     });
     setBusy(false);
@@ -155,14 +181,33 @@ export default function EditLibraryFilePage({
             />
           </Field>
 
-          <Field label="Category" required>
-            <Combobox
+          <Field
+            label="Category"
+            hint="Pick an existing category or type a new one to create it."
+            required
+          >
+            {/* Free-text input with datalist suggestions — same picker
+                shape the upload form uses on /library. Options are a
+                union of the defaults, the manager-curated list (from
+                app_settings.library_categories), and any categories
+                already in use on files. Mariska's B6: before this, the
+                edit page bound to the hardcoded LIBRARY_CATEGORIES so
+                a file uploaded under "Brand Guidelines" couldn't be
+                re-saved with that category — the dropdown didn't list
+                it. The DB column is free-text so no migration needed. */}
+            <input
+              type="text"
+              list="library-edit-category-list"
               value={category}
-              onChange={(v) => setCategory(v ?? "")}
-              triggerIcon="lib"
-              clearable={false}
-              options={LIBRARY_CATEGORIES.map((c) => ({ value: c, label: c }))}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="e.g. Documents, Onboarding, Compliance…"
+              style={inputStyle}
             />
+            <datalist id="library-edit-category-list">
+              {categoryOptions.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
           </Field>
 
           <Field label="Customers" hint="Pick all (universal), one, or many.">
