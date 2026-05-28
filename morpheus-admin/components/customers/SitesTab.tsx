@@ -74,9 +74,10 @@ export function SitesTab({
         action={
           !adding && count > 0 ? (
             <div style={{ display: "flex", gap: 8 }}>
+              {/* Mariska G4: explicit label. URL unchanged. */}
               <Link href="/settings/import/site" style={{ textDecoration: "none" }}>
                 <Btn size="sm" icon="upload">
-                  Import
+                  Bulk import sites
                 </Btn>
               </Link>
               <Btn

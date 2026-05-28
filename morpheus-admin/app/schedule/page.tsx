@@ -713,9 +713,10 @@ export default function SchedulePage() {
           {/* Manage shifts → /schedule/manage. Lives next to "New
               shift" so a manager can flip from "what's happening"
               to "edit the patterns" in one click. */}
+          {/* Mariska G4: explicit label. URL unchanged. */}
           <Link href="/settings/import/shift" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
-              Import
+              Bulk import shifts
             </Btn>
           </Link>
           <Link href="/schedule/manage" style={{ textDecoration: "none" }}>

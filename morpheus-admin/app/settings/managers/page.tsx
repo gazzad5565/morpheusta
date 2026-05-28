@@ -197,9 +197,12 @@ export default function ManagersPage() {
               Roles &amp; permissions
             </Btn>
           </Link>
+          {/* Mariska G4: explicit label. Routes to the hub (not a
+              specific entity) since Users covers both managers and
+              reps — the hub lets the manager pick which. */}
           <Link href="/settings/import" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
-              Import
+              Bulk import users
             </Btn>
           </Link>
           <Btn

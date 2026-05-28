@@ -331,9 +331,11 @@ export default function CustomersPage() {
       breadcrumbs={["Home", "Customers"]}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
+          {/* Mariska G4: explicit label so the user knows where
+              the button takes them. URL unchanged. */}
           <Link href="/settings/import/customer" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
-              Import
+              Bulk import customers
             </Btn>
           </Link>
           <Link href="/customers/new" style={{ textDecoration: "none" }}>

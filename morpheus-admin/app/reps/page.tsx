@@ -199,9 +199,14 @@ export default function RepsPage() {
       breadcrumbs={["Home", "Reps"]}
       actions={
         <div style={{ display: "flex", gap: 8 }}>
+          {/* Mariska G4: "Import" alone made it feel like a jump
+              into Settings. Explicit "Bulk import reps" tells the
+              user up front what kind of operation they're starting
+              + matches the Settings rail label "Bulk import". URL
+              unchanged. */}
           <Link href="/settings/import/rep" style={{ textDecoration: "none" }}>
             <Btn icon="upload" size="sm">
-              Import
+              Bulk import reps
             </Btn>
           </Link>
           <Link href="/schedule/manage" style={{ textDecoration: "none" }}>
