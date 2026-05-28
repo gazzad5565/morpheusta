@@ -15,12 +15,10 @@
 
 Top of the queue (in priority order):
 
-0-NEXT. **🟢 SURFACE customer region + group + the rest of R7/G5 on the Customer Overview hero.** Gary's request at end-of-day May 28: "where do I see the group in the region in the customer page? It should be on the main page overview." Currently region + group only show on the EDIT page's Location tab — they need to land on the Overview tab next to name / address / status. Bundle with Rayhaan's R7 ask while we're touching the hero:
-   - **Already on Overview**: name, code, region (just the value, not labelled clearly), address, contacts
-   - **Needs surfacing** (this commit): Customer region · Customer group · store_type (future) · phone · primary contact pinned to top
-   - **Files to touch**: `morpheus-admin/components/customers/OverviewTab.tsx` (line 42-158 hero area). Likely add a small "Tags" row showing the region + group as pill chips, alongside or below the address.
-   - **Empty-state etiquette**: hide each chip when the value is NULL so an un-tagged customer doesn't show "Region: —" everywhere.
-   - **No DB changes needed** for region + group (already exist after the May 28 customer_group migration). store_type + customer phone + primary_contact_id are the larger pieces from R7 and can be a separate follow-up.
+0-NEXT. ✅ **SHIPPED May 28 (commit `cf7d400`)** — customer classification + primary contact now surface on the customer header card (visible on every tab): a chip row for Region · Customer group · Store type (each hidden when unset) plus a ★ primary-contact line with tappable phone. Combined with R7: store_type became a full tenant vocabulary (Organisation → Store types tab + edit picker + /customers filter), and customer_contacts.is_primary lets a manager star the headline contact (ContactsTab ★ toggle).
+   - **🟡 OPERATOR — run the migration**: `db/migrations/2026_05_28_customer_store_type_and_primary_contact.sql` (store_type column + store_types vocab seed + customer_contacts.is_primary). Idempotent. Until it runs, store-type dropdowns hide + primary stars no-op (graceful — nothing errors).
+   - **Then**: Settings → Organisation → Store types → add your classifications (Supermarket, Spaza, Pharmacy…). Star a primary contact per customer on the Contacts tab.
+   - **Deferred from R7** (separate follow-up if wanted): a dedicated `customers.phone` column (today the hero phone comes from the starred contact, which is the single-source-of-truth approach Rayhaan suggested) and the import-adapter columns for store_type / customer_group.
 
 0a-new-may-28. ✅ **APPLIED May 28 morning** — all three early-May-28 migrations ran (customer_code_text, customer_coords_source, profiles_manager_type). Gary confirmed.
 
