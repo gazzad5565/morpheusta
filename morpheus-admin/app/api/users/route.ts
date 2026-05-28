@@ -105,6 +105,11 @@ export async function POST(req: NextRequest) {
     /** May 28 — optional manager_type set at creation time. Same
      *  semantics as rep_type but for managers. Ignored when role=rep. */
     manager_type?: string | null;
+    /** May 28 (Mariska G2) — region / group / hire_date tags. Empty
+     *  string / null = unassigned. Applied regardless of role. */
+    region?: string | null;
+    group_name?: string | null;
+    hire_date?: string | null;
   };
   try {
     body = await req.json();
@@ -125,6 +130,12 @@ export async function POST(req: NextRequest) {
     role === "rep" ? ((body.rep_type ?? "").trim() || null) : null;
   const managerType =
     role === "manager" ? ((body.manager_type ?? "").trim() || null) : null;
+  // May 28 (Mariska G2) — region / group / hire_date apply to either
+  // role. Same trim-or-null normalisation. hire_date stays a string
+  // (Postgres date column accepts YYYY-MM-DD); empty string → null.
+  const region = (body.region ?? "").trim() || null;
+  const groupName = (body.group_name ?? "").trim() || null;
+  const hireDate = (body.hire_date ?? "").trim() || null;
 
   if (!email) {
     return NextResponse.json({ ok: false, error: "email required" }, { status: 400 });
@@ -163,6 +174,9 @@ export async function POST(req: NextRequest) {
         role,
         rep_type: repType,
         manager_type: managerType,
+        region,
+        group_name: groupName,
+        hire_date: hireDate,
       },
       { onConflict: "id" }
     );
@@ -191,6 +205,12 @@ export async function PATCH(req: NextRequest) {
      *  caveat (no server-side validation against the vocabulary —
      *  client dropdown is authoritative). */
     manager_type?: string | null;
+    /** May 28 (Mariska G2) — region / group / hire_date tags. Empty
+     *  string = clear. Server doesn't validate against the vocabulary;
+     *  client dropdown is authoritative. */
+    region?: string | null;
+    group_name?: string | null;
+    hire_date?: string | null;
   };
   try {
     body = await req.json();
@@ -248,6 +268,21 @@ export async function PATCH(req: NextRequest) {
     // re-assigned).
     const v = (body.manager_type ?? "").trim();
     profilePatch.manager_type = v.length > 0 ? v : null;
+  }
+  // May 28 (Mariska G2) — region / group / hire_date pass through with
+  // the same empty-string-to-null normalisation. Apply regardless of
+  // role; both managers and reps can carry these tags.
+  if (body.region !== undefined) {
+    const v = (body.region ?? "").trim();
+    profilePatch.region = v.length > 0 ? v : null;
+  }
+  if (body.group_name !== undefined) {
+    const v = (body.group_name ?? "").trim();
+    profilePatch.group_name = v.length > 0 ? v : null;
+  }
+  if (body.hire_date !== undefined) {
+    const v = (body.hire_date ?? "").trim();
+    profilePatch.hire_date = v.length > 0 ? v : null;
   }
   if (authPatch.email) profilePatch.email = authPatch.email;
   if (Object.keys(profilePatch).length > 0) {

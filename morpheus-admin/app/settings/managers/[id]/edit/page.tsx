@@ -25,6 +25,8 @@ import { formatRelative } from "@/lib/format";
 import {
   getRepTypes,
   getManagerTypes,
+  getRegions,
+  getGroups,
   type RepTypeConfig,
   type ManagerTypeConfig,
 } from "@/lib/settings-store";
@@ -64,6 +66,14 @@ export default function EditManagerPage({
   // editing themselves — forces "ask another Owner" for self-demote.
   const [managerType, setManagerType] = useState<string>("");
   const [managerTypes, setManagerTypes] = useState<ManagerTypeConfig[]>([]);
+  // May 28 — region / group / hire_date (Mariska G2). Empty string
+  // (or null hire_date) = unassigned, lenient default. Vocabularies
+  // live in app_settings.regions / .groups; edited at /settings/roles.
+  const [region, setRegion] = useState<string>("");
+  const [groupName, setGroupName] = useState<string>("");
+  const [hireDate, setHireDate] = useState<string>("");
+  const [regions, setRegions] = useState<string[]>([]);
+  const [groups, setGroups] = useState<string[]>([]);
   const [newPassword, setNewPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
 
@@ -81,14 +91,18 @@ export default function EditManagerPage({
       }
       const u = await getUser();
       if (!cancelled) setMyId(u?.id ?? null);
-      const [{ data, error: dbErr }, rTypes, mTypes] = await Promise.all([
+      const [{ data, error: dbErr }, rTypes, mTypes, rRegions, rGroups] = await Promise.all([
         supabase
           .from("profiles")
-          .select("id, email, name, role, created_at, rep_type, manager_type")
+          .select(
+            "id, email, name, role, created_at, rep_type, manager_type, region, group_name, hire_date"
+          )
           .eq("id", id)
           .maybeSingle(),
         getRepTypes(),
         getManagerTypes(),
+        getRegions(),
+        getGroups(),
       ]);
       if (cancelled) return;
       if (dbErr || !data) {
@@ -103,8 +117,13 @@ export default function EditManagerPage({
       setRole(p.role === "manager" ? "manager" : "rep");
       setRepType(p.rep_type ?? "");
       setManagerType(p.manager_type ?? "");
+      setRegion(p.region ?? "");
+      setGroupName(p.group_name ?? "");
+      setHireDate(p.hire_date ?? "");
       setRepTypes(rTypes);
       setManagerTypes(mTypes);
+      setRegions(rRegions);
+      setGroups(rGroups);
       setLoading(false);
     })();
     return () => {
@@ -138,6 +157,13 @@ export default function EditManagerPage({
             ? undefined
             : managerType
           : null,
+      // May 28 (Mariska G2) — region / group / hire_date apply to
+      // either role. Empty string from the dropdown clears the field
+      // server-side. hire_date is a YYYY-MM-DD string from the
+      // <input type="date">; the API treats empty as null.
+      region,
+      group_name: groupName,
+      hire_date: hireDate,
     });
     setBusy(false);
     if (!r.ok) {
@@ -375,6 +401,67 @@ export default function EditManagerPage({
                 </div>
               </Field>
             )}
+
+            {/* May 28 (Mariska G2) — Region / Group / Hire date.
+                Apply to either role. Empty selection = unassigned;
+                lenient default everywhere downstream so this never
+                hides users from filters that ignore the field.
+                Region + Group dropdowns hide entirely when the
+                tenant hasn't defined any values yet — managers
+                go to Settings → Roles & permissions to populate
+                them first. */}
+            {regions.length > 0 && (
+              <Field label="Region">
+                <select
+                  value={region}
+                  onChange={(e) => setRegion(e.target.value)}
+                  style={{ ...inputStyle, cursor: "pointer" }}
+                >
+                  <option value="">— Unassigned —</option>
+                  {regions.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {groups.length > 0 && (
+              <Field label="Group">
+                <select
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  style={{ ...inputStyle, cursor: "pointer" }}
+                >
+                  <option value="">— Unassigned —</option>
+                  {groups.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            <Field label="Hire date">
+              <input
+                type="date"
+                value={hireDate}
+                onChange={(e) => setHireDate(e.target.value)}
+                style={inputStyle}
+              />
+              <div
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11.5,
+                  color: AC.mute,
+                  marginTop: 6,
+                  lineHeight: 1.4,
+                }}
+              >
+                When this person joined the field workforce. Distinct from the
+                account-creation date above.
+              </div>
+            </Field>
           </Card>
 
           <Card padding={20}>

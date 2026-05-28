@@ -31,6 +31,17 @@ export interface CreateUserInput {
    *  View only / …). Empty string / null means "unrestricted". Only
    *  applied when role=manager. May 28. */
   manager_type?: string | null;
+  /** Optional region tag (e.g. "Gauteng"). Vocabulary in
+   *  app_settings.regions. Empty / null = unassigned. Mariska G2
+   *  (May 28). */
+  region?: string | null;
+  /** Optional work group tag (e.g. "Cape route"). DB column is
+   *  group_name (SQL reserved-word avoidance); the wire shape is
+   *  also group_name. Vocabulary in app_settings.groups. May 28. */
+  group_name?: string | null;
+  /** Optional hire date (YYYY-MM-DD). Distinct from created_at.
+   *  Empty / null = unknown. May 28. */
+  hire_date?: string | null;
 }
 
 export async function createUser(
@@ -65,6 +76,12 @@ export interface UpdateUserInput {
    *  string / null clears the category back to lenient default-allow.
    *  Ignored when role=rep. May 28. */
   manager_type?: string | null;
+  /** Region / group / hire_date tags — Mariska G2 (May 28). Empty
+   *  string / null clears the field. Vocabularies live in
+   *  app_settings.regions / .groups; hire_date is freeform YYYY-MM-DD. */
+  region?: string | null;
+  group_name?: string | null;
+  hire_date?: string | null;
 }
 
 export async function updateUser(
