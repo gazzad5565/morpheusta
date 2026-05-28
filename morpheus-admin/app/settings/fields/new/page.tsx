@@ -55,7 +55,7 @@ function NewFieldPage() {
       alert(`Couldn't save: ${r.error}`);
       return;
     }
-    router.push("/settings/organisation?tab=custom-fields");
+    router.push("/settings/site?tab=custom-fields");
   };
 
   return (
@@ -64,7 +64,7 @@ function NewFieldPage() {
         initial={initial}
         busy={busy}
         onSubmit={onSave}
-        onCancel={() => router.push("/settings/organisation?tab=custom-fields")}
+        onCancel={() => router.push("/settings/site?tab=custom-fields")}
         saveLabel="Create field"
       />
     </AdminShell>

@@ -45,20 +45,30 @@ export interface SettingsSection {
 // so every existing link + breadcrumb keeps working.
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
-    // "Organisation" → "Site settings" (May 28, later — Gary:
-    // "make us a site settings... site-wide [defaults] where they
-    // adjust things... customer regions + customer groups belong
-    // there, custom fields too, and slowly currency etc."). The
-    // page (route unchanged at /settings/organisation) is a tabbed
-    // hub: Details (org name/logo) · Customer regions · Customer
-    // groups · Store types · Custom fields. Future site-wide
-    // defaults (currency, date format) become new tabs here.
+    // Organisation = company identity only (name, logo, accent
+    // colour, contact details). Its own rail entry — Gary (May 28)
+    // keeps it separate from Site settings.
     id: "organisation",
-    label: "Site settings",
+    label: "Organisation",
     href: "/settings/organisation",
+    glyph: "building",
+    description:
+      "Organisation name, logo, accent colour, and contact details — shown in the sidebar and on exports.",
+    available: true,
+  },
+  {
+    // Site settings = the site-wide taxonomies + field definitions
+    // (May 28 — Gary: "site-wide defaults where they adjust things;
+    // customer regions + groups belong there, custom fields too, and
+    // slowly currency etc"). Tabbed page: Customer regions · Customer
+    // groups · Store types · Custom fields. Future defaults (currency,
+    // date format) slot in as new tabs — no new rail entry needed.
+    id: "site",
+    label: "Site settings",
+    href: "/settings/site",
     glyph: "settings",
     description:
-      "Site-wide defaults — organisation details, customer regions / groups, store types, and custom fields. Each in its own tab.",
+      "Site-wide taxonomies + custom fields: customer regions, customer groups, store types, and field definitions. Each in its own tab.",
     available: true,
   },
   {

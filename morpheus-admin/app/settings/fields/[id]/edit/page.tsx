@@ -68,7 +68,7 @@ export default function EditFieldPage({
       alert(`Couldn't save: ${r.error}`);
       return;
     }
-    router.push("/settings/organisation?tab=custom-fields");
+    router.push("/settings/site?tab=custom-fields");
   };
 
   const onDelete = async () => {
@@ -86,7 +86,7 @@ export default function EditFieldPage({
       alert(`Couldn't delete: ${r.error}`);
       return;
     }
-    router.push("/settings/organisation?tab=custom-fields");
+    router.push("/settings/site?tab=custom-fields");
   };
 
   if (loading) {
@@ -107,7 +107,7 @@ export default function EditFieldPage({
             <div style={{ fontFamily: AC.font, fontSize: 14, color: AC.ink, marginBottom: 8 }}>
               No field found with this ID.
             </div>
-            <Btn onClick={() => router.push("/settings/organisation?tab=custom-fields")}>Back to Settings</Btn>
+            <Btn onClick={() => router.push("/settings/site?tab=custom-fields")}>Back to Settings</Btn>
           </Card>
         </div>
       </AdminShell>
@@ -121,7 +121,7 @@ export default function EditFieldPage({
         busy={busy}
         onSubmit={onSave}
         onDelete={onDelete}
-        onCancel={() => router.push("/settings/organisation?tab=custom-fields")}
+        onCancel={() => router.push("/settings/site?tab=custom-fields")}
         saveLabel="Save changes"
       />
     </AdminShell>

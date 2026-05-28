@@ -12,5 +12,5 @@
 import { redirect } from "next/navigation";
 
 export default function CustomFieldsRedirect() {
-  redirect("/settings/organisation?tab=custom-fields");
+  redirect("/settings/site?tab=custom-fields");
 }

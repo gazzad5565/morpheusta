@@ -24,16 +24,6 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { SettingsShell } from "@/components/shell/SettingsShell";
-import { StringListEditor } from "@/components/users/StringListEditor";
-import { CustomFieldsManager } from "@/components/settings/CustomFieldsManager";
-import {
-  getRegions,
-  setRegions,
-  getGroups,
-  setGroups,
-  getStoreTypes,
-  setStoreTypes,
-} from "@/lib/settings-store";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import { CustomerAddressMap } from "@/components/CustomerAddressMap";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
@@ -58,53 +48,10 @@ import {
 } from "@/lib/settings-store";
 
 export default function OrganisationSettingsPage() {
-  // Tab state (May 28 later — Gary: convert Organisation to tabs).
-  // Three tabs: Details (the existing org-branding form), Customer
-  // regions (vocab editor), Customer groups (vocab editor). State
-  // is local — not persisted to URL — since the typical flow is
-  // "open the section, edit one thing, leave." Bookmarkable tabs
-  // can come later if managers ask.
-  const [tab, setTab] = useState<
-    "details" | "regions" | "groups" | "store-types" | "custom-fields"
-  >("details");
-  // Honour a ?tab= query param on mount so deep-links (e.g. the
-  // /settings/custom-fields redirect → ?tab=custom-fields) land on
-  // the right tab. Read via window to avoid the useSearchParams
-  // Suspense requirement on this client page. May 28.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const t = new URLSearchParams(window.location.search).get("tab");
-    if (
-      t === "details" ||
-      t === "regions" ||
-      t === "groups" ||
-      t === "store-types" ||
-      t === "custom-fields"
-    ) {
-      setTab(t);
-    }
-  }, []);
-  // Vocab state for the three vocab tabs. null = loading; the
-  // StringListEditor needs a non-null array so we wait.
-  const [regions, setRegionsState] = useState<string[] | null>(null);
-  const [groups, setGroupsState] = useState<string[] | null>(null);
-  const [storeTypes, setStoreTypesState] = useState<string[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void Promise.all([getRegions(), getGroups(), getStoreTypes()]).then(
-      ([r, g, s]) => {
-        if (cancelled) return;
-        setRegionsState(r);
-        setGroupsState(g);
-        setStoreTypesState(s);
-      }
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
+  // Organisation = org identity only (name, logo, branding, contact).
+  // The site-wide taxonomies + custom fields moved to /settings/site
+  // ("Site settings") on May 28 — Gary keeps Organisation as its own
+  // separate rail entry.
   const [name, setName] = useState<string>("");
   const [logoUrl, setLogoUrl] = useState<string>("");
   // Org-name accent colour (hex string). Empty = inherit default.
@@ -303,121 +250,8 @@ export default function OrganisationSettingsPage() {
   return (
     <SettingsShell
       section="organisation"
-      description="Site-wide defaults — your organisation details, the customer regions / groups / store-type taxonomies, and custom field definitions. Each lives in its own tab."
+      description="Your organisation's name, logo, accent colour, and contact details — shown in the sidebar, on exports, and the rep app footer. Customer regions / groups / store types + custom fields live under Site settings."
     >
-      {/* Tab bar — Details / Customer regions / Customer groups.
-          Same visual shape as the RulesTabBar so the two tabbed
-          Settings surfaces feel like siblings (May 28 later, Gary:
-          "tabs... so its clear what its for"). */}
-      <div
-        style={{
-          display: "flex",
-          gap: 0,
-          marginBottom: 18,
-          borderBottom: `1px solid ${AC.line}`,
-          maxWidth: 760,
-        }}
-      >
-        {[
-          { id: "details" as const, label: "Details" },
-          { id: "regions" as const, label: "Customer regions" },
-          { id: "groups" as const, label: "Customer groups" },
-          { id: "store-types" as const, label: "Store types" },
-          { id: "custom-fields" as const, label: "Custom fields" },
-        ].map((t) => {
-          const isActive = tab === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => setTab(t.id)}
-              style={{
-                padding: "10px 16px",
-                borderBottom: `2px solid ${isActive ? AC.brandDeep : "transparent"}`,
-                marginBottom: -1,
-                background: "transparent",
-                border: "none",
-                borderBottomWidth: 2,
-                borderBottomStyle: "solid",
-                borderBottomColor: isActive ? AC.brandDeep : "transparent",
-                cursor: "pointer",
-                fontFamily: AC.font,
-                fontSize: 13,
-                fontWeight: isActive ? 700 : 500,
-                color: isActive ? AC.brandInk : AC.mute,
-                letterSpacing: -0.1,
-              }}
-            >
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {tab === "regions" && (
-        <div style={{ maxWidth: 760 }}>
-          {regions === null ? (
-            <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
-              Loading customer regions…
-            </div>
-          ) : (
-            <StringListEditor
-              current={regions}
-              noun="customer region"
-              hint="Geographic regions you assign customers to (e.g. Gauteng, Western Cape, KZN). Drives the Customer region filter on /customers and audience targeting downstream."
-              addPlaceholder="e.g. Gauteng, Western Cape, KZN…"
-              onSave={setRegions}
-              onSaved={(next) => setRegionsState(next)}
-            />
-          )}
-        </div>
-      )}
-
-      {tab === "groups" && (
-        <div style={{ maxWidth: 760 }}>
-          {groups === null ? (
-            <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
-              Loading customer groups…
-            </div>
-          ) : (
-            <StringListEditor
-              current={groups}
-              noun="customer group"
-              hint="Customer cohorts / segments (e.g. 'Premium', 'Spaza', 'Wholesale'). Drives the Customer group filter on /customers."
-              addPlaceholder="e.g. Premium, Spaza, Wholesale…"
-              onSave={setGroups}
-              onSaved={(next) => setGroupsState(next)}
-            />
-          )}
-        </div>
-      )}
-
-      {tab === "store-types" && (
-        <div style={{ maxWidth: 760 }}>
-          {storeTypes === null ? (
-            <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
-              Loading store types…
-            </div>
-          ) : (
-            <StringListEditor
-              current={storeTypes}
-              noun="store type"
-              hint="How you classify a customer's outlet (e.g. 'Supermarket', 'Spaza', 'Pharmacy', 'Wholesale'). Shows on the customer header + drives the Store type filter on /customers."
-              addPlaceholder="e.g. Supermarket, Spaza, Pharmacy…"
-              onSave={setStoreTypes}
-              onSaved={(next) => setStoreTypesState(next)}
-            />
-          )}
-        </div>
-      )}
-
-      {tab === "custom-fields" && (
-        <div style={{ maxWidth: 760 }}>
-          <CustomFieldsManager />
-        </div>
-      )}
-
-      {tab === "details" && (
       <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 760 }}>
         {/* Name */}
         <Card padding={20}>
@@ -779,7 +613,6 @@ export default function OrganisationSettingsPage() {
           </div>
         )}
       </div>
-      )}
     </SettingsShell>
   );
 }
