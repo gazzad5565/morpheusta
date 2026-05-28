@@ -34,6 +34,20 @@ export interface Profile {
    *  'manager'. Two capability flags gate /settings/* and /schedule/*
    *  respectively — see managerTypeCan in settings-store.ts. May 28. */
   manager_type?: string | null;
+  /** Tenant-defined region tag (e.g. "Gauteng", "Western Cape").
+   *  Vocabulary lives in app_settings.regions. NULL = unassigned;
+   *  filters treat NULL as "any". Mariska G2 (May 28). */
+  region?: string | null;
+  /** Tenant-defined work group / team tag (e.g. "Cape route",
+   *  "Bakery merchandisers"). Vocabulary lives in app_settings.groups.
+   *  The DB column is `group_name` (the bare word `group` is a SQL
+   *  reserved word) — the UI surfaces it as just "Group". NULL =
+   *  unassigned. Mariska G2 (May 28). */
+  group_name?: string | null;
+  /** When the person joined the field workforce. Distinct from
+   *  created_at, which is when their account was created in the
+   *  system (often later). NULL = unknown. Mariska G2 (May 28). */
+  hire_date?: string | null;
 }
 
 // SELECT column lists for profile reads.
@@ -49,7 +63,7 @@ export interface Profile {
 // keeps the admin functional even when a deploy has raced ahead of
 // a migration. May 28 (post-rep-vanish incident).
 const PROFILE_COLS_FULL =
-  "id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type, manager_type";
+  "id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type, manager_type, region, group_name, hire_date";
 const PROFILE_COLS_SAFE =
   "id, email, name, role, avatar_url, created_at";
 

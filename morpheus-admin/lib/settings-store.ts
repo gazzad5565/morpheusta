@@ -874,3 +874,62 @@ export function managerTypeCan(
   if (!entry) return true; // unknown type → don't block
   return entry[capability];
 }
+
+// ─── Regions & groups (May 28, 2026) ──────────────────────────────
+//
+// Mariska G2 — region and group tags on profiles. Same admin-managed
+// vocabulary pattern as rep_types / manager_types but WITHOUT
+// per-tag capabilities. Just lists of strings.
+//
+// The DB columns on profiles are `region` and `group_name` (the
+// bare `group` is a SQL reserved word). The vocabularies live at:
+//   app_settings.regions  → JSON array of strings
+//   app_settings.groups   → JSON array of strings
+//
+// Empty array is a valid state — fresh tenant hasn't named any
+// regions / groups yet. Filter UI hides itself when the vocabulary
+// is empty. Defensive reader trims + dedupes + drops non-strings so
+// a malformed JSON value in the row can't crash the page.
+
+/** Trim, drop empty / non-string entries, dedupe case-insensitively
+ *  while preserving the first-seen casing. Used by both getRegions /
+ *  getGroups since they share the shape. */
+function parseStringList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const trimmed = v.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+export async function getRegions(): Promise<string[]> {
+  const v = await readSetting<unknown>("regions", null);
+  return parseStringList(v);
+}
+
+export async function setRegions(
+  list: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  const clean = parseStringList(list);
+  return writeSetting("regions", clean, "regions");
+}
+
+export async function getGroups(): Promise<string[]> {
+  const v = await readSetting<unknown>("groups", null);
+  return parseStringList(v);
+}
+
+export async function setGroups(
+  list: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  const clean = parseStringList(list);
+  return writeSetting("groups", clean, "groups");
+}
