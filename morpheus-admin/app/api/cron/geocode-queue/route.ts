@@ -137,6 +137,10 @@ export async function GET(req: NextRequest) {
             longitude: hit.longitude,
             geocode_status: "done",
             geocode_attempted_at: new Date().toISOString(),
+            // Mariska B4 (May 28): tag the source so admin UI can
+            // surface "may be stale". Don't touch coords_source on
+            // failure — keep whatever was there.
+            coords_source: "address_geocode",
           })
           .eq("id", row.id);
         done += 1;

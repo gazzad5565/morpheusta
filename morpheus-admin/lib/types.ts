@@ -53,6 +53,14 @@ export interface Customer {
    *  to geocode. The Phase E cron drains 'pending' rows once per
    *  minute. Manual address edits flip the row back to 'pending'. */
   geocodeStatus?: "pending" | "done" | "failed" | "skipped" | null;
+  /** Why this customer has its current lat/lng. NULL for legacy /
+   *  pre-May-28 rows. 'manual' = admin curated; 'address_geocode' =
+   *  Phase E cron resolved from address text (potentially stale);
+   *  'rep_pinned' = field rep dropped a GPS pin via /active
+   *  geocode-task card (coords trustworthy, address may not match).
+   *  Drives the "Pinned by rep — confirm address" chip on the
+   *  customer detail page. Mariska B4, May 28. */
+  coordsSource?: "manual" | "address_geocode" | "rep_pinned" | null;
 }
 
 /**

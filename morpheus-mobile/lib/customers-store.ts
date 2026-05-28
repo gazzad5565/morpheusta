@@ -422,6 +422,10 @@ export async function setCustomerSiteCoords(args: {
     : `Pinned location · ${source === "gps" ? "rep GPS" : "address geocode"}`;
   const siteUpdate: Record<string, unknown> = { latitude, longitude };
   if (cleanName) siteUpdate.name = cleanName;
+  // Mariska B4 (May 28): tag where these coords came from so the
+  // admin UI can show a "Pinned by rep — confirm address" chip and
+  // managers know the street text may not match the GPS pin.
+  if (source === "gps") siteUpdate.coords_source = "rep_pinned";
   // Pull the existing site row first so we only overwrite address /
   // name when they're empty — never stomp a manager's curated value.
   const { data: existing } = await supabase
@@ -464,6 +468,8 @@ export async function setCustomerSiteCoords(args: {
   //    so the customer-level "no address" tile fills in too.
   const customerUpdate: Record<string, unknown> = { latitude, longitude };
   if (!hasExistingAddress) customerUpdate.address = syntheticAddress;
+  // Same tag on the parent customer row when we touch its coords.
+  if (source === "gps") customerUpdate.coords_source = "rep_pinned";
   await supabase
     .from("customers")
     .update(customerUpdate)

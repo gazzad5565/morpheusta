@@ -46,6 +46,8 @@ interface DbRow {
   created_at?: string | null;
   /** Background-geocoder status from the Phase A migration. */
   geocode_status?: "pending" | "done" | "failed" | "skipped" | null;
+  /** Why this row has its current lat/lng. Added May 28 — Mariska B4. */
+  coords_source?: "manual" | "address_geocode" | "rep_pinned" | null;
 }
 
 function rowToCustomer(row: DbRow): Customer {
@@ -70,6 +72,7 @@ function rowToCustomer(row: DbRow): Customer {
     createdByRepId: row.created_by_rep_id ?? null,
     createdAt: row.created_at ?? undefined,
     geocodeStatus: row.geocode_status ?? null,
+    coordsSource: row.coords_source ?? null,
   };
 }
 
@@ -352,6 +355,18 @@ export async function updateCustomer(
   ) {
     cleanPatch.geocode_status = "pending";
     cleanPatch.geocode_attempted_at = null;
+  }
+  // Mariska B4 (May 28): any time the manager touches address or
+  // coords from admin, that's a curated value — flip coords_source
+  // to 'manual' so the "Pinned by rep — confirm address" chip
+  // clears. If the cron later re-resolves the address it'll
+  // overwrite this back to 'address_geocode' on the next tick.
+  if (
+    patch.address !== undefined ||
+    patch.latitude !== undefined ||
+    patch.longitude !== undefined
+  ) {
+    cleanPatch.coords_source = "manual";
   }
   const { error } = await supabase.from("customers").update(cleanPatch).eq("id", id);
   if (error) {

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
+import { CoordsSourceChip } from "@/components/ui/CoordsSourceChip";
 import { AC } from "@/lib/tokens";
 import type { Customer } from "@/lib/types";
 import {
@@ -254,6 +255,14 @@ export function OverviewTab({
               <span style={{ fontWeight: 500, color: AC.mute, fontStyle: "italic" }}>
                 No address yet — open Edit to add one.
               </span>
+            )}
+            {/* Mariska B4: the rep pinned a GPS location from the
+                mobile app. The address text above may not match
+                that pin — flag it so the manager edits to confirm. */}
+            {customer.coordsSource === "rep_pinned" && (
+              <div style={{ marginTop: 6 }}>
+                <CoordsSourceChip source={customer.coordsSource} />
+              </div>
             )}
           </div>
           <div
