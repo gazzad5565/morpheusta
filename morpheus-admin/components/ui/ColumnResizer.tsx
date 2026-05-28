@@ -100,17 +100,53 @@ export function ColumnResizer({ index, cols }: ColumnResizerProps) {
         top: 0,
         right: -3,
         bottom: 0,
-        width: 6,
+        width: 8,
         cursor: "col-resize",
         // High z-index so the hit area sits over the next column's
         // padding too — wider effective target than the visual line.
         zIndex: 2,
-        // Visual line — invisible by default, brand-tinted on
-        // hover/drag so the user knows they've grabbed it.
-        background: active ? AC.brand : "transparent",
-        opacity: active ? 0.85 : 1,
-        transition: "background .12s ease",
+        // The hit area itself is transparent; the visible affordance
+        // is the centred grip below.
+        background: "transparent",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
       }}
-    />
+    >
+      {/* Resize affordance (Gary, May 28: "people won't know columns
+          can be resized — show it subtly, smartly"). A small grip of
+          two short vertical bars, faint at rest so it reads as a
+          gentle "you can grab this" cue without shouting, then
+          brand-tinted + taller on hover/drag for clear feedback. */}
+      <div
+        aria-hidden
+        style={{
+          display: "flex",
+          gap: 2,
+          alignItems: "center",
+          opacity: active ? 1 : 0.45,
+          transition: "opacity .12s ease",
+        }}
+      >
+        <span
+          style={{
+            width: 1.5,
+            height: active ? 16 : 11,
+            borderRadius: 1,
+            background: active ? AC.brand : AC.line,
+            transition: "height .12s ease, background .12s ease",
+          }}
+        />
+        <span
+          style={{
+            width: 1.5,
+            height: active ? 16 : 11,
+            borderRadius: 1,
+            background: active ? AC.brand : AC.line,
+            transition: "height .12s ease, background .12s ease",
+          }}
+        />
+      </div>
+    </div>
   );
 }

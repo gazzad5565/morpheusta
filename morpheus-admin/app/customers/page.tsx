@@ -37,7 +37,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
-import { FilterChip } from "@/components/ui/Filters";
+import { FilterChip, FilterSelect } from "@/components/ui/Filters";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { getRegions, getGroups, getStoreTypes } from "@/lib/settings-store";
 import {
@@ -65,23 +65,6 @@ type CustomerSortKey =
 /** Validate a persisted sort key against the current schema. Old
  *  entries that still hold "status" (dropped May 27 when the column
  *  went away) silently fall back to "code". */
-/** Brand-tinted-when-active styling for the Customer region +
- *  Customer group filter dropdowns. Matches the equivalent style
- *  on /reps so the two list pages feel consistent. May 28. */
-function customerFilterSelectStyle(active: string): React.CSSProperties {
-  return {
-    padding: "6px 10px",
-    borderRadius: 8,
-    border: `1px solid ${active ? AC.brandDeep : AC.line}`,
-    background: active ? AC.brandSoft : "#fff",
-    color: active ? AC.brandInk : AC.ink2,
-    fontFamily: AC.font,
-    fontSize: 12.5,
-    fontWeight: 600,
-    cursor: "pointer",
-  };
-}
-
 function safeCustomerSortKey(v: unknown): CustomerSortKey {
   const allowed: CustomerSortKey[] = [
     "code",
@@ -147,7 +130,11 @@ export default function CustomersPage() {
   // via localStorage below.
   const [view, setView] = useState<ViewMode>(persisted.view ?? "Table");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(
-    persisted.statusFilter ?? "all"
+    // "inactive" filter was removed May 28 — coerce any stale
+    // persisted value back to "all" so an old localStorage entry
+    // doesn't strand the user on an inactive-only view with no chip
+    // to clear it.
+    persisted.statusFilter === "inactive" ? "all" : persisted.statusFilter ?? "all"
   );
   const [withAddressOnly, setWithAddressOnly] = useState(
     persisted.withAddressOnly ?? false
@@ -425,12 +412,9 @@ export default function CustomersPage() {
             >
               Active · {counts.active}
             </FilterChip>
-            <FilterChip
-              active={statusFilter === "inactive"}
-              onClick={() => setStatusFilter("inactive")}
-            >
-              Inactive · {counts.inactive}
-            </FilterChip>
+            {/* "Inactive" chip removed May 28 (Gary: "no value"). The
+                "all" chip still includes inactive customers; there's
+                just no dedicated inactive-only filter anymore. */}
             <FilterChip
               active={statusFilter === "new"}
               onClick={() => setStatusFilter("new")}
@@ -443,54 +427,37 @@ export default function CustomersPage() {
             >
               On the map · {counts.withAddr}
             </FilterChip>
-            {/* Mariska G5a (May 28 later) — Customer region + group
-                filters. Hide when the tenant hasn't populated the
-                vocabulary; encourages going to Settings →
-                Organisation → Customer regions / groups first. */}
+            {/* Mariska G5a — Customer region / group / store-type
+                filters. FilterSelect (May 28) keeps them visually in
+                the FilterChip pill family. Each hides until the
+                tenant populates its vocabulary at Settings →
+                Organisation. */}
             {regionVocab.length > 0 && (
-              <select
+              <FilterSelect
                 value={regionFilter}
-                onChange={(e) => setRegionFilter(e.target.value)}
+                onChange={setRegionFilter}
+                allLabel="All customer regions"
                 title="Filter by customer region"
-                style={customerFilterSelectStyle(regionFilter)}
-              >
-                <option value="">All customer regions</option>
-                {regionVocab.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
+                options={regionVocab.map((r) => ({ value: r, label: r }))}
+              />
             )}
             {groupVocab.length > 0 && (
-              <select
+              <FilterSelect
                 value={groupFilter}
-                onChange={(e) => setGroupFilter(e.target.value)}
+                onChange={setGroupFilter}
+                allLabel="All customer groups"
                 title="Filter by customer group"
-                style={customerFilterSelectStyle(groupFilter)}
-              >
-                <option value="">All customer groups</option>
-                {groupVocab.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </select>
+                options={groupVocab.map((g) => ({ value: g, label: g }))}
+              />
             )}
             {storeTypeVocab.length > 0 && (
-              <select
+              <FilterSelect
                 value={storeTypeFilter}
-                onChange={(e) => setStoreTypeFilter(e.target.value)}
+                onChange={setStoreTypeFilter}
+                allLabel="All store types"
                 title="Filter by store type"
-                style={customerFilterSelectStyle(storeTypeFilter)}
-              >
-                <option value="">All store types</option>
-                {storeTypeVocab.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+                options={storeTypeVocab.map((s) => ({ value: s, label: s }))}
+              />
             )}
             <div style={{ flex: 1 }} />
             <div

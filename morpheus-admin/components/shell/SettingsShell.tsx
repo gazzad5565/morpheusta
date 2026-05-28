@@ -85,7 +85,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     // is /settings/check-in-rules — the tab bar surfaces
     // Messaging from there.
     id: "rules",
-    label: "Check-ins & messaging",
+    label: "Check-in & messaging rules",
     href: "/settings/check-in-rules",
     glyph: "clock",
     description:
@@ -108,7 +108,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     // alone is ambiguous (could mean code imports or anything); "Bulk
     // import" tells you what it is.
     id: "import",
-    label: "Bulk import",
+    label: "Bulk imports",
     href: "/settings/import",
     glyph: "upload",
     description:

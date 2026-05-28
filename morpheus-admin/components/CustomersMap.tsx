@@ -80,7 +80,6 @@ export function CustomersMap({ customers }: { customers: Customer[] }) {
         box-shadow: 0 1px 4px rgba(0,0,0,0.3);
         border: 2px solid #fff;
         cursor: pointer;
-        opacity: ${c.active === false ? 0.55 : 1};
       `;
       el.title = `${c.name} — customer site`;
       el.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V11z"/></svg>`;

@@ -204,7 +204,7 @@ export default function CheckInRulesPage() {
   return (
     <SettingsShell
       section="rules"
-      title="Check-ins & messaging"
+      title="Check-in & messaging rules"
       description="Thresholds that gate when the mobile app shows an exception card on check-in / check-out. Below each threshold no exception UI appears and the rep can proceed straight away."
     >
       <RulesTabBar active="check-ins" />

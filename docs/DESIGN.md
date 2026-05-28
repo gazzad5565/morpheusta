@@ -237,6 +237,17 @@ so the next page can reuse it.
   duplicate-mode picker.
 - **`FilterChip`** (from `Filters.tsx`) — the round pill that says "All"
   / "With shifts today" / "Managers" on list pages. Click to toggle.
+- **`FilterSelect`** (from `Filters.tsx`) — the canonical filter-row
+  **dropdown**. A `<select>` styled as a pill in the same family as
+  `FilterChip` (radius 99, same height/font, brand-tinted when a value
+  is chosen, native arrow suppressed + replaced with a brand chevron).
+  **Every categorical filter dropdown on a list page must use this, not
+  a bare `<select>`** — Gary's May 28 note: raw selects "don't look like
+  the [chip] buttons." Props: `value`, `onChange`, `options` (`{value,
+  label}[]`), `allLabel` (the clear-filter option), `title`. Exception:
+  grouped selects that need `<optgroup>` (e.g. /notify's manager-types-
+  vs-rep-types picker) stay as styled `<select>`s for now — FilterSelect
+  doesn't do groups yet.
 - **`SortableHeader`** — clickable table header cell that toggles
   asc / desc / unsorted via `SortState<T>`. Comes with `compareBy`.
 
@@ -278,7 +289,12 @@ so the next page can reuse it.
   <page>.v1`). Min column width 60px. Double-click handle to reset
   that column. Computed `gridTemplateColumns` string returned by
   the hook is used on BOTH the header row AND every data row in
-  the table. Added May 27.
+  the table. Added May 27. **Affordance (May 28):** the handle is
+  NOT invisible-until-hover — it shows a faint two-bar grip at rest
+  (≈45% opacity, `AC.line`) so users discover columns are resizable,
+  then brightens to brand + grows taller on hover/drag. Gary's rule:
+  "show it subtly, smartly — not too in your face." Don't revert to a
+  fully-hidden handle; the resting grip is the discoverability cue.
 - **`EmailUserModal`** — portal-based "Email this user" dialog
   shared by `/settings/managers/[id]/edit` and `/reps/[id]`. Two
   send paths: invite link (Supabase recovery flow, doesn't touch

@@ -96,7 +96,7 @@ export default function NotificationsSettingsPage() {
   return (
     <SettingsShell
       section="rules"
-      title="Check-ins & messaging"
+      title="Check-in & messaging rules"
       description="Org-wide on/off for every Web Push notification. Reps still subscribe / unsubscribe from /profile on the mobile app; this just controls whether the server actually delivers."
     >
       <RulesTabBar active="messaging" />

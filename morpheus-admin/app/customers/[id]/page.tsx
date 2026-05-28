@@ -393,6 +393,27 @@ export default function CustomerDetailPage() {
                       {primaryContact.phone}
                     </a>
                   )}
+                  {/* Clickable email → opens the manager's mail client
+                      (Gary, May 28: "I should be able to email them
+                      straight from looking at a customer"). */}
+                  {primaryContact.email && (
+                    <a
+                      href={`mailto:${primaryContact.email}`}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        color: AC.brandInk,
+                        textDecoration: "none",
+                        fontWeight: 500,
+                        wordBreak: "break-all",
+                      }}
+                      title={`Email ${primaryContact.name}`}
+                    >
+                      <AGlyph name="mail" size={11} color={AC.brandDeep} />
+                      {primaryContact.email}
+                    </a>
+                  )}
                 </div>
               )}
 

@@ -20,7 +20,7 @@ import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { RepAvatar } from "@/components/ui/Avatars";
 import { SegTabs } from "@/components/ui/SegTabs";
-import { FilterChip } from "@/components/ui/Filters";
+import { FilterChip, FilterSelect } from "@/components/ui/Filters";
 import {
   SortableHeader,
   compareBy,
@@ -241,19 +241,13 @@ export default function RepsPage() {
               No shifts today · {counts.noShifts}
             </FilterChip>
             {repTypes.length > 0 && (
-              <select
+              <FilterSelect
                 value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
+                onChange={setTypeFilter}
+                allLabel="All types"
                 title="Filter by rep type"
-                style={filterSelectStyle(typeFilter)}
-              >
-                <option value="">All types</option>
-                {repTypes.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
+                options={repTypes.map((t) => ({ value: t.name, label: t.name }))}
+              />
             )}
             <div style={{ flex: 1 }} />
             <SearchBox value={search} onChange={setSearch} />
@@ -426,22 +420,6 @@ function LastActiveCell({ ts }: { ts: string | null }) {
   );
 }
 
-/** Shared style for the filter dropdowns on the /reps filter row.
- *  Brand-tinted when active, neutral when "All". Used by the rep
- *  type, region, and group selects. May 28. */
-function filterSelectStyle(active: string): CSSProperties {
-  return {
-    padding: "6px 10px",
-    borderRadius: 8,
-    border: `1px solid ${active ? AC.brandDeep : AC.line}`,
-    background: active ? AC.brandSoft : "#fff",
-    color: active ? AC.brandInk : AC.ink2,
-    fontFamily: AC.font,
-    fontSize: 12.5,
-    fontWeight: 600,
-    cursor: "pointer",
-  };
-}
 
 function ShiftsTodayPill({ count }: { count: number }) {
   if (count === 0) {
