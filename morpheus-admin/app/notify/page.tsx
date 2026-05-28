@@ -32,6 +32,8 @@ import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import {
   getRepTypes,
   getManagerTypes,
+  getRegions,
+  getGroups,
   type RepTypeConfig,
   type ManagerTypeConfig,
 } from "@/lib/settings-store";
@@ -68,8 +70,14 @@ export default function NotifyPage() {
   // name collision between the two vocabularies can't blur the
   // filter — same convention as /settings/managers.
   const [typeFilter, setTypeFilter] = useState<string>("");
+  // May 28 (Mariska G11a) — region + group drill-down on the
+  // Pick-specific picker. Same hide-when-vocab-empty rule.
+  const [regionFilter, setRegionFilter] = useState<string>("");
+  const [groupFilter, setGroupFilter] = useState<string>("");
   const [repTypes, setRepTypes] = useState<RepTypeConfig[]>([]);
   const [managerTypes, setManagerTypes] = useState<ManagerTypeConfig[]>([]);
+  const [regions, setRegions] = useState<string[]>([]);
+  const [groups, setGroups] = useState<string[]>([]);
 
   // Recent messages list
   const [recent, setRecent] = useState<MessageRow[]>([]);
@@ -81,10 +89,17 @@ export default function NotifyPage() {
     void listProfiles().then((ps) => {
       if (!cancelled) setAllProfiles(ps);
     });
-    void Promise.all([getRepTypes(), getManagerTypes()]).then(([r, m]) => {
+    void Promise.all([
+      getRepTypes(),
+      getManagerTypes(),
+      getRegions(),
+      getGroups(),
+    ]).then(([r, m, rg, gr]) => {
       if (cancelled) return;
       setRepTypes(r);
       setManagerTypes(m);
+      setRegions(rg);
+      setGroups(gr);
     });
     const loadRecent = () => {
       void listMessages({ limit: 25 }).then((rows) => {
@@ -117,6 +132,17 @@ export default function NotifyPage() {
         return true;
       });
     }
+    if (regionFilter) {
+      out = out.filter(
+        (p) => (p.region || "").toLowerCase() === regionFilter.toLowerCase()
+      );
+    }
+    if (groupFilter) {
+      out = out.filter(
+        (p) =>
+          (p.group_name || "").toLowerCase() === groupFilter.toLowerCase()
+      );
+    }
     const q = profileSearch.trim().toLowerCase();
     if (q) {
       out = out.filter(
@@ -126,7 +152,7 @@ export default function NotifyPage() {
       );
     }
     return out;
-  }, [allProfiles, profileSearch, typeFilter]);
+  }, [allProfiles, profileSearch, typeFilter, regionFilter, groupFilter]);
 
   const togglePicked = (id: string) => {
     setPickedIds((prev) => {
@@ -289,89 +315,115 @@ export default function NotifyPage() {
               checkbox tick or full-row click. */}
           {audienceKind === "specific" && (
             <Field label="Pick users">
-              {/* Type filter — narrows the user list by manager_type
-                  or rep_type before the search runs. Same optgroup
-                  shape + role-prefixed values as /settings/managers
-                  so the two pickers feel identical. Only renders
-                  when there's something to filter by. */}
-              {(repTypes.length > 0 || managerTypes.length > 0) && (
+              {/* Filter block — narrows the user list by type /
+                  region / group before the search runs. Same
+                  optgroup + brand-active styling as /settings/
+                  managers + /reps. Only renders when there's at
+                  least one vocab to filter by. May 28 (Mariska
+                  G11a) extends from type-only to type+region+group. */}
+              {(repTypes.length > 0 ||
+                managerTypes.length > 0 ||
+                regions.length > 0 ||
+                groups.length > 0) && (
                 <div
                   style={{
                     display: "flex",
                     gap: 8,
                     alignItems: "center",
                     marginBottom: 8,
+                    flexWrap: "wrap",
                   }}
                 >
-                  <select
-                    value={typeFilter}
-                    onChange={(e) => setTypeFilter(e.target.value)}
-                    title="Narrow by manager or rep type"
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      border: `1px solid ${typeFilter ? AC.brandDeep : AC.line}`,
-                      background: typeFilter ? AC.brandSoft : "#fff",
-                      color: typeFilter ? AC.brandInk : AC.ink2,
-                      fontFamily: AC.font,
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      flex: 1,
-                    }}
-                  >
-                    <option value="">All types</option>
-                    {managerTypes.length > 0 && (
-                      <optgroup label="Manager types">
-                        {managerTypes.map((t) => (
-                          <option key={`m:${t.name}`} value={`manager:${t.name}`}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {repTypes.length > 0 && (
-                      <optgroup label="Rep types">
-                        {repTypes.map((t) => (
-                          <option key={`r:${t.name}`} value={`rep:${t.name}`}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
-                  {/* Quick "pick everyone matching the current filter"
-                      button — the headline use case (send to every
-                      Sales Rep) shouldn't require 30 individual
-                      checkbox taps. Only enabled when a filter
-                      narrowed the set AND there's at least one row. */}
-                  {typeFilter && filteredProfiles.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPickedIds((prev) => {
-                          const next = new Set(prev);
-                          for (const p of filteredProfiles) next.add(p.id);
-                          return next;
-                        });
-                      }}
-                      title={`Add all ${filteredProfiles.length} matching users to the selection`}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        border: `1px solid ${AC.brand}`,
-                        background: AC.brandSoft,
-                        color: AC.brandDeep,
-                        fontFamily: AC.font,
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                      }}
+                  {(repTypes.length > 0 || managerTypes.length > 0) && (
+                    <select
+                      value={typeFilter}
+                      onChange={(e) => setTypeFilter(e.target.value)}
+                      title="Narrow by manager or rep type"
+                      style={notifyFilterSelectStyle(typeFilter)}
                     >
-                      + Add all ({filteredProfiles.length})
-                    </button>
+                      <option value="">All types</option>
+                      {managerTypes.length > 0 && (
+                        <optgroup label="Manager types">
+                          {managerTypes.map((t) => (
+                            <option key={`m:${t.name}`} value={`manager:${t.name}`}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {repTypes.length > 0 && (
+                        <optgroup label="Rep types">
+                          {repTypes.map((t) => (
+                            <option key={`r:${t.name}`} value={`rep:${t.name}`}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
                   )}
+                  {regions.length > 0 && (
+                    <select
+                      value={regionFilter}
+                      onChange={(e) => setRegionFilter(e.target.value)}
+                      title="Narrow by region"
+                      style={notifyFilterSelectStyle(regionFilter)}
+                    >
+                      <option value="">All regions</option>
+                      {regions.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {groups.length > 0 && (
+                    <select
+                      value={groupFilter}
+                      onChange={(e) => setGroupFilter(e.target.value)}
+                      title="Narrow by group"
+                      style={notifyFilterSelectStyle(groupFilter)}
+                    >
+                      <option value="">All groups</option>
+                      {groups.map((g) => (
+                        <option key={g} value={g}>
+                          {g}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {/* Quick "pick everyone matching the current
+                      filter" button — sends-to-every-Sales-Rep-in-
+                      Gauteng without 30 checkbox taps. Fires when
+                      ANY filter is set + there's at least one row. */}
+                  {(typeFilter || regionFilter || groupFilter) &&
+                    filteredProfiles.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPickedIds((prev) => {
+                            const next = new Set(prev);
+                            for (const p of filteredProfiles) next.add(p.id);
+                            return next;
+                          });
+                        }}
+                        title={`Add all ${filteredProfiles.length} matching users to the selection`}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 8,
+                          border: `1px solid ${AC.brand}`,
+                          background: AC.brandSoft,
+                          color: AC.brandDeep,
+                          fontFamily: AC.font,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        + Add all ({filteredProfiles.length})
+                      </button>
+                    )}
                 </div>
               )}
               <input
@@ -749,6 +801,26 @@ export default function NotifyPage() {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
+
+/** Shared brand-tinted-when-active styling for the type / region /
+ *  group selects inside the Pick-specific picker. Wider than the
+ *  /reps filter dropdowns since the picker has more room to breathe.
+ *  May 28 (Mariska G11a). */
+function notifyFilterSelectStyle(active: string): React.CSSProperties {
+  return {
+    padding: "8px 10px",
+    borderRadius: 8,
+    border: `1px solid ${active ? AC.brandDeep : AC.line}`,
+    background: active ? AC.brandSoft : "#fff",
+    color: active ? AC.brandInk : AC.ink2,
+    fontFamily: AC.font,
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+    flex: 1,
+    minWidth: 140,
+  };
+}
 
 function ChannelToggle({
   checked,

@@ -30,7 +30,12 @@ import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import { ListCount } from "@/components/ui/ListCount";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
-import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
+import {
+  getRepTypes,
+  getRegions,
+  getGroups,
+  type RepTypeConfig,
+} from "@/lib/settings-store";
 import { AC } from "@/lib/tokens";
 
 // Default column widths for /reps Table view. localStorage takes
@@ -79,10 +84,24 @@ export default function RepsPage() {
   // Rep type filter — "" = all types. The list comes from the
   // admin-managed vocabulary in app_settings.rep_types.
   const [typeFilter, setTypeFilter] = useState<string>("");
+  // May 28 (Mariska G3) — Region + Group filters. Empty = "all".
+  // Vocab loaded from app_settings; dropdowns hide when the tenant
+  // hasn't populated the vocab yet (encourages going to /settings/
+  // roles first to add entries).
+  const [regionFilter, setRegionFilter] = useState<string>("");
+  const [groupFilter, setGroupFilter] = useState<string>("");
   const [repTypes, setRepTypesState] = useState<RepTypeConfig[]>([]);
+  const [regions, setRegions] = useState<string[]>([]);
+  const [groups, setGroups] = useState<string[]>([]);
 
   useEffect(() => {
-    getRepTypes().then(setRepTypesState);
+    void Promise.all([getRepTypes(), getRegions(), getGroups()]).then(
+      ([t, r, g]) => {
+        setRepTypesState(t);
+        setRegions(r);
+        setGroups(g);
+      }
+    );
   }, []);
 
   // Reset to page 0 whenever any filter, search, or sort changes —
@@ -90,7 +109,7 @@ export default function RepsPage() {
   // or re-sorting.
   useEffect(() => {
     setPage(0);
-  }, [statusFilter, search, sort, typeFilter]);
+  }, [statusFilter, search, sort, typeFilter, regionFilter, groupFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,6 +184,17 @@ export default function RepsPage() {
           (r.rep_type || "").toLowerCase() === typeFilter.toLowerCase()
       );
     }
+    if (regionFilter) {
+      out = out.filter(
+        (r) => (r.region || "").toLowerCase() === regionFilter.toLowerCase()
+      );
+    }
+    if (groupFilter) {
+      out = out.filter(
+        (r) =>
+          (r.group_name || "").toLowerCase() === groupFilter.toLowerCase()
+      );
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       out = out.filter(
@@ -192,7 +222,7 @@ export default function RepsPage() {
       }
     });
     return sorted;
-  }, [reps, statusFilter, search, sort, typeFilter]);
+  }, [reps, statusFilter, search, sort, typeFilter, regionFilter, groupFilter]);
 
   return (
     <AdminShell
@@ -241,24 +271,45 @@ export default function RepsPage() {
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value)}
                 title="Filter by rep type"
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 8,
-                  border: `1px solid ${
-                    typeFilter ? AC.brandDeep : AC.line
-                  }`,
-                  background: typeFilter ? AC.brandSoft : "#fff",
-                  color: typeFilter ? AC.brandInk : AC.ink2,
-                  fontFamily: AC.font,
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
+                style={filterSelectStyle(typeFilter)}
               >
                 <option value="">All types</option>
                 {repTypes.map((t) => (
                   <option key={t.name} value={t.name}>
                     {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {/* May 28 (Mariska G3) — Region + Group filters. Same
+                hide-when-vocab-empty rule as the type filter so a
+                fresh tenant doesn't see dead dropdowns. */}
+            {regions.length > 0 && (
+              <select
+                value={regionFilter}
+                onChange={(e) => setRegionFilter(e.target.value)}
+                title="Filter by region"
+                style={filterSelectStyle(regionFilter)}
+              >
+                <option value="">All regions</option>
+                {regions.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            )}
+            {groups.length > 0 && (
+              <select
+                value={groupFilter}
+                onChange={(e) => setGroupFilter(e.target.value)}
+                title="Filter by group"
+                style={filterSelectStyle(groupFilter)}
+              >
+                <option value="">All groups</option>
+                {groups.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
                   </option>
                 ))}
               </select>
@@ -432,6 +483,23 @@ function LastActiveCell({ ts }: { ts: string | null }) {
       {formatRelative(ts, " ago")}
     </span>
   );
+}
+
+/** Shared style for the filter dropdowns on the /reps filter row.
+ *  Brand-tinted when active, neutral when "All". Used by the rep
+ *  type, region, and group selects. May 28. */
+function filterSelectStyle(active: string): CSSProperties {
+  return {
+    padding: "6px 10px",
+    borderRadius: 8,
+    border: `1px solid ${active ? AC.brandDeep : AC.line}`,
+    background: active ? AC.brandSoft : "#fff",
+    color: active ? AC.brandInk : AC.ink2,
+    fontFamily: AC.font,
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+  };
 }
 
 function ShiftsTodayPill({ count }: { count: number }) {
