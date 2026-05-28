@@ -18,6 +18,7 @@ import {
   setCustomersForRep,
 } from "@/lib/assignments-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
+import { FilterChip, inputStyle } from "@/components/ui/Filters";
 import { initialsFromNameOrEmail, formatTimeRange, formatRelative } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 import { EmailUserModal } from "@/components/users/EmailUserModal";
@@ -619,12 +620,32 @@ function CustomerMultiSelect({
   onChange: (next: string[]) => void | Promise<void>;
 }) {
   const set = new Set(selectedIds);
+  // Default to the ASSIGNED view (Gary, May 28: "it's showing me ALL
+  // of them not who's assigned — most important is to show assigned,
+  // then let me choose more"). "Assign more" flips to the All view
+  // where the full searchable roster is pickable.
+  const [mode, setMode] = useState<"assigned" | "all">("assigned");
+  const [search, setSearch] = useState("");
+
   const toggle = (cid: string) => {
     const next = new Set(set);
     if (next.has(cid)) next.delete(cid);
     else next.add(cid);
     onChange(Array.from(next));
   };
+
+  const q = search.trim().toLowerCase();
+  const matchesSearch = (c: Customer) =>
+    !q ||
+    c.name.toLowerCase().includes(q) ||
+    String(c.code).toLowerCase().includes(q);
+
+  // Assigned view shows only the rep's customers; All view shows the
+  // whole roster (to add more). Search narrows whichever list is up.
+  const visible = customers
+    .filter((c) => (mode === "assigned" ? set.has(c.id) : true))
+    .filter(matchesSearch);
+
   const linkBtn: React.CSSProperties = {
     background: "transparent",
     border: "none",
@@ -641,39 +662,96 @@ function CustomerMultiSelect({
         border: `1px solid ${AC.line}`,
         borderRadius: 10,
         background: "#fff",
-        maxHeight: 320,
-        overflowY: "auto",
+        overflow: "hidden",
       }}
     >
+      {/* Assigned / All toggle + count — FilterChip family so it
+          matches the rest of the admin. Default = Assigned. */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 8,
-          padding: "8px 12px",
+          padding: "10px 12px",
           borderBottom: `1px solid ${AC.lineDim}`,
           background: AC.bg,
+          flexWrap: "wrap",
         }}
       >
-        <span
-          style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, fontWeight: 600 }}
+        <FilterChip
+          active={mode === "assigned"}
+          onClick={() => setMode("assigned")}
         >
-          {selectedIds.length} of {customers.length} selected
-        </span>
+          Assigned · {selectedIds.length}
+        </FilterChip>
+        <FilterChip active={mode === "all"} onClick={() => setMode("all")}>
+          All customers · {customers.length}
+        </FilterChip>
         <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={() => onChange(customers.map((c) => c.id))}
-          style={linkBtn}
-        >
-          Select all
-        </button>
-        <span style={{ color: AC.faint }}>·</span>
-        <button type="button" onClick={() => onChange([])} style={linkBtn}>
-          Clear
-        </button>
+        {mode === "all" && selectedIds.length > 0 && (
+          <button type="button" onClick={() => onChange([])} style={linkBtn}>
+            Clear all
+          </button>
+        )}
       </div>
-      {customers.map((c) => {
+
+      {/* Search — every list-view gets one (Gary's standing rule). */}
+      <div style={{ padding: "8px 12px", borderBottom: `1px solid ${AC.lineDim}` }}>
+        <div style={{ position: "relative" }}>
+          <span
+            style={{
+              position: "absolute",
+              left: 10,
+              top: "50%",
+              transform: "translateY(-50%)",
+              display: "flex",
+              pointerEvents: "none",
+            }}
+          >
+            <AGlyph name="search" size={13} color={AC.hint} />
+          </span>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={
+              mode === "assigned"
+                ? "Search assigned customers…"
+                : "Search all customers to assign…"
+            }
+            style={{ ...inputStyle, paddingLeft: 30 }}
+          />
+        </div>
+      </div>
+
+      <div style={{ maxHeight: 320, overflowY: "auto" }}>
+      {visible.length === 0 ? (
+        <div
+          style={{
+            padding: "18px 14px",
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            color: AC.mute,
+            textAlign: "center",
+            lineHeight: 1.5,
+          }}
+        >
+          {mode === "assigned" ? (
+            q ? (
+              <>No assigned customers match &quot;{search}&quot;.</>
+            ) : (
+              <>
+                No customers assigned yet. Tap{" "}
+                <b style={{ color: AC.ink2 }}>All customers</b> above to assign
+                some.
+              </>
+            )
+          ) : (
+            <>No customers match &quot;{search}&quot;.</>
+          )}
+        </div>
+      ) : (
+        visible.map((c) => {
         const checked = set.has(c.id);
         return (
           <label
@@ -732,7 +810,9 @@ function CustomerMultiSelect({
             </span>
           </label>
         );
-      })}
+        })
+      )}
+      </div>
     </div>
   );
 }
