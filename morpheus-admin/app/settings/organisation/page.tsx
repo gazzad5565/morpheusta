@@ -25,6 +25,7 @@ import { Card } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { SettingsShell } from "@/components/shell/SettingsShell";
 import { StringListEditor } from "@/components/users/StringListEditor";
+import { CustomFieldsManager } from "@/components/settings/CustomFieldsManager";
 import {
   getRegions,
   setRegions,
@@ -64,8 +65,25 @@ export default function OrganisationSettingsPage() {
   // "open the section, edit one thing, leave." Bookmarkable tabs
   // can come later if managers ask.
   const [tab, setTab] = useState<
-    "details" | "regions" | "groups" | "store-types"
+    "details" | "regions" | "groups" | "store-types" | "custom-fields"
   >("details");
+  // Honour a ?tab= query param on mount so deep-links (e.g. the
+  // /settings/custom-fields redirect → ?tab=custom-fields) land on
+  // the right tab. Read via window to avoid the useSearchParams
+  // Suspense requirement on this client page. May 28.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (
+      t === "details" ||
+      t === "regions" ||
+      t === "groups" ||
+      t === "store-types" ||
+      t === "custom-fields"
+    ) {
+      setTab(t);
+    }
+  }, []);
   // Vocab state for the three vocab tabs. null = loading; the
   // StringListEditor needs a non-null array so we wait.
   const [regions, setRegionsState] = useState<string[] | null>(null);
@@ -285,7 +303,7 @@ export default function OrganisationSettingsPage() {
   return (
     <SettingsShell
       section="organisation"
-      description="Your organisation's name, logo, contact details, customer regions, and customer groups. Used everywhere the system displays your brand and categorises customers."
+      description="Site-wide defaults — your organisation details, the customer regions / groups / store-type taxonomies, and custom field definitions. Each lives in its own tab."
     >
       {/* Tab bar — Details / Customer regions / Customer groups.
           Same visual shape as the RulesTabBar so the two tabbed
@@ -305,6 +323,7 @@ export default function OrganisationSettingsPage() {
           { id: "regions" as const, label: "Customer regions" },
           { id: "groups" as const, label: "Customer groups" },
           { id: "store-types" as const, label: "Store types" },
+          { id: "custom-fields" as const, label: "Custom fields" },
         ].map((t) => {
           const isActive = tab === t.id;
           return (
@@ -389,6 +408,12 @@ export default function OrganisationSettingsPage() {
               onSaved={(next) => setStoreTypesState(next)}
             />
           )}
+        </div>
+      )}
+
+      {tab === "custom-fields" && (
+        <div style={{ maxWidth: 760 }}>
+          <CustomFieldsManager />
         </div>
       )}
 

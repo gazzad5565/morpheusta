@@ -45,11 +45,20 @@ export interface SettingsSection {
 // so every existing link + breadcrumb keeps working.
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
+    // "Organisation" → "Site settings" (May 28, later — Gary:
+    // "make us a site settings... site-wide [defaults] where they
+    // adjust things... customer regions + customer groups belong
+    // there, custom fields too, and slowly currency etc."). The
+    // page (route unchanged at /settings/organisation) is a tabbed
+    // hub: Details (org name/logo) · Customer regions · Customer
+    // groups · Store types · Custom fields. Future site-wide
+    // defaults (currency, date format) become new tabs here.
     id: "organisation",
-    label: "Organisation",
+    label: "Site settings",
     href: "/settings/organisation",
-    glyph: "building",
-    description: "Org name and logo, shown in the sidebar and on receipts.",
+    glyph: "settings",
+    description:
+      "Site-wide defaults — organisation details, customer regions / groups, store types, and custom fields. Each in its own tab.",
     available: true,
   },
   {
@@ -90,15 +99,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     glyph: "clock",
     description:
       "Check-in / out exception thresholds and org-wide messaging policies. Two tabs in one place.",
-    available: true,
-  },
-  {
-    id: "custom-fields",
-    label: "Custom fields",
-    href: "/settings/custom-fields",
-    glyph: "tasks",
-    description:
-      "Add your own fields to any entity (customers, reps, shifts, tasks, library files).",
     available: true,
   },
   {
