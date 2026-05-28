@@ -1,5 +1,10 @@
 "use client";
 
+// Deploy marker: 2026-05-28 15:44 UTC. Touched to force a fresh
+// Vercel build because admin.morpheusops.app was serving an old
+// deployment ID after several commits had merged to main. If you
+// see "Manage users" in the Settings rail, the new deploy is live.
+
 /**
  * SettingsShell — wraps AdminShell for every /settings/* page.
  *
