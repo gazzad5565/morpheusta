@@ -35,8 +35,6 @@ import { initialsFromNameOrEmail } from "@/lib/format";
 import {
   getRepTypes,
   getManagerTypes,
-  getRegions,
-  getGroups,
   type RepTypeConfig,
   type ManagerTypeConfig,
 } from "@/lib/settings-store";
@@ -670,28 +668,15 @@ function AddUserModal({
   const [managerType, setManagerType] = useState<string>("");
   const [repTypes, setRepTypes] = useState<RepTypeConfig[]>([]);
   const [managerTypes, setManagerTypes] = useState<ManagerTypeConfig[]>([]);
-  // May 28 (Mariska G2) — region / group / hire_date pickers at
-  // creation time so we don't force a follow-up edit just to tag a
-  // user. Vocabularies load on mount; the region + group dropdowns
-  // hide if the tenant hasn't populated them yet (encourages going
-  // to /settings/roles first to set up).
-  const [region, setRegion] = useState<string>("");
-  const [groupName, setGroupName] = useState<string>("");
+  // May 28 (Mariska G2) — hire_date picker at creation time. region
+  // + group were originally here but Gary corrected same day: those
+  // belong on customers, not users.
   const [hireDate, setHireDate] = useState<string>("");
-  const [regions, setRegions] = useState<string[]>([]);
-  const [groups, setGroups] = useState<string[]>([]);
 
   useEffect(() => {
-    Promise.all([
-      getRepTypes(),
-      getManagerTypes(),
-      getRegions(),
-      getGroups(),
-    ]).then(([r, m, rg, gr]) => {
+    Promise.all([getRepTypes(), getManagerTypes()]).then(([r, m]) => {
       setRepTypes(r);
       setManagerTypes(m);
-      setRegions(rg);
-      setGroups(gr);
     });
   }, []);
 
@@ -712,9 +697,7 @@ function AddUserModal({
       // back, but never gets written to the row.
       rep_type: role === "rep" ? repType : null,
       manager_type: role === "manager" ? managerType : null,
-      // Tags apply to either role.
-      region,
-      group_name: groupName,
+      // Hire date applies to either role.
       hire_date: hireDate,
     });
     setBusy(false);
@@ -895,42 +878,9 @@ function AddUserModal({
                 </ModalField>
               )}
 
-              {/* May 28 (Mariska G2) — Region / Group / Hire date.
-                  Region + Group only render when the tenant has
-                  added entries via Settings → Roles & permissions.
-                  Hire date is always available. All three optional. */}
-              {regions.length > 0 && (
-                <ModalField label="Region">
-                  <select
-                    value={region}
-                    onChange={(e) => setRegion(e.target.value)}
-                    style={{ ...modalInputStyle, cursor: "pointer" }}
-                  >
-                    <option value="">— Unassigned —</option>
-                    {regions.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                </ModalField>
-              )}
-              {groups.length > 0 && (
-                <ModalField label="Group">
-                  <select
-                    value={groupName}
-                    onChange={(e) => setGroupName(e.target.value)}
-                    style={{ ...modalInputStyle, cursor: "pointer" }}
-                  >
-                    <option value="">— Unassigned —</option>
-                    {groups.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                </ModalField>
-              )}
+              {/* May 28 (Mariska G2) — Hire date. Region + Group
+                  were originally here but Gary corrected same day:
+                  those belong on customers. */}
               <ModalField
                 label="Hire date"
                 hint="When this person joined the field workforce. Optional."

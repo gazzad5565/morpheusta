@@ -30,12 +30,7 @@ import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import { ListCount } from "@/components/ui/ListCount";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
-import {
-  getRepTypes,
-  getRegions,
-  getGroups,
-  type RepTypeConfig,
-} from "@/lib/settings-store";
+import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
 import { AC } from "@/lib/tokens";
 
 // Default column widths for /reps Table view. localStorage takes
@@ -84,24 +79,14 @@ export default function RepsPage() {
   // Rep type filter — "" = all types. The list comes from the
   // admin-managed vocabulary in app_settings.rep_types.
   const [typeFilter, setTypeFilter] = useState<string>("");
-  // May 28 (Mariska G3) — Region + Group filters. Empty = "all".
-  // Vocab loaded from app_settings; dropdowns hide when the tenant
-  // hasn't populated the vocab yet (encourages going to /settings/
-  // roles first to add entries).
-  const [regionFilter, setRegionFilter] = useState<string>("");
-  const [groupFilter, setGroupFilter] = useState<string>("");
   const [repTypes, setRepTypesState] = useState<RepTypeConfig[]>([]);
-  const [regions, setRegions] = useState<string[]>([]);
-  const [groups, setGroups] = useState<string[]>([]);
+  // Region + Group filters were added on May 28 then removed same
+  // day: those tags belong to customers, not reps. Filtering reps
+  // by their *assigned customers'* region/group is a derived-join
+  // feature on the roadmap (Sprint 2D candidate).
 
   useEffect(() => {
-    void Promise.all([getRepTypes(), getRegions(), getGroups()]).then(
-      ([t, r, g]) => {
-        setRepTypesState(t);
-        setRegions(r);
-        setGroups(g);
-      }
-    );
+    void getRepTypes().then(setRepTypesState);
   }, []);
 
   // Reset to page 0 whenever any filter, search, or sort changes —
@@ -109,7 +94,7 @@ export default function RepsPage() {
   // or re-sorting.
   useEffect(() => {
     setPage(0);
-  }, [statusFilter, search, sort, typeFilter, regionFilter, groupFilter]);
+  }, [statusFilter, search, sort, typeFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,17 +169,6 @@ export default function RepsPage() {
           (r.rep_type || "").toLowerCase() === typeFilter.toLowerCase()
       );
     }
-    if (regionFilter) {
-      out = out.filter(
-        (r) => (r.region || "").toLowerCase() === regionFilter.toLowerCase()
-      );
-    }
-    if (groupFilter) {
-      out = out.filter(
-        (r) =>
-          (r.group_name || "").toLowerCase() === groupFilter.toLowerCase()
-      );
-    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       out = out.filter(
@@ -222,7 +196,7 @@ export default function RepsPage() {
       }
     });
     return sorted;
-  }, [reps, statusFilter, search, sort, typeFilter, regionFilter, groupFilter]);
+  }, [reps, statusFilter, search, sort, typeFilter]);
 
   return (
     <AdminShell
@@ -277,39 +251,6 @@ export default function RepsPage() {
                 {repTypes.map((t) => (
                   <option key={t.name} value={t.name}>
                     {t.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            {/* May 28 (Mariska G3) — Region + Group filters. Same
-                hide-when-vocab-empty rule as the type filter so a
-                fresh tenant doesn't see dead dropdowns. */}
-            {regions.length > 0 && (
-              <select
-                value={regionFilter}
-                onChange={(e) => setRegionFilter(e.target.value)}
-                title="Filter by region"
-                style={filterSelectStyle(regionFilter)}
-              >
-                <option value="">All regions</option>
-                {regions.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            )}
-            {groups.length > 0 && (
-              <select
-                value={groupFilter}
-                onChange={(e) => setGroupFilter(e.target.value)}
-                title="Filter by group"
-                style={filterSelectStyle(groupFilter)}
-              >
-                <option value="">All groups</option>
-                {groups.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
                   </option>
                 ))}
               </select>

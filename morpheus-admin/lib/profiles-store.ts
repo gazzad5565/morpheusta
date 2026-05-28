@@ -34,19 +34,15 @@ export interface Profile {
    *  'manager'. Two capability flags gate /settings/* and /schedule/*
    *  respectively — see managerTypeCan in settings-store.ts. May 28. */
   manager_type?: string | null;
-  /** Tenant-defined region tag (e.g. "Gauteng", "Western Cape").
-   *  Vocabulary lives in app_settings.regions. NULL = unassigned;
-   *  filters treat NULL as "any". Mariska G2 (May 28). */
-  region?: string | null;
-  /** Tenant-defined work group / team tag (e.g. "Cape route",
-   *  "Bakery merchandisers"). Vocabulary lives in app_settings.groups.
-   *  The DB column is `group_name` (the bare word `group` is a SQL
-   *  reserved word) — the UI surfaces it as just "Group". NULL =
-   *  unassigned. Mariska G2 (May 28). */
-  group_name?: string | null;
   /** When the person joined the field workforce. Distinct from
    *  created_at, which is when their account was created in the
-   *  system (often later). NULL = unknown. Mariska G2 (May 28). */
+   *  system (often later). NULL = unknown. Mariska G2 (May 28).
+   *
+   *  Note (May 28 follow-up): region + group_name were originally
+   *  added to this row too based on a misread of Mariska's G2 —
+   *  Gary corrected that region + group belong to CUSTOMERS, not
+   *  users. Those two columns were dropped via
+   *  2026_05_28_drop_wrong_profile_columns.sql; hire_date stays. */
   hire_date?: string | null;
 }
 
@@ -63,7 +59,7 @@ export interface Profile {
 // keeps the admin functional even when a deploy has raced ahead of
 // a migration. May 28 (post-rep-vanish incident).
 const PROFILE_COLS_FULL =
-  "id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type, manager_type, region, group_name, hire_date";
+  "id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type, manager_type, hire_date";
 const PROFILE_COLS_SAFE =
   "id, email, name, role, avatar_url, created_at";
 

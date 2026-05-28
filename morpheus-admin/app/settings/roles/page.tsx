@@ -1,19 +1,16 @@
 "use client";
 
 /**
- * /settings/roles — manager + rep type vocabularies + tag vocabs
- * (regions, groups) in one place.
+ * /settings/roles — manager + rep type vocabularies in one place.
  *
- * Four tabs:
+ * Two tabs:
  *   - Manager types  — canManageSettings, canScheduleShifts
  *                       (light-touch RBAC v1, May 28)
  *   - Rep types      — canCreateCustomers (existing May 27 vocab)
- *   - Regions        — plain string tags (Mariska G2, May 28)
- *   - Groups         — plain string tags (Mariska G2, May 28)
  *
- * Regions + Groups are tags without per-tag capabilities — they
- * drive filters and audience pickers but don't gate anything. The
- * StringListEditor handles both.
+ * Regions + Groups tabs were briefly added on May 28 then moved
+ * out — those vocabularies belong to customers, not users, so they
+ * live under Organisation Settings now.
  *
  * Gated by canManageSettings — only managers whose type grants
  * Settings access can edit roles. Self-demote protection lives on
@@ -31,19 +28,14 @@ import { RequireCapability } from "@/components/ui/RequireCapability";
 import { useManagerCapabilities } from "@/lib/manager-capabilities-context";
 import {
   getRepTypes,
-  getRegions,
-  getGroups,
-  setRegions,
-  setGroups,
   type ManagerTypeConfig,
   type RepTypeConfig,
 } from "@/lib/settings-store";
 import { ManagerTypesEditor } from "@/components/users/ManagerTypesEditor";
 import { RepTypesEditor } from "@/components/users/RepTypesEditor";
-import { StringListEditor } from "@/components/users/StringListEditor";
 import { AC } from "@/lib/tokens";
 
-type TabId = "managers" | "reps" | "regions" | "groups";
+type TabId = "managers" | "reps";
 
 export default function RolesPage() {
   return (
@@ -77,64 +69,36 @@ function RolesContent() {
     setManagerList(managerTypes);
   }, [managerTypes]);
 
-  // Rep types + regions + groups — three separate vocabs, fetched
-  // once on mount. Each is null until loaded so the tab can show
-  // "…" instead of "0" before the network round-trip resolves.
+  // Rep types live in a separate vocab — fetch on mount.
   const [repList, setRepList] = useState<RepTypeConfig[] | null>(null);
-  const [regions, setRegionsState] = useState<string[] | null>(null);
-  const [groups, setGroupsState] = useState<string[] | null>(null);
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([getRepTypes(), getRegions(), getGroups()]).then(
-      ([r, rg, gr]) => {
-        if (cancelled) return;
-        setRepList(r);
-        setRegionsState(rg);
-        setGroupsState(gr);
-      }
-    );
+    getRepTypes().then((list) => {
+      if (!cancelled) setRepList(list);
+    });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Small helper to render the count sublabel for a vocab tab — "…"
-  // while loading, "N type(s)" / "N tag(s)" once loaded.
-  const countLabel = (
-    list: { length: number } | null,
-    singular: string,
-    plural: string
-  ): string => {
-    if (list === null) return "…";
-    return `${list.length} ${list.length === 1 ? singular : plural}`;
-  };
-
   return (
     <div style={{ padding: 20, maxWidth: 820, margin: "0 auto" }}>
-      <div style={{ display: "flex", gap: 0, marginBottom: 14, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 0, marginBottom: 14 }}>
         <TabPill
           active={tab === "managers"}
           label="Manager types"
-          sublabel={countLabel(managerList, "type", "types")}
+          sublabel={`${managerList.length} ${managerList.length === 1 ? "type" : "types"}`}
           onClick={() => setTab("managers")}
         />
         <TabPill
           active={tab === "reps"}
           label="Rep types"
-          sublabel={countLabel(repList, "type", "types")}
+          sublabel={
+            repList === null
+              ? "…"
+              : `${repList.length} ${repList.length === 1 ? "type" : "types"}`
+          }
           onClick={() => setTab("reps")}
-        />
-        <TabPill
-          active={tab === "regions"}
-          label="Regions"
-          sublabel={countLabel(regions, "region", "regions")}
-          onClick={() => setTab("regions")}
-        />
-        <TabPill
-          active={tab === "groups"}
-          label="Groups"
-          sublabel={countLabel(groups, "group", "groups")}
-          onClick={() => setTab("groups")}
         />
       </div>
 
@@ -151,52 +115,17 @@ function RolesContent() {
               void refreshCaps();
             }}
           />
-        ) : tab === "reps" ? (
-          repList === null ? (
-            <Loading label="Loading rep types…" />
-          ) : (
-            <RepTypesEditor
-              current={repList}
-              onSaved={(next) => setRepList(next)}
-            />
-          )
-        ) : tab === "regions" ? (
-          regions === null ? (
-            <Loading label="Loading regions…" />
-          ) : (
-            <StringListEditor
-              current={regions}
-              noun="region"
-              hint="Drives the Region filter on /reps and audience targeting on /notify. Assign a region to each user via Settings → Users → edit."
-              addPlaceholder="e.g. Gauteng, Western Cape, KZN…"
-              onSave={setRegions}
-              onSaved={(next) => setRegionsState(next)}
-            />
-          )
+        ) : repList === null ? (
+          <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
+            Loading rep types…
+          </div>
         ) : (
-          // groups tab
-          groups === null ? (
-            <Loading label="Loading groups…" />
-          ) : (
-            <StringListEditor
-              current={groups}
-              noun="group"
-              hint="Work groups / teams (e.g. 'Cape route', 'Bakery merchandisers'). Same surfaces as Regions — list filters + notification audience picker."
-              addPlaceholder="e.g. Cape route, Bakery team…"
-              onSave={setGroups}
-              onSaved={(next) => setGroupsState(next)}
-            />
-          )
+          <RepTypesEditor
+            current={repList}
+            onSaved={(next) => setRepList(next)}
+          />
         )}
       </Card>
-    </div>
-  );
-}
-
-function Loading({ label }: { label: string }) {
-  return (
-    <div style={{ fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
-      {label}
     </div>
   );
 }
