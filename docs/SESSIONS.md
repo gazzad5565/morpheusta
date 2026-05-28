@@ -77,9 +77,30 @@ in 4 commits. Cross-platform: all admin-only; mobile untouched.
      follow-up (move the 3 vocab tabs + custom-fields tab into a
      new /settings/site page, revert Organisation to Details-only).
 
-Operator note unchanged: RESEND_FROM env var still outstanding;
-R7 migration (2026_05_28_customer_store_type_and_primary_contact)
-still needs running for store_type + is_primary to persist.
+**Continuation (same evening) — 4 more commits:**
+9. **Organisation / Site settings split** (`018ff91`) — Gary's
+   correction: Organisation stays its OWN rail entry (identity:
+   name/logo/contact); a separate **Site settings** entry
+   (/settings/site) holds the tabs Customer regions · Customer
+   groups · Store types · Custom fields. Rail order: Organisation
+   · Site settings · Manage users · Roles & permissions · Check-in
+   & messaging rules · Bulk imports · Billing.
+10. **PageLoading** (`0100c43`) — shared on-brand loading
+    treatment (brand-cyan scan bar + mono label, scoped keyframes)
+    on /customers, /past-shifts, /tasks, /reps, /library. Edit
+    once in components/ui/PageLoading.tsx.
+11. **customers.phone** (`f58eb1d`) — outlet main line; edit-page
+    Identity field + tappable tel: on the detail hero.
+12. **Import-adapter columns** (`f58eb1d`) — customer CSV import
+    can now set customer_group / store_type / phone (region was
+    already there).
+
+**🟡 OPERATOR — migrations still to run (idempotent):**
+  - `2026_05_28_customer_store_type_and_primary_contact.sql`
+    (store_type + customer_contacts.is_primary)
+  - `2026_05_28_customers_phone.sql` (customers.phone)
+  Until run, those fields save no-ops + nothing errors (graceful).
+**🟡 RESEND_FROM** env var on Vercel still outstanding.
 
 ---
 
