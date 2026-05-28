@@ -69,16 +69,20 @@ export default function ManagersPage() {
 
   // Add-user modal
   const [addOpen, setAddOpen] = useState(false);
-  // Live rep-types vocabulary — read for the type-filter dropdown
-  // only. The CRUD editor moved to /settings/roles on May 28 (so
-  // manager + rep types live in one place). The state is still
-  // loaded here so the existing filter dropdown can show the
-  // current vocabulary; if the vocab is edited on /settings/roles
-  // the next time this page mounts it'll re-read fresh.
+  // Live type vocabularies — read for the type-filter dropdown. Both
+  // are needed since the filter spans managers AND reps (Gary's
+  // directive May 28 — previously the dropdown only listed rep types
+  // so you couldn't narrow a manager list by manager_type). CRUD for
+  // both lives at /settings/roles; this page re-reads on every mount
+  // so an edit there shows up here.
   const [repTypes, setRepTypesState] = useState<RepTypeConfig[]>([]);
+  const [managerTypes, setManagerTypesState] = useState<ManagerTypeConfig[]>([]);
 
   useEffect(() => {
-    getRepTypes().then(setRepTypesState);
+    Promise.all([getRepTypes(), getManagerTypes()]).then(([r, m]) => {
+      setRepTypesState(r);
+      setManagerTypesState(m);
+    });
   }, []);
 
   const reload = () => {
@@ -104,10 +108,26 @@ export default function ManagersPage() {
     let out = profiles;
     if (filter !== "all") out = out.filter((p) => p.role === filter);
     if (typeFilter) {
-      out = out.filter(
-        (p) =>
-          (p.rep_type || "").toLowerCase() === typeFilter.toLowerCase()
-      );
+      // typeFilter is prefixed with the role it came from
+      // ("manager:Owner" or "rep:Sales Rep") so a name collision
+      // between the two vocabularies can't bleed across. Split on the
+      // first colon; everything after is the actual type name.
+      const colon = typeFilter.indexOf(":");
+      const wantRole = colon >= 0 ? typeFilter.slice(0, colon) : "";
+      const wantName = (colon >= 0 ? typeFilter.slice(colon + 1) : typeFilter).toLowerCase();
+      out = out.filter((p) => {
+        if (wantRole === "manager") {
+          return p.role === "manager" && (p.manager_type || "").toLowerCase() === wantName;
+        }
+        if (wantRole === "rep") {
+          return p.role === "rep" && (p.rep_type || "").toLowerCase() === wantName;
+        }
+        // Defensive: no prefix → legacy behaviour (match either column).
+        return (
+          (p.rep_type || "").toLowerCase() === wantName ||
+          (p.manager_type || "").toLowerCase() === wantName
+        );
+      });
     }
     const q = search.trim().toLowerCase();
     if (q) {
@@ -116,6 +136,7 @@ export default function ManagersPage() {
           (p.name || "").toLowerCase().includes(q) ||
           p.email.toLowerCase().includes(q) ||
           (p.rep_type || "").toLowerCase().includes(q) ||
+          (p.manager_type || "").toLowerCase().includes(q) ||
           p.role.toLowerCase().includes(q)
       );
     }
@@ -251,11 +272,11 @@ export default function ManagersPage() {
             <FilterChip active={filter === "rep"} onClick={() => setFilter("rep")}>
               Reps
             </FilterChip>
-            {repTypes.length > 0 && (
+            {(repTypes.length > 0 || managerTypes.length > 0) && (
               <select
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value)}
-                title="Filter by rep type"
+                title="Filter by manager or rep type"
                 style={{
                   padding: "6px 10px",
                   borderRadius: 8,
@@ -271,11 +292,30 @@ export default function ManagersPage() {
                 }}
               >
                 <option value="">All types</option>
-                {repTypes.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name}
-                  </option>
-                ))}
+                {/* Two optgroups so the user sees which vocabulary each
+                    type came from. Values are prefixed with the role
+                    (manager: / rep:) so the filter logic can tell them
+                    apart even if both vocabs happen to share a name.
+                    Selecting a manager type naturally narrows the
+                    visible rows to managers — same the other way. */}
+                {managerTypes.length > 0 && (
+                  <optgroup label="Manager types">
+                    {managerTypes.map((t) => (
+                      <option key={`m:${t.name}`} value={`manager:${t.name}`}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {repTypes.length > 0 && (
+                  <optgroup label="Rep types">
+                    {repTypes.map((t) => (
+                      <option key={`r:${t.name}`} value={`rep:${t.name}`}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             )}
             <div
