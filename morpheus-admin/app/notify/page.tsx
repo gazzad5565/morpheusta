@@ -29,6 +29,12 @@ import {
   type MessageRow,
 } from "@/lib/messaging-store";
 import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
+import {
+  getRepTypes,
+  getManagerTypes,
+  type RepTypeConfig,
+  type ManagerTypeConfig,
+} from "@/lib/settings-store";
 import { RepAvatar } from "@/components/ui/Avatars";
 import { initialsFromNameOrEmail } from "@/lib/format";
 
@@ -54,16 +60,31 @@ export default function NotifyPage() {
   // Recipients (for the "specific" picker)
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [profileSearch, setProfileSearch] = useState("");
+  // Type-filter drill-down on the Pick-specific picker — Gary's
+  // directive (May 28): a manager should be able to narrow the
+  // recipient list to e.g. all Sales Reps or all Owners without
+  // scrolling 100+ people. Empty = no type filter (show everyone).
+  // Value is role-prefixed ("manager:Owner" / "rep:Sales Rep") so a
+  // name collision between the two vocabularies can't blur the
+  // filter — same convention as /settings/managers.
+  const [typeFilter, setTypeFilter] = useState<string>("");
+  const [repTypes, setRepTypes] = useState<RepTypeConfig[]>([]);
+  const [managerTypes, setManagerTypes] = useState<ManagerTypeConfig[]>([]);
 
   // Recent messages list
   const [recent, setRecent] = useState<MessageRow[]>([]);
 
-  // Load profiles + recent messages on mount; subscribe to message
-  // changes so the recent list stays live.
+  // Load profiles + type vocabularies + recent messages on mount;
+  // subscribe to message changes so the recent list stays live.
   useEffect(() => {
     let cancelled = false;
     void listProfiles().then((ps) => {
       if (!cancelled) setAllProfiles(ps);
+    });
+    void Promise.all([getRepTypes(), getManagerTypes()]).then(([r, m]) => {
+      if (cancelled) return;
+      setRepTypes(r);
+      setManagerTypes(m);
     });
     const loadRecent = () => {
       void listMessages({ limit: 25 }).then((rows) => {
@@ -79,14 +100,33 @@ export default function NotifyPage() {
   }, []);
 
   const filteredProfiles = useMemo(() => {
+    let out = allProfiles;
+    // Apply the type filter first — narrows the candidate set before
+    // the free-text search runs.
+    if (typeFilter) {
+      const colon = typeFilter.indexOf(":");
+      const wantRole = colon >= 0 ? typeFilter.slice(0, colon) : "";
+      const wantName = (colon >= 0 ? typeFilter.slice(colon + 1) : typeFilter).toLowerCase();
+      out = out.filter((p) => {
+        if (wantRole === "manager") {
+          return p.role === "manager" && (p.manager_type || "").toLowerCase() === wantName;
+        }
+        if (wantRole === "rep") {
+          return p.role === "rep" && (p.rep_type || "").toLowerCase() === wantName;
+        }
+        return true;
+      });
+    }
     const q = profileSearch.trim().toLowerCase();
-    if (!q) return allProfiles;
-    return allProfiles.filter(
-      (p) =>
-        displayName(p).toLowerCase().includes(q) ||
-        p.email.toLowerCase().includes(q)
-    );
-  }, [allProfiles, profileSearch]);
+    if (q) {
+      out = out.filter(
+        (p) =>
+          displayName(p).toLowerCase().includes(q) ||
+          p.email.toLowerCase().includes(q)
+      );
+    }
+    return out;
+  }, [allProfiles, profileSearch, typeFilter]);
 
   const togglePicked = (id: string) => {
     setPickedIds((prev) => {
@@ -249,6 +289,91 @@ export default function NotifyPage() {
               checkbox tick or full-row click. */}
           {audienceKind === "specific" && (
             <Field label="Pick users">
+              {/* Type filter — narrows the user list by manager_type
+                  or rep_type before the search runs. Same optgroup
+                  shape + role-prefixed values as /settings/managers
+                  so the two pickers feel identical. Only renders
+                  when there's something to filter by. */}
+              {(repTypes.length > 0 || managerTypes.length > 0) && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    marginBottom: 8,
+                  }}
+                >
+                  <select
+                    value={typeFilter}
+                    onChange={(e) => setTypeFilter(e.target.value)}
+                    title="Narrow by manager or rep type"
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: `1px solid ${typeFilter ? AC.brandDeep : AC.line}`,
+                      background: typeFilter ? AC.brandSoft : "#fff",
+                      color: typeFilter ? AC.brandInk : AC.ink2,
+                      fontFamily: AC.font,
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      flex: 1,
+                    }}
+                  >
+                    <option value="">All types</option>
+                    {managerTypes.length > 0 && (
+                      <optgroup label="Manager types">
+                        {managerTypes.map((t) => (
+                          <option key={`m:${t.name}`} value={`manager:${t.name}`}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {repTypes.length > 0 && (
+                      <optgroup label="Rep types">
+                        {repTypes.map((t) => (
+                          <option key={`r:${t.name}`} value={`rep:${t.name}`}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                  {/* Quick "pick everyone matching the current filter"
+                      button — the headline use case (send to every
+                      Sales Rep) shouldn't require 30 individual
+                      checkbox taps. Only enabled when a filter
+                      narrowed the set AND there's at least one row. */}
+                  {typeFilter && filteredProfiles.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickedIds((prev) => {
+                          const next = new Set(prev);
+                          for (const p of filteredProfiles) next.add(p.id);
+                          return next;
+                        });
+                      }}
+                      title={`Add all ${filteredProfiles.length} matching users to the selection`}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: `1px solid ${AC.brand}`,
+                        background: AC.brandSoft,
+                        color: AC.brandDeep,
+                        fontFamily: AC.font,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      + Add all ({filteredProfiles.length})
+                    </button>
+                  )}
+                </div>
+              )}
               <input
                 value={profileSearch}
                 onChange={(e) => setProfileSearch(e.target.value)}
@@ -380,6 +505,15 @@ export default function NotifyPage() {
                           }}
                         >
                           {p.email} · {p.role}
+                          {/* Surface the user's type next to their
+                              role — without this the manager has no
+                              way to tell from the row alone whether
+                              this person is an Owner vs Operations
+                              manager, or a Sales Rep vs Merchandiser. */}
+                          {p.role === "manager" && p.manager_type
+                            ? ` · ${p.manager_type}`
+                            : ""}
+                          {p.role === "rep" && p.rep_type ? ` · ${p.rep_type}` : ""}
                         </div>
                       </div>
                     </label>

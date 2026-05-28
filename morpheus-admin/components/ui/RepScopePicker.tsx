@@ -19,11 +19,12 @@
  * sorts role='rep' first, then by display name).
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AC } from "@/lib/tokens";
 import { RepAvatar } from "@/components/ui/Avatars";
 import { displayName, type Profile } from "@/lib/profiles-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
+import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
 
 export type RepScope = null | string[];
 
@@ -58,17 +59,41 @@ export function RepScopePicker({
     [value]
   );
   const [search, setSearch] = useState("");
+  // Type-filter drill-down (May 28). Lets the scheduler narrow the
+  // rep list by rep_type before picking individuals — e.g. assigning
+  // a customer to "all Sales Reps" no longer requires scrolling 30
+  // names. Only rep_types live here; manager_types aren't relevant
+  // since shifts are claimed/done by reps, not managers.
+  const [typeFilter, setTypeFilter] = useState<string>("");
+  const [repTypes, setRepTypes] = useState<RepTypeConfig[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void getRepTypes().then((rs) => {
+      if (!cancelled) setRepTypes(rs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const visible = useMemo(() => {
+    let out = reps;
+    if (typeFilter) {
+      const want = typeFilter.toLowerCase();
+      out = out.filter((r) => (r.rep_type || "").toLowerCase() === want);
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return reps;
-    return reps.filter(
-      (r) =>
-        r.name?.toLowerCase().includes(q) ||
-        r.email.toLowerCase().includes(q) ||
-        r.role.toLowerCase().includes(q)
-    );
-  }, [reps, search]);
+    if (q) {
+      out = out.filter(
+        (r) =>
+          r.name?.toLowerCase().includes(q) ||
+          r.email.toLowerCase().includes(q) ||
+          r.role.toLowerCase().includes(q) ||
+          (r.rep_type || "").toLowerCase().includes(q)
+      );
+    }
+    return out;
+  }, [reps, search, typeFilter]);
 
   const toggle = (id: string) => {
     const next = new Set(selectedIds);
@@ -143,6 +168,76 @@ export function RepScopePicker({
               Clear
             </button>
           </div>
+
+          {/* Type-filter drill-down (May 28). Lets the scheduler
+              narrow by rep_type before picking individuals + offers
+              a one-tap "Add all matching" shortcut so assigning to
+              "every Sales Rep" isn't a wall of checkbox taps. */}
+          {repTypes.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 12px",
+                borderBottom: `1px solid ${AC.lineDim}`,
+              }}
+            >
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                title="Narrow by rep type"
+                style={{
+                  flex: 1,
+                  padding: "7px 10px",
+                  borderRadius: 8,
+                  border: `1px solid ${typeFilter ? AC.brandDeep : AC.line}`,
+                  background: typeFilter ? AC.brandSoft : "#fff",
+                  color: typeFilter ? AC.brandInk : AC.ink2,
+                  fontFamily: AC.font,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <option value="">All rep types</option>
+                {repTypes.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              {typeFilter && visible.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Union current selection with everyone matching
+                    // the filter — additive, doesn't blow away the
+                    // selection if the scheduler had already ticked
+                    // a few people manually.
+                    const next = new Set(selectedIds);
+                    for (const r of visible) next.add(r.id);
+                    onChange(Array.from(next));
+                  }}
+                  title={`Add all ${visible.length} matching reps`}
+                  style={{
+                    padding: "7px 11px",
+                    borderRadius: 8,
+                    border: `1px solid ${AC.brand}`,
+                    background: AC.brandSoft,
+                    color: AC.brandDeep,
+                    fontFamily: AC.font,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  + Add all ({visible.length})
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Inline search — useful once you have 20+ reps */}
           {reps.length > 6 && (
