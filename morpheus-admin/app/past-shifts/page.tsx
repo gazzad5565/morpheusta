@@ -23,6 +23,7 @@ import { FilterChip } from "@/components/ui/Filters";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ListCount } from "@/components/ui/ListCount";
+import { PageLoading } from "@/components/ui/PageLoading";
 import { type SortState, compareBy } from "@/components/ui/SortableHeader";
 import { TableView } from "@/components/past-shifts/TableView";
 import { GridView } from "@/components/past-shifts/GridView";
@@ -337,17 +338,8 @@ export default function PastShiftsPage() {
 
         {/* Body */}
         {filtered === null ? (
-          <Card padding={32}>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 13,
-                color: AC.mute,
-                textAlign: "center",
-              }}
-            >
-              Loading past shifts…
-            </div>
+          <Card padding={0}>
+            <PageLoading label="Loading past shifts…" />
           </Card>
         ) : filtered.length === 0 ? (
           <Card padding={0}>

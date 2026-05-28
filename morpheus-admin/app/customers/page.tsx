@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import { ListCount } from "@/components/ui/ListCount";
+import { PageLoading } from "@/components/ui/PageLoading";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
 
@@ -520,17 +521,8 @@ export default function CustomersPage() {
 
         {/* Body */}
         {filtered === null ? (
-          <Card padding={32}>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 13,
-                color: AC.mute,
-                textAlign: "center",
-              }}
-            >
-              Loading customers…
-            </div>
+          <Card padding={0}>
+            <PageLoading label="Loading customers…" />
           </Card>
         ) : filtered.length === 0 ? (
           <Card padding={36}>

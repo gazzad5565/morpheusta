@@ -24,6 +24,7 @@ import { AC } from "@/lib/tokens";
 import { listAllTasks, deleteTask, type TaskRow } from "@/lib/tasks-store";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import { ListCount } from "@/components/ui/ListCount";
+import { PageLoading } from "@/components/ui/PageLoading";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
 
@@ -258,17 +259,7 @@ export default function TasksPage() {
           </div>
 
           {!loaded ? (
-            <div
-              style={{
-                padding: 28,
-                fontFamily: AC.font,
-                fontSize: 13,
-                color: AC.mute,
-                textAlign: "center",
-              }}
-            >
-              Loading tasks…
-            </div>
+            <PageLoading label="Loading tasks…" />
           ) : filtered.length === 0 ? (
             <div
               style={{

@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/SortableHeader";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import { ListCount } from "@/components/ui/ListCount";
+import { PageLoading } from "@/components/ui/PageLoading";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
 import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
@@ -266,8 +267,8 @@ export default function RepsPage() {
 
         {/* Body */}
         {filtered === null ? (
-          <Card padding={32}>
-            <Centered>Loading reps…</Centered>
+          <Card padding={0}>
+            <PageLoading label="Loading reps…" />
           </Card>
         ) : filtered.length === 0 ? (
           <Card padding={36}>

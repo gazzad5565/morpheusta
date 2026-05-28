@@ -35,6 +35,7 @@ import { Combobox } from "@/components/ui/Combobox";
 import { SegTabs } from "@/components/ui/SegTabs";
 import { Pagination, DEFAULT_PAGE_SIZE } from "@/components/ui/Pagination";
 import { ListCount } from "@/components/ui/ListCount";
+import { PageLoading } from "@/components/ui/PageLoading";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
 import type { Customer } from "@/lib/types";
@@ -546,7 +547,7 @@ export default function LibraryPage() {
             </div>
 
             {!loaded ? (
-              <Empty text="Loading library…" />
+              <PageLoading label="Loading library…" />
             ) : filtered.length === 0 ? (
               files.length === 0 ? (
                 <Empty
@@ -754,7 +755,7 @@ function FileGrid({
   if (!loaded) {
     return (
       <Card padding={0}>
-        <Empty text="Loading library…" />
+        <PageLoading label="Loading library…" />
       </Card>
     );
   }
