@@ -763,3 +763,114 @@ export function repTypeCan(
   if (!entry) return true; // unknown type → don't block
   return entry[capability];
 }
+
+// ─── Manager types (May 28, 2026) ─────────────────────────────────
+//
+// Parallel structure to rep_types above — admin-managed vocabulary
+// of MANAGER categories (Owner, Operations, View only, etc) +
+// per-type capability flags. Each manager can have ONE type
+// assigned via /settings/managers/[id]/edit; the type is stored on
+// profiles.manager_type as plain text matching one of the entries.
+//
+// Two capability flags ship in v1 (Gary, May 28 — kept small on
+// purpose; expand later if real demand):
+//   canManageSettings  — gates the entire /settings/* rail incl.
+//                        /settings/roles itself
+//   canScheduleShifts  — gates /schedule/new, schedule drag-drop
+//                        save, /shifts/[id]/edit save, request
+//                        approval queue
+//
+// Lenient default-allow everywhere: NULL manager_type OR unknown
+// vocab entry OR missing capability key → returns true. Existing
+// managers (manager_type=NULL after the migration) keep all
+// capabilities — no one gets locked out on the first deploy.
+//
+// SECURITY: client-side enforcement only, same posture as
+// canCreateCustomers. A motivated manager could still hit the
+// underlying API routes directly. Hard RLS gating is deferred —
+// flagged in the SESSIONS.md entry for this commit.
+
+export interface ManagerTypeConfig {
+  name: string;
+  /** Gates /settings/* (incl. /settings/roles + the /settings/managers
+   *  user CRUD page). Default true on missing key so a malformed
+   *  vocab entry doesn't accidentally lock out a real Owner. */
+  canManageSettings: boolean;
+  /** Gates /schedule/new, schedule drag-drop saves, /shifts/[id]/edit
+   *  save, and the request-approval queue. Default true on missing
+   *  key (same reason as canManageSettings). */
+  canScheduleShifts: boolean;
+}
+
+export type ManagerCapability =
+  | "canManageSettings"
+  | "canScheduleShifts";
+
+export const DEFAULT_MANAGER_TYPES: ReadonlyArray<ManagerTypeConfig> = [
+  { name: "Owner", canManageSettings: true, canScheduleShifts: true },
+  { name: "Operations", canManageSettings: false, canScheduleShifts: true },
+  { name: "View only", canManageSettings: false, canScheduleShifts: false },
+] as const;
+
+/** Defensive parser — same shape as parseRepTypes. Trims, dedupes by
+ *  case-insensitive name, coerces missing capability keys to true,
+ *  falls back to DEFAULT_MANAGER_TYPES on malformed input. */
+function parseManagerTypes(raw: unknown): ManagerTypeConfig[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_MANAGER_TYPES];
+  const seen = new Set<string>();
+  const out: ManagerTypeConfig[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as {
+      name?: unknown;
+      canManageSettings?: unknown;
+      canScheduleShifts?: unknown;
+    };
+    const name = typeof r.name === "string" ? r.name.trim() : "";
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push({
+      name,
+      // Missing key / wrong type → treat as true (allow-all) so a
+      // legacy / partial entry doesn't silently lock out a real
+      // manager. Only explicit `false` restricts.
+      canManageSettings: r.canManageSettings === false ? false : true,
+      canScheduleShifts: r.canScheduleShifts === false ? false : true,
+    });
+  }
+  return out.length > 0 ? out : [...DEFAULT_MANAGER_TYPES];
+}
+
+export async function getManagerTypes(): Promise<ManagerTypeConfig[]> {
+  const v = await readSetting<unknown>("manager_types", null);
+  return parseManagerTypes(v);
+}
+
+export async function setManagerTypes(
+  list: ManagerTypeConfig[]
+): Promise<{ ok: boolean; error?: string }> {
+  const clean = parseManagerTypes(list);
+  if (clean.length === 0) {
+    return { ok: false, error: "Need at least one manager type." };
+  }
+  return writeSetting("manager_types", clean, "manager types");
+}
+
+/** Pure capability check for a single (typeName, capability) pair.
+ *  Caller fetches the vocabulary once via getManagerTypes() then
+ *  calls this per check. typeName=null / unknown / missing-key
+ *  defaults to true (allow-all) — preserves behaviour for managers
+ *  whose manager_type hasn't been set yet AND for any vocab entry
+ *  that's been deleted out from under them. */
+export function managerTypeCan(
+  types: ManagerTypeConfig[],
+  typeName: string | null | undefined,
+  capability: ManagerCapability
+): boolean {
+  if (!typeName) return true;
+  const entry = types.find(
+    (t) => t.name.toLowerCase() === typeName.toLowerCase()
+  );
+  if (!entry) return true; // unknown type → don't block
+  return entry[capability];
+}

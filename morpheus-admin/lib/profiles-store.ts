@@ -27,6 +27,13 @@ export interface Profile {
    *  (allow-all capabilities). Only meaningful when role='rep'; the
    *  edit UI hides the picker for managers. See May 27 migration. */
   rep_type?: string | null;
+  /** Manager category (Owner / Operations / View only / etc) —
+   *  managed vocabulary in app_settings.manager_types. NULL =
+   *  unrestricted (allow-all capabilities — preserves existing-manager
+   *  behaviour after the migration). Only meaningful when role=
+   *  'manager'. Two capability flags gate /settings/* and /schedule/*
+   *  respectively — see managerTypeCan in settings-store.ts. May 28. */
+  manager_type?: string | null;
 }
 
 /** All profiles, optionally filtered by role. */
@@ -34,7 +41,7 @@ export async function listProfiles(opts?: { role?: string }): Promise<Profile[]>
   if (!isSupabaseConfigured() || !supabase) return [];
   let q = supabase
     .from("profiles")
-    .select("id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type")
+    .select("id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type, manager_type")
     .order("name", { ascending: true, nullsFirst: false });
   if (opts?.role) q = q.eq("role", opts.role);
   const { data, error } = await q;
@@ -62,7 +69,7 @@ export async function getProfileById(id: string): Promise<Profile | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type")
+    .select("id, email, name, role, avatar_url, created_at, last_credentials_sent_at, rep_type, manager_type")
     .eq("id", id)
     .maybeSingle();
   if (error) {
