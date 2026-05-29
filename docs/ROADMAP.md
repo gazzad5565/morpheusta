@@ -243,6 +243,8 @@ These are the next obvious chunks of work, roughly in order of impact:
 
 ### Architecture-review epics (deferred May 29 — see SESSIONS "Architecture review" entry)
 
+> **Greenlit by Gary (May 29) for an upcoming session — start with #14 (RLS) then #11 (zod): highest correctness/security upside. Each gets its own change + verification (and #14 needs a migration Gary runs + a test pass).**
+
 The May 29 senior-eng review shipped the four safe refactors (#1–#4). These four were flagged as epics that each need their own change + verification — **not** rammed in the review pass:
 
 11. **zod at the store boundary.** ~50 `data as T` casts bypass validation; a renamed/dropped DB column surfaces as `undefined` silently (the class of bug behind the "North" fix). Add per-store row schemas, parse once in each `rowToX`. Needs a test pass against real data so it logs/handles drift rather than throwing on valid rows.
