@@ -312,6 +312,15 @@ so the next page can reuse it.
   the new password as a copy-fallback when post-reset email send
   fails. Reference for the "modal with two action-row options"
   pattern.
+- **`LibraryFilePreview`** (`components/library/`) — in-place file
+  preview modal. Pass `file={libraryFile | null}` to open/close;
+  it signs its own short-lived Storage URL and previews images
+  (`<img>`) / PDFs (`<iframe>`) inline, with a Download +
+  open-in-a-new-tab fallback for other types. **Open library files
+  with this, not `window.open(signedUrl)`** (Gary, May 29: a file
+  should pop up in place, not punt to a new browser tab). Used by the
+  customer Library tab + the library file detail page's "View file"
+  button.
 - **`LoadingBar`** — top-of-page progress bar for slow loads.
 - **`SaveIndicator`** — bottom-right toast that fires from
   `notifySaved()` / `notifySaveError()`. Don't show your own toast.

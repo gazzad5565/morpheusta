@@ -83,6 +83,39 @@ Still pending operator action (unchanged from May 28): run the two
 customer migrations (`2026_05_28_customer_store_type_and_primary_contact.sql`,
 `2026_05_28_customers_phone.sql`) + set `RESEND_FROM` in Vercel.
 
+**Follow-up batch (later, May 29) — UX polish from Gary:**
+
+- **`/tasks` clickable rows + columns.** Rows now navigate to
+  `/tasks/[id]/edit` on click (role=button + Enter/Space; standalone
+  Edit pencil removed; Delete `stopPropagation`s) so the page behaves
+  like /reps, /customers, Users. Columns reworked: Task · Customer ·
+  Type · **Requirements** · Order · (delete) — dropped Duration, added
+  a Requirements column (camera-count + "Sig" chips for photo /
+  signature gates). Column count stays 6 so saved widths still apply.
+
+- **In-place library file preview.** New
+  `components/library/LibraryFilePreview.tsx` modal — signs its own
+  Storage URL and previews images (`<img>`) / PDFs (`<iframe>`) inline,
+  with a Download + open-in-new-tab fallback for other types. Replaced
+  the `window.open(_blank)` flow in the two places a file is opened:
+  the customer **Library tab** and the library file detail page's
+  **View file** button. The /library list row still goes to the file
+  detail page first (Gary's explicit May 28 call) — this only changes
+  what "open the file" does once you're there.
+
+- **Scan-bar loading everywhere.** The `<PageLoading>` treatment now
+  renders on the **rep detail**, **customer detail**, and **library
+  file detail** initial loads (were plain "Loading…" text), matching
+  the list pages Gary liked.
+
+- **Region/group = live rule** (Gary asked to make the static
+  bulk-select dynamic): assessed, NOT yet built — it needs a DB
+  migration (region/group columns on `customer_tasks` / `library_files`),
+  a mobile read-path change, and a change to the shared
+  `CustomerScopePicker` value contract (which must NOT affect
+  schedule/new + messaging, where point-in-time IDs are correct).
+  Surfaced as a scoped plan for Gary to greenlight before building.
+
 ---
 
 ### Today's session — what shipped (May 28, 2026, customer-selection + audit log)
