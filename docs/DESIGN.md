@@ -335,6 +335,24 @@ so the next page can reuse it.
   everywhere. `formatDateAs` forces a specific format (used by the
   settings preview); `setDateFormatPref` / `getDateFormatPref` manage
   the cache (called by `settings-store.get/setDateFormat`).
+- **`Modal` + `ModalHeader`** (`components/ui/Modal.tsx`, May 29 review)
+  — the canonical backdrop + centered-card + Escape + click-outside
+  chrome. Props: `maxWidth`, `maxHeight` (→ scroll-capped flex card),
+  `zIndex`, `padding`, `backdrop`, `closeOnBackdrop`. **Build new
+  modals with this**, not a hand-rolled `position:fixed inset:0`.
+  (`EmailUserModal` + the managers Add-user modal are pre-existing
+  bespoke exceptions carrying `TODO(review #3)` migration pointers.)
+- **`ScopePickerPrimitives`** (`components/ui/`) — `ScopeButton`,
+  `ScopeEmpty`, `scopeLinkBtn`, shared by `CustomerScopePicker` +
+  `RepScopePicker` (were duplicated byte-for-byte). Any new "pick a
+  scope" surface imports these.
+- **`lib/db/selects.ts`** — shared PostgREST select strings
+  (`CUSTOMER_EMBED`, `SITE_EMBED`, `SHIFT_SELECT`, `TASK_SELECT`).
+  **Reference these in stores; don't paste embed strings inline** — a
+  column added to an embed should be one edit, not a hunt across call
+  sites. **And map nullable DB columns to nullable app types — never a
+  fake default** (the May 29 `region: || "North"` bug is the cautionary
+  tale: it minted a phantom region that polluted the filter dropdowns).
 
 ### Content composers
 

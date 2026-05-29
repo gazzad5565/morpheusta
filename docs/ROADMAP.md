@@ -241,6 +241,15 @@ These are the next obvious chunks of work, roughly in order of impact:
 9. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence — also unlocks proper background location.
 10. **Dynamic region/group scopes ("live rules").** Today picking "Gauteng" when scoping a task/library file does a STATIC bulk-select — it resolves to the matching customer IDs at that moment, so a customer added to Gauteng later won't auto-join. Making it live = store the rule, not the IDs: add `customer_region` / `customer_group` columns to `customer_tasks` + `library_files`, evaluate at read time, change the mobile task/library read path to match the shift customer's region/group, and give `CustomerScopePicker` a rule mode (WITHOUT changing schedule/new + messaging, which are correctly point-in-time). Gary's call May 29: hold off for now. Tasks + Library only when picked up.
 
+### Architecture-review epics (deferred May 29 — see SESSIONS "Architecture review" entry)
+
+The May 29 senior-eng review shipped the four safe refactors (#1–#4). These four were flagged as epics that each need their own change + verification — **not** rammed in the review pass:
+
+11. **zod at the store boundary.** ~50 `data as T` casts bypass validation; a renamed/dropped DB column surfaces as `undefined` silently (the class of bug behind the "North" fix). Add per-store row schemas, parse once in each `rowToX`. Needs a test pass against real data so it logs/handles drift rather than throwing on valid rows.
+12. **`packages/shared` monorepo.** `morpheus-admin` and `morpheus-mobile` copy-paste `format.ts` / `supabase.ts` / `auth.ts` and the `Customer` type already diverges between them (admin rich, mobile light). Extract a workspace package both import. **Changes BOTH Vercel projects' build config** — plan + deploy coordination required.
+13. **Client-side data-fetching → SWR/React Query.** All ~53 pages are `"use client"` + ad-hoc `useEffect` fetch (no cache, no dedup, waterfalls, refetch on every nav). Adopt a cache/query layer. Large (53-page migration + new dep).
+14. **RLS capability hardening.** `settings-store` comments flag "client-side enforcement only" for `canCreateCustomers` / manager capabilities — a motivated rep with their JWT could bypass the UI gate. Make the DB the real boundary (capability-aware policies). Security-critical: needs a migration Gary runs + a full test pass (a wrong policy locks users out).
+
 ---
 
 

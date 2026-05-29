@@ -14,6 +14,7 @@
 
 ## Quick TOC
 
+- [May 29, 2026 (review) — senior-eng architecture review + 4 safe refactors (phantom-region bug, scope primitives, select constants, shared Modal)](#architecture-review--refactors-may-29-2026)
 - [May 29, 2026 — rep detail tabs + shift history (R4/R6), Past Shifts load-older (R9), tenant date format (G15)](#todays-session--what-shipped-may-29-2026)
 - [May 28, 2026 — B5/B4/B6 from rep feedback + manager roles & permissions v1](#todays-session--what-shipped-may-28-2026)
 - [May 27, 2026 (post-very-very-late) — undo rep-types-in-rail, customers columns, managers off /reps, list count at top](#todays-session--what-shipped-may-27-2026-post-very-very-late)
@@ -32,6 +33,54 @@
 - [May 8, 2026 — multi-site customers schema + admin Sites tab](#todays-session--what-shipped-may-8-2026)
 - [May 7, 2026 — calendar, schedule rewrites, broad UX pass](#todays-session--what-shipped-may-7-2026)
 - [May 6, 2026 — auto-checkout, organisation settings, indexes](#todays-session--what-shipped-may-6-2026)
+
+---
+
+### Architecture review + refactors (May 29, 2026)
+
+Gary asked for a senior-engineer review — understand the architecture,
+find structural / duplication / performance / maintainability problems,
+then "FIX THEM ALL". Ran a 4-agent parallel read (data layer,
+components, app/cross-app, config/types) and verified the load-bearing
+findings first-hand. Shipped the four SAFE, behaviour-preserving fixes;
+the rest are flagged epics (they'd need their own change + verification,
+two need deploy/migration coordination — not safe to ram).
+
+**Shipped:**
+- **#1 — phantom-region bug + dead fields** (`628d3e6`). Root cause of
+  the ghost region Gary saw weeks ago: `rowToCustomer` defaulted
+  `region: row.region || "North"`, so EVERY region-less customer read
+  as "North" and showed up in the vocab-sourced dropdowns. Fixed at the
+  mapper + 3 more "North" sources: both customer forms defaulted region
+  state to "North"; the **new-customer form HARDCODED** its region
+  dropdown (`["North","South","East","West"]`) — now sourced from
+  `getRegions()` like the edit page; two map popups did
+  `String(c.region)` → would render literal `"null"`. Removed dead
+  Customer fields `sites`/`shiftsThisWeek`/`tier` (hardcoded constants,
+  grep-confirmed zero consumers). `region` is now `string | null`.
+- **#2 — scope-picker primitives** (`c5dc7cb`). `ScopeButton` / `Empty`
+  / `linkBtn` were byte-identical in both pickers →
+  `components/ui/ScopePickerPrimitives.tsx`.
+- **#4 — select-string constants** (`f2165a1`). `lib/db/selects.ts`
+  (`CUSTOMER_EMBED` / `SITE_EMBED` / `SHIFT_SELECT` / `TASK_SELECT`).
+  The full shift join (6×) + task select (2×) now reference them.
+- **#3 — shared `<Modal>`** (`3c8f171`). `components/ui/Modal.tsx` +
+  `ModalHeader`; `LibraryFilePreview` adopted. `EmailUserModal` (portal
+  + close-while-busy + aria) and the managers Add-user modal left
+  bespoke with `TODO(review #3)` pointers — migrating them now wasn't
+  worth destabilising the auth / user-create flows for ~50 lines.
+
+**Deferred epics (flagged, NOT rammed):**
+- **#5 zod at the store boundary** — runtime validation to catch the DB
+  drift class behind #1. Needs per-store schemas + a test pass.
+- **#6 `packages/shared` monorepo** — both apps copy-paste
+  `format`/`supabase`/`auth`/`types`; the `Customer` shape already
+  diverges. Real fix changes BOTH Vercel projects' build config.
+- **#7 SWR/React Query** — all 53 pages client-fetch ad-hoc (no cache,
+  waterfalls). A cache layer is a 53-page migration + new dep.
+- **#8 RLS capability hardening** — close the "client-side enforcement
+  only" gap (`settings-store` comments). Security-critical: needs a
+  migration Gary runs + a full test pass.
 
 ---
 
