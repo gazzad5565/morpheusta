@@ -764,6 +764,65 @@ value1,value2,value3
         — has the exact column headers we expect, with 2-3 example rows you can
         delete before uploading yours.
       </div>
+
+      {/* How role / type gets assigned (Gary, May 29: "make it clear so
+          the rep comes imported with the correct role"). The role isn't
+          a column — it's set by WHICH import you ran. */}
+      {(entity === "rep" || entity === "manager") && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: 12,
+            borderRadius: 10,
+            background: AC.brandSoft,
+            fontFamily: AC.font,
+            fontSize: 11.5,
+            color: AC.brandInk,
+            lineHeight: 1.5,
+          }}
+        >
+          {entity === "rep" ? (
+            <>
+              Everyone in this file is imported as a <b>Field Rep</b> (role
+              = rep, so they appear in the mobile app) — the role is set by
+              this import, not a column. Set each rep&rsquo;s category with
+              the <b>rep_type</b> column; it must match a type from{" "}
+              <b>Settings → Roles &amp; permissions</b> (e.g. Sales Rep,
+              Merchandiser, Driver) or the row is rejected with the list of
+              valid types. Leave it blank for &ldquo;uncategorised&rdquo;.
+              Managers go through the <b>Managers</b> import instead.
+            </>
+          ) : (
+            <>
+              Everyone in this file is imported as a <b>Manager</b> (role =
+              manager, with console access) — the role is set by this
+              import, not a column. Import field reps from the <b>Reps</b>{" "}
+              import instead.
+            </>
+          )}
+        </div>
+      )}
+
+      {entity === "customer" && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: 12,
+            borderRadius: 10,
+            background: AC.bg,
+            fontFamily: AC.font,
+            fontSize: 11.5,
+            color: AC.mute,
+            lineHeight: 1.5,
+          }}
+        >
+          <b>region</b>, <b>customer_group</b> and <b>store_type</b> are
+          free text — type them exactly as you want them shown on the
+          customer. To also filter by those values in the dropdowns on{" "}
+          /customers, add the same names under{" "}
+          <b>Settings → Site settings</b>.
+        </div>
+      )}
     </Card>
   );
 }

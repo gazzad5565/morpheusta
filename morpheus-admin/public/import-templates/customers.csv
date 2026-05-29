@@ -1,4 +1,4 @@
-code,name,initials,color,region,city,address
-1001,Acme Cosmetics,AC,#15B4D6,Western Cape,Cape Town,12 Main Street Cape Town 8001
-1002,Brava Foods,BF,#E0563A,Gauteng,Johannesburg,45 Long Avenue Sandton 2196
-1003,Crown Hardware,CH,#7C3AED,Western Cape,Cape Town,
+code,name,initials,color,region,customer_group,store_type,phone,city,address
+1001,Acme Cosmetics,AC,#15B4D6,Western Cape,Premium,Supermarket,021 555 0101,Cape Town,12 Main Street Cape Town 8001
+1002,Brava Foods,BF,#E0563A,Gauteng,Wholesale,Wholesale,011 555 0202,Johannesburg,45 Long Avenue Sandton 2196
+1003,Crown Hardware,CH,#7C3AED,Western Cape,Spaza,Hardware,021 555 0303,Cape Town,8 Hill Road Claremont 7708
