@@ -34,6 +34,37 @@
 
 ---
 
+### Today's session — what shipped (May 28, 2026, customer-selection + audit log)
+
+Two asks: universal "select customers by group/region" + the audit
+log UI. (Kicked off a discovery Workflow first; its 8 agents came
+back empty — harness hiccup, 0 tokens/tool-uses — so I mapped the
+surfaces directly and built.)
+
+- **Customer selection by region/group** — `CustomerScopePicker`
+  (the shared picker) gains a "Quick add: by region / by group" row
+  that bulk-selects matching customers. Auto-covers **Library**
+  (upload + edit) + **schedule/new**. Value stays a customer-ID list
+  (static). (`d9c40b5`)
+- **Tasks** — swapped its bespoke All/Specific control for the shared
+  `CustomerScopePicker`, so task audience gets region/group too.
+  (`d9c40b5`)
+- **Messaging** (`/notify`) — new "Add reps serving: [Customer
+  region] [Customer group]" control. Resolves customers in a
+  region/group → their assigned reps (via `listAllAssignments`) →
+  adds them to the picked set. JUDGMENT CALL flagged: "by
+  region/group" for a message = "reps assigned to those customers".
+  (`04ce7ee`)
+- **Audit log UI** — new `/settings/audit` (Mariska G1 + Rayhaan R1):
+  browse `shift_events` by category / date / search; gated by
+  canManageSettings. Rail entry added before Billing. (`79a5068`)
+
+No DB migrations in this batch (audit reads existing shift_events).
+Still pending operator-side: the two R7 migrations (store_type +
+is_primary; phone) and the RESEND_FROM env var.
+
+---
+
 ### Today's session — what shipped (May 28, 2026, evening rapid-fire)
 
 Gary fired off ~8 feedback items in quick succession. All shipped

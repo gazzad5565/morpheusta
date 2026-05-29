@@ -322,6 +322,15 @@ so the next page can reuse it.
   thread it through `entity` prop.
 - **`CustomerScopePicker`** + **`RepScopePicker`** — multi-select
   pickers for "which customers" / "which reps" this thing applies to.
+  **Use `CustomerScopePicker` for ANY "select customers" surface**
+  (Library scope, Tasks audience, schedule) — don't hand-roll a
+  customer checkbox list. It includes the **"Quick add: by region /
+  by group"** dropdowns (May 28) that bulk-select matching customers,
+  so "select customers by group or region" works everywhere it's
+  used. Value is a customer-ID list (static bulk-select). For
+  user-targeting surfaces that need "customers' reps" (e.g.
+  Messaging), resolve customer region/group → assigned reps via
+  `listAllAssignments` rather than picking customers directly.
 
 ---
 
