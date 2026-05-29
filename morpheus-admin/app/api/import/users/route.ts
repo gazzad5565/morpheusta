@@ -129,6 +129,10 @@ interface Body {
    *  the import wizard's failures CSV is actionable. Ignored when
    *  role=manager. Empty / null = uncategorised. */
   rep_type?: string | null;
+  /** May 29 — manager_type category (Owner / Operations / View only / …).
+   *  Validated against app_settings.manager_types; ignored when
+   *  role=rep. Empty / null = uncategorised (unrestricted manager). */
+  manager_type?: string | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -149,6 +153,9 @@ export async function POST(req: NextRequest) {
   // rep_type only meaningful for rep imports. Empty / null = uncategorised.
   const repTypeRaw = (body.rep_type ?? "").toString().trim();
   const wantsRepType = role === "rep" && repTypeRaw.length > 0;
+  // manager_type only meaningful for manager imports (May 29).
+  const managerTypeRaw = (body.manager_type ?? "").toString().trim();
+  const wantsManagerType = role === "manager" && managerTypeRaw.length > 0;
 
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return NextResponse.json(
@@ -204,6 +211,44 @@ export async function POST(req: NextRequest) {
     resolvedRepType = match;
   }
 
+  // Validate manager_type against app_settings.manager_types — same
+  // shape (array of { name, ... }) and canonical-casing approach as
+  // rep_type above. May 29.
+  let resolvedManagerType: string | null = null;
+  if (wantsManagerType) {
+    const { data: settingRow } = await sb
+      .from("app_settings")
+      .select("value")
+      .eq("key", "manager_types")
+      .maybeSingle();
+    const rawList = (settingRow as { value?: unknown } | null)?.value;
+    const types = Array.isArray(rawList) ? rawList : [];
+    const names: string[] = [];
+    for (const t of types) {
+      if (t && typeof t === "object") {
+        const n = (t as { name?: unknown }).name;
+        if (typeof n === "string" && n.trim()) names.push(n.trim());
+      }
+    }
+    const match = names.find(
+      (n) => n.toLowerCase() === managerTypeRaw.toLowerCase()
+    );
+    if (!match) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `unknown manager_type "${managerTypeRaw}". Configured types: ${
+            names.length > 0
+              ? names.join(", ")
+              : "(none — add some from Roles & permissions)"
+          }`,
+        },
+        { status: 400 }
+      );
+    }
+    resolvedManagerType = match;
+  }
+
   // Look up by email. The auth.admin API exposes listUsers; we
   // page through up to one batch (1000 users) and match locally.
   // For larger orgs this would warrant a different approach — but
@@ -233,6 +278,9 @@ export async function POST(req: NextRequest) {
     const updatePatch: Record<string, unknown> = { name, role };
     if (role === "rep" && wantsRepType) {
       updatePatch.rep_type = resolvedRepType;
+    }
+    if (role === "manager" && wantsManagerType) {
+      updatePatch.manager_type = resolvedManagerType;
     }
     const { error: profErr } = await sb
       .from("profiles")
@@ -273,6 +321,9 @@ export async function POST(req: NextRequest) {
       name,
       role,
       ...(role === "rep" && wantsRepType ? { rep_type: resolvedRepType } : {}),
+      ...(role === "manager" && wantsManagerType
+        ? { manager_type: resolvedManagerType }
+        : {}),
     },
     { onConflict: "id" }
   );

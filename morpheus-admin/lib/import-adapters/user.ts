@@ -35,6 +35,7 @@ async function callImportUsersRoute(payload: {
    *  app_settings.rep_types and rejects unknown values with a clear
    *  error message that lists the available types. */
   rep_type?: string | null;
+  manager_type?: string | null;
 }): Promise<{
   ok: boolean;
   outcome?: UpsertOutcome;
@@ -76,7 +77,7 @@ function userAdapter(role: "rep" | "manager"): ImportAdapter {
     requiredFields: ["email", "name"],
     optionalFields: isRep
       ? ["send_welcome_email", "rep_type"]
-      : ["send_welcome_email"],
+      : ["send_welcome_email", "manager_type"],
     fieldLabels: {
       email: "Email address",
       name: "Full name",
@@ -84,6 +85,8 @@ function userAdapter(role: "rep" | "manager"): ImportAdapter {
         "Send welcome email (true/false — overrides the import-run default)",
       rep_type:
         "Rep type (Sales Rep / Merchandiser / Driver / … — must match a configured type)",
+      manager_type:
+        "Manager type (Owner / Operations / View only / … — must match a configured type)",
     },
     fieldKinds: {
       email: "id",
@@ -114,6 +117,10 @@ function userAdapter(role: "rep" | "manager"): ImportAdapter {
       const repType = isRep
         ? ((row.rep_type || "").trim() || null)
         : null;
+      // manager_type only meaningful for manager imports (May 29).
+      const managerType = !isRep
+        ? ((row.manager_type || "").trim() || null)
+        : null;
       // Per-row override: if the CSV has a non-empty send_welcome_email
       // column, that wins over the import-run default. Run default is
       // applied server-side from the request body.
@@ -130,6 +137,7 @@ function userAdapter(role: "rep" | "manager"): ImportAdapter {
         send_welcome_email: sendWelcome,
         mode,
         rep_type: repType,
+        manager_type: managerType,
       });
 
       if (!result.ok) {

@@ -796,7 +796,11 @@ value1,value2,value3
             <>
               Everyone in this file is imported as a <b>Manager</b> (role =
               manager, with console access) — the role is set by this
-              import, not a column. Import field reps from the <b>Reps</b>{" "}
+              import, not a column. Set each manager&rsquo;s{" "}
+              <b>manager_type</b> column (Owner / Operations / View only) to
+              control what they can do; it must match a type from{" "}
+              <b>Settings → Roles &amp; permissions</b>, or leave it blank for
+              an unrestricted manager. Import field reps from the <b>Reps</b>{" "}
               import instead.
             </>
           )}

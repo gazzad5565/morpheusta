@@ -20,16 +20,19 @@
 
 ### Migrations applied today (cloud status)
 
-**Status as of end of May 28 session:**
+**Status — Gary ran the outstanding SQL on May 29; the batch below is now APPLIED in cloud.**
 - May 21 and earlier — all applied.
-- **Pending — run before next test pass:**
+- **Applied May 29 (Gary ran them — were pending through May 28):**
   - `db/migrations/2026_05_25_import_runs_and_geocode_status.sql` (Phase A — Import hub foundation: new `import_runs` table, `geocode_status` + `geocode_attempted_at` on customers + customer_sites with backfill, partial indexes for the cron work queue, `app_settings` seed for the two import defaults)
   - `db/migrations/2026_05_25_profiles_last_credentials_sent_at.sql` (Phase B — adds `profiles.last_credentials_sent_at timestamptz NULL` so the "Email this user" modal can show "Last sent: X ago")
   - `db/migrations/2026_05_27_profiles_rep_type.sql` (rep types + canCreateCustomers vocabulary — May 27)
   - `db/migrations/2026_05_27_shifts_claimable_rep_types.sql` (per-shift rep-type restriction — May 27)
   - `db/migrations/2026_05_28_customer_code_text.sql` (B5 — customers.code + requested_shifts.customer_code become text so SP-001 / ACME-JHB imports work)
   - `db/migrations/2026_05_28_customer_coords_source.sql` (B4 — `coords_source` column on customers + customer_sites so the admin can see when a row's coords came from a rep pin)
-  - `db/migrations/2026_05_28_profiles_manager_type.sql` (manager roles foundation — `profiles.manager_type` + seeded `app_settings.manager_types` with Owner / Operations / View only)
+  - `db/migrations/2026_05_28_profiles_manager_type.sql` (manager roles foundation — `profiles.manager_type` + seeded `app_settings.manager_types` with Owner / Operations / View only). **Unblocked the May 29 manager_type bulk-import.**
+  - `db/migrations/2026_05_28_customer_store_type_and_primary_contact.sql` + `db/migrations/2026_05_28_customers_customer_group.sql` + `db/migrations/2026_05_28_customers_phone.sql` (customer store_type, customer_group, phone + primary-contact star — these now PERSIST; were silent no-ops before the columns existed).
+  - `db/migrations/2026_05_28_profiles_region_group_hire_date.sql` + `db/migrations/2026_05_28_drop_wrong_profile_columns.sql` (profile column cleanup from the region/group-on-profiles revert).
+  - If `git status` shows any *other* un-applied `db/migrations/*.sql` you haven't run, double-check — but per Gary (May 29) the outstanding set is in.
 
 **Lockout recovery for the manager roles work:** if a manager
 accidentally locks themselves out by saving a restrictive
