@@ -239,6 +239,7 @@ These are the next obvious chunks of work, roughly in order of impact:
 7. **Promote `db/migrations/` to the Supabase CLI** so migrations apply automatically per environment instead of being pasted into the SQL Editor by hand.
 8. **Tests.** No tests yet — for production, add at minimum smoke tests for auth + critical CRUD.
 9. **Native apps** (Capacitor wrap of the PWA, or React Native rewrite) for App Store / Play Store presence — also unlocks proper background location.
+10. **Dynamic region/group scopes ("live rules").** Today picking "Gauteng" when scoping a task/library file does a STATIC bulk-select — it resolves to the matching customer IDs at that moment, so a customer added to Gauteng later won't auto-join. Making it live = store the rule, not the IDs: add `customer_region` / `customer_group` columns to `customer_tasks` + `library_files`, evaluate at read time, change the mobile task/library read path to match the shift customer's region/group, and give `CustomerScopePicker` a rule mode (WITHOUT changing schedule/new + messaging, which are correctly point-in-time). Gary's call May 29: hold off for now. Tasks + Library only when picked up.
 
 ---
 

@@ -108,13 +108,14 @@ customer migrations (`2026_05_28_customer_store_type_and_primary_contact.sql`,
   file detail** initial loads (were plain "Loading…" text), matching
   the list pages Gary liked.
 
-- **Region/group = live rule** (Gary asked to make the static
-  bulk-select dynamic): assessed, NOT yet built — it needs a DB
-  migration (region/group columns on `customer_tasks` / `library_files`),
-  a mobile read-path change, and a change to the shared
-  `CustomerScopePicker` value contract (which must NOT affect
-  schedule/new + messaging, where point-in-time IDs are correct).
-  Surfaced as a scoped plan for Gary to greenlight before building.
+- **Region/group = live rule** — assessed, and Gary's call (May 29)
+  was to **hold off for now**. Making it dynamic (a customer added to
+  "Gauteng" next month auto-joins) needs a DB migration (region/group
+  columns on `customer_tasks` / `library_files`), a mobile read-path
+  change, and a change to the shared `CustomerScopePicker` value
+  contract (which must NOT affect schedule/new + messaging, where
+  point-in-time IDs are correct). Kept the static bulk-select for now;
+  parked in ROADMAP deferred. Don't re-propose unprompted.
 
 ---
 
