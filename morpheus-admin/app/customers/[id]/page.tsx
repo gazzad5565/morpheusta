@@ -51,9 +51,9 @@ import {
 import { listTasksForCustomer, deleteTask, type TaskRow } from "@/lib/tasks-store";
 import {
   listLibraryFilesForCustomer,
-  getLibraryDownloadUrl,
   type LibraryFile,
 } from "@/lib/library-store";
+import { LibraryFilePreview } from "@/components/library/LibraryFilePreview";
 import { listShiftsInRange, type ShiftRow } from "@/lib/shifts-store";
 import { isoDaysAgo, todayLocalISO } from "@/lib/format";
 import { listSitesForCustomer, type CustomerSite } from "@/lib/sites-store";
@@ -111,6 +111,8 @@ export default function CustomerDetailPage() {
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // In-place library file preview (Gary, May 29). null = closed.
+  const [previewFile, setPreviewFile] = useState<LibraryFile | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [savingAssignments, setSavingAssignments] = useState(false);
   const [taskBusyId, setTaskBusyId] = useState<string | null>(null);
@@ -244,13 +246,10 @@ export default function CustomerDetailPage() {
     setTasks((arr) => arr.filter((x) => x.id !== t.id));
   }
 
-  async function onOpenFile(f: LibraryFile) {
-    const r = await getLibraryDownloadUrl(f.storagePath);
-    if (!r.ok || !r.url) {
-      alert(`Couldn't open: ${r.error}`);
-      return;
-    }
-    window.open(r.url, "_blank", "noopener,noreferrer");
+  // Open the file in an in-place preview modal (Gary, May 29) rather
+  // than punting it to a new browser tab.
+  function onOpenFile(f: LibraryFile) {
+    setPreviewFile(f);
   }
 
   return (
@@ -561,6 +560,7 @@ export default function CustomerDetailPage() {
           <CustomFieldsCard entity="customer" entityId={id} />
         )}
       </div>
+      <LibraryFilePreview file={previewFile} onClose={() => setPreviewFile(null)} />
     </AdminShell>
   );
 }
