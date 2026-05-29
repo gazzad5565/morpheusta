@@ -725,6 +725,10 @@ function AddUserModal({
     }
   };
 
+  // TODO(review #3): migrate this backdrop/card/header chrome to the
+  // shared <Modal> + <ModalHeader>. Left as-is to avoid JSX surgery in
+  // this large file mid-sprint (the credentials success-state makes the
+  // closing-tag boundary fiddly). It works — low priority.
   return (
     <div
       role="dialog"

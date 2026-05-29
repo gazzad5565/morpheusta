@@ -25,6 +25,7 @@ import { useEffect, useState } from "react";
 import { AC } from "@/lib/tokens";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { PageLoading } from "@/components/ui/PageLoading";
+import { Modal } from "@/components/ui/Modal";
 import { getLibraryDownloadUrl, type LibraryFile } from "@/lib/library-store";
 
 type PreviewTarget = Pick<LibraryFile, "name" | "storagePath" | "mimeType">;
@@ -81,16 +82,7 @@ export function LibraryFilePreview({
     };
   }, [file]);
 
-  // Escape closes — standard modal affordance.
-  useEffect(() => {
-    if (!file) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [file, onClose]);
-
+  // Backdrop + Escape-to-close are handled by <Modal>.
   if (!file) return null;
 
   const mime = file.mimeType || "";
@@ -98,35 +90,13 @@ export function LibraryFilePreview({
   const isPdf = mime === "application/pdf";
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 60,
-        background: "rgba(10,15,30,.55)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
-      }}
+    <Modal
+      onClose={onClose}
+      maxWidth={960}
+      maxHeight="90vh"
+      zIndex={60}
+      backdrop="rgba(10,15,30,.55)"
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#fff",
-          borderRadius: 14,
-          width: "100%",
-          maxWidth: 960,
-          maxHeight: "90vh",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "0 20px 60px rgba(10,15,30,.3)",
-          overflow: "hidden",
-        }}
-      >
         {/* Header — name + Download + Close */}
         <div
           style={{
@@ -219,8 +189,7 @@ export function LibraryFilePreview({
             />
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

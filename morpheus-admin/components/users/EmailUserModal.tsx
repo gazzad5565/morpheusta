@@ -91,6 +91,10 @@ export function EmailUserModal({
 
   if (!mounted) return null;
 
+  // TODO(review #3): migrate to the shared <Modal> primitive. Kept
+  // bespoke for now — it uses createPortal + a close-while-busy guard
+  // + aria-labelledby, which the shared Modal would need extra props
+  // to cover. Not worth destabilising the credential-email flow now.
   return createPortal(
     <div
       // Backdrop — click outside closes the modal (unless mid-request).
