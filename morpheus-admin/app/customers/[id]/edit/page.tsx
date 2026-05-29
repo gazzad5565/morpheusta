@@ -81,7 +81,7 @@ export default function EditCustomerPage() {
   const [color, setColor] = useState(SWATCHES[0]);
   // Customer/outlet main phone (Rayhaan R7). Free text.
   const [phone, setPhone] = useState("");
-  const [region, setRegion] = useState<Customer["region"]>("North");
+  const [region, setRegion] = useState<string>("");
   // Mariska G5a (May 28 later) — Customer region + Customer group
   // are tenant-managed vocabularies. Loaded from app_settings.regions
   // / .groups. Empty array = vocab not populated yet; dropdown falls
@@ -144,7 +144,7 @@ export default function EditCustomerPage() {
         setInitials(c.initials ?? deriveInitials(c.name ?? ""));
         setColor(c.color ?? SWATCHES[0]);
         setPhone(c.phone ?? "");
-        setRegion((c.region as Customer["region"]) ?? "North");
+        setRegion(c.region ?? "");
         setCustomerGroup(c.customerGroup ?? "");
         setStoreType(c.storeType ?? "");
         setAddress(c.address ?? "");
@@ -626,7 +626,7 @@ export default function EditCustomerPage() {
             <Field label="Customer region">
               <Combobox
                 value={region}
-                onChange={(v) => setRegion((v ?? "") as Customer["region"])}
+                onChange={(v) => setRegion(v ?? "")}
                 triggerIcon="pin"
                 clearable={false}
                 options={(() => {

@@ -18,8 +18,11 @@ export interface Customer {
   /** Tenant-defined region tag (e.g. "Gauteng"). Vocabulary in
    *  app_settings.regions. Pre-Phase-4 rows may carry legacy values
    *  like "North" / "South" that aren't in the current vocab — the
-   *  edit form preserves them so they don't get blown away on save. */
-  region: string;
+   *  edit form preserves them so they don't get blown away on save.
+   *  NULL = no region set. Do NOT default to a fake value — the
+   *  May 29 fix removed a `|| "North"` fallback in rowToCustomer that
+   *  was surfacing a phantom "North" region in the filter dropdowns. */
+  region: string | null;
   /** Tenant-defined customer cohort tag (e.g. "Premium", "Spaza").
    *  Vocabulary in app_settings.groups. NULL = unassigned. Mariska
    *  G5a, May 28 (Gary's correction: region + group are CUSTOMER
@@ -34,11 +37,8 @@ export interface Customer {
    *  contact person's phone — this is the store's own line.
    *  Tappable on the customer header. Rayhaan R7, May 28. */
   phone?: string | null;
-  sites: number;
   geofence: number;
-  shiftsThisWeek: number;
   color: string;
-  tier?: "Premium" | "Standard";
   address?: string;
   latitude?: number;
   longitude?: number;

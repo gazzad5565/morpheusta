@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
@@ -12,6 +12,7 @@ import { inputStyle } from "@/components/ui/Filters";
 import { Combobox } from "@/components/ui/Combobox";
 import { AC } from "@/lib/tokens";
 import { createCustomer } from "@/lib/customers-store";
+import { getRegions } from "@/lib/settings-store";
 import { AddressAutocomplete } from "@/components/ui/AddressAutocomplete";
 import { CustomerAddressMap } from "@/components/CustomerAddressMap";
 import type { Customer } from "@/lib/types";
@@ -27,7 +28,8 @@ const SWATCHES = [
   "#5B7DC2", // accent indigo
 ];
 
-const REGIONS: Customer["region"][] = ["North", "South", "East", "West"];
+// Region options come from Site settings vocab (regionVocab below) —
+// never a hardcoded legacy list. May 29.
 
 // Local deriveInitials removed — use initialsFromNameOrEmail from
 // lib/format.ts which handles the same word-split + uppercase logic
@@ -40,7 +42,7 @@ export default function NewCustomerPage() {
   const [name, setName] = useState("");
   const [initials, setInitials] = useState("");
   const [color, setColor] = useState(SWATCHES[0]);
-  const [region, setRegion] = useState<Customer["region"]>("North");
+  const [region, setRegion] = useState<string>("");
   const [city, setCity] = useState("");
   const [address, setAddress] = useState("");
   const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -48,6 +50,13 @@ export default function NewCustomerPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [geocodeNote, setGeocodeNote] = useState<string | null>(null);
+  // Region dropdown options — sourced from Site settings vocab, not a
+  // hardcoded list (Gary's standing rule). Empty until the manager
+  // defines regions under Site settings.
+  const [regionVocab, setRegionVocab] = useState<string[]>([]);
+  useEffect(() => {
+    void getRegions().then(setRegionVocab);
+  }, []);
 
   // Auto-fill initials from name when user hasn't manually typed any
   const [initialsManuallyEdited, setInitialsManuallyEdited] = useState(false);
@@ -62,11 +71,8 @@ export default function NewCustomerPage() {
     initials: initials || "??",
     color,
     code: formatCustomerCode(code) || "—",
-    region,
-    sites: 1,
+    region: region || null,
     geofence: 75,
-    shiftsThisWeek: 0,
-    tier: "Standard",
   };
 
   const onSubmit = async () => {
@@ -111,7 +117,7 @@ export default function NewCustomerPage() {
       initials: initials.trim().slice(0, 3).toUpperCase(),
       color,
       code: codeClean,
-      region,
+      region: region || undefined,
       city: city.trim() || undefined,
       address: trimmedAddress || undefined,
       latitude,
@@ -188,10 +194,10 @@ export default function NewCustomerPage() {
             <Field label="Region">
               <Combobox
                 value={region}
-                onChange={(v) => setRegion((v ?? REGIONS[0]) as Customer["region"])}
+                onChange={(v) => setRegion(v ?? "")}
                 triggerIcon="pin"
                 clearable={false}
-                options={REGIONS.map((r) => ({ value: r, label: r }))}
+                options={regionVocab.map((r) => ({ value: r, label: r }))}
               />
             </Field>
 

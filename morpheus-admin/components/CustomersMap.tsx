@@ -90,7 +90,7 @@ export function CustomersMap({ customers }: { customers: Customer[] }) {
       const popup = new maplibregl.Popup({ offset: 18, closeButton: false }).setHTML(
         `<div style="font-family:${AC.font};font-size:12px;line-height:1.4;cursor:pointer">
            <div style="font-weight:700;color:${AC.ink};">${escapeHtml(c.name)}</div>
-           <div style="color:${AC.mute};font-size:11px;margin-top:2px;">${escapeHtml(String(c.code))} · ${escapeHtml(c.region)}</div>
+           <div style="color:${AC.mute};font-size:11px;margin-top:2px;">${escapeHtml(String(c.code))}${c.region ? ` · ${escapeHtml(c.region)}` : ""}</div>
            ${c.address ? `<div style="color:${AC.ink2};font-size:11px;margin-top:4px;max-width:220px;">${escapeHtml(c.address)}</div>` : ""}
          </div>`
       );

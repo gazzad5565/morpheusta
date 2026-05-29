@@ -68,11 +68,10 @@ function rowToCustomer(row: DbRow): Customer {
     initials: row.initials,
     color: row.color,
     code: formatCustomerCode(row.code),
-    region: (row.region as Customer["region"]) || "North",
-    sites: 1,
+    // NULL stays NULL — no fake "North" fallback (it was leaking a
+    // phantom region into the vocab-sourced filter dropdowns). May 29.
+    region: row.region ?? null,
     geofence: row.geofence_radius_m ?? 100,
-    shiftsThisWeek: 0,
-    tier: "Standard",
     address: row.address ?? undefined,
     latitude: row.latitude ?? undefined,
     longitude: row.longitude ?? undefined,
