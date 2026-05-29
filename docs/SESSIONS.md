@@ -136,6 +136,18 @@ customer migrations (`2026_05_28_customer_store_type_and_primary_contact.sql`,
   limiting the size." Dropped the cap; form pages keep their own inner
   ~760 width. (`cf2307c`)
 
+- **Migrations applied + `manager_type` import (end of day).** Gary ran
+  the outstanding SQL, so the May 25/27/28 batch is now live in cloud
+  (OPS.md updated). That made customer **store_type / customer_group /
+  phone + the primary-contact star** actually persist (silent no-ops
+  before), and unblocked the deferred follow-up: the **Managers import
+  now takes a `manager_type` column** (Owner / Operations / View only),
+  validated server-side against `app_settings.manager_types` exactly
+  like rep_type. managers.csv sample + wizard note updated. (`a8d5ff0`)
+  Sole remaining operator item: the **`RESEND_FROM`** Vercel env var
+  (welcome/credential emails are sandbox-locked to gazzad@mac.com until
+  it's set).
+
 ---
 
 ### Today's session — what shipped (May 28, 2026, customer-selection + audit log)
