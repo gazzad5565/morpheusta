@@ -15,9 +15,10 @@
  * card with either Table or Grid.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Card } from "@/components/ui/Card";
+import { Btn } from "@/components/ui/Btn";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { FilterChip } from "@/components/ui/Filters";
 import { SegTabs } from "@/components/ui/SegTabs";
@@ -77,6 +78,17 @@ export default function PastShiftsPage() {
     cancelled: number;
   }>({ "7": 0, "30": 0, "90": 0, all: 0, cancelled: 0 });
 
+  // Date-window paging (Rayhaan R9). `listPastShifts` caps each fetch
+  // so the "all-time" window can't pull a six-figure payload — but
+  // that left the OLDEST shifts unreachable once an org crossed the
+  // cap. `limit` grows by one page each time the manager taps "Load
+  // older", so the archive's tail is always reachable. quietRef
+  // suppresses the full-page loader on a load-more: we keep the
+  // current rows on screen and just extend the list downward.
+  const [limit, setLimit] = useState(PAST_SHIFTS_DEFAULT_LIMIT);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const quietRef = useRef(false);
+
   // Data load. We over-fetch slightly to keep the period chips honest
   // (so toggling between "7 / 30 / 90" doesn't refetch each time). The
   // "all" window is only fetched when the user actively selects it,
@@ -84,12 +96,15 @@ export default function PastShiftsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setRows(null);
+      // Keep the current list on screen during a "Load older" fetch
+      // (quietRef); blank to the full-page loader only on a fresh
+      // window change.
+      if (!quietRef.current) setRows(null);
       const endISO = todayLocalISO();
       const startISO =
         period === "all" ? "1970-01-01" : isoDaysAgo(parseInt(period) - 1);
       const [shifts, reps] = await Promise.all([
-        listPastShifts({ startISO, endISO, includeCancelled }),
+        listPastShifts({ startISO, endISO, includeCancelled, limit }),
         listProfiles({ role: "rep" }),
       ]);
       if (cancelled) return;
@@ -148,11 +163,37 @@ export default function PastShiftsPage() {
         all: completeOnly.length,
         cancelled: cancelledInWin,
       });
+
+      // Clear the load-more flags now the bigger page has landed.
+      quietRef.current = false;
+      setLoadingMore(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [period, includeCancelled]);
+  }, [period, includeCancelled, limit]);
+
+  // Window-change handlers reset paging back to the first page (and
+  // drop out of "quiet" mode so the full-page loader shows). "Load
+  // older" bumps the cap by one page and stays quiet so the list just
+  // grows. React batches these, so each triggers exactly one refetch.
+  const selectPeriod = (p: Period) => {
+    quietRef.current = false;
+    setLoadingMore(false);
+    setLimit(PAST_SHIFTS_DEFAULT_LIMIT);
+    setPeriod(p);
+  };
+  const toggleCancelled = () => {
+    quietRef.current = false;
+    setLoadingMore(false);
+    setLimit(PAST_SHIFTS_DEFAULT_LIMIT);
+    setIncludeCancelled((v) => !v);
+  };
+  const loadOlder = () => {
+    quietRef.current = true;
+    setLoadingMore(true);
+    setLimit((l) => l + PAST_SHIFTS_DEFAULT_LIMIT);
+  };
 
   // Rank periods narrowest-to-widest. We only display a chip count
   // when the chip's window is narrower or equal to the currently-
@@ -222,31 +263,31 @@ export default function PastShiftsPage() {
           >
             <FilterChip
               active={period === "7"}
-              onClick={() => setPeriod("7")}
+              onClick={() => selectPeriod("7")}
             >
               7 days{chipCountFor("7") !== null ? ` · ${chipCountFor("7")}` : ""}
             </FilterChip>
             <FilterChip
               active={period === "30"}
-              onClick={() => setPeriod("30")}
+              onClick={() => selectPeriod("30")}
             >
               30 days{chipCountFor("30") !== null ? ` · ${chipCountFor("30")}` : ""}
             </FilterChip>
             <FilterChip
               active={period === "90"}
-              onClick={() => setPeriod("90")}
+              onClick={() => selectPeriod("90")}
             >
               90 days{chipCountFor("90") !== null ? ` · ${chipCountFor("90")}` : ""}
             </FilterChip>
             <FilterChip
               active={period === "all"}
-              onClick={() => setPeriod("all")}
+              onClick={() => selectPeriod("all")}
             >
               All time{chipCountFor("all") !== null ? ` · ${chipCountFor("all")}` : ""}
             </FilterChip>
             <FilterChip
               active={includeCancelled}
-              onClick={() => setIncludeCancelled((v) => !v)}
+              onClick={toggleCancelled}
             >
               Include cancelled
               {includeCancelled ? ` · ${allCounts.cancelled}` : ""}
@@ -304,31 +345,6 @@ export default function PastShiftsPage() {
           </div>
         </Card>
 
-        {/* Truncation banner — `listPastShifts` caps its result at
-            PAST_SHIFTS_DEFAULT_LIMIT to keep the "all-time" window
-            from pulling a six-figure payload on long-lived orgs. When
-            the cap is hit we tell the manager so they don't read the
-            partial list as the full archive. */}
-        {rows && rows.length >= PAST_SHIFTS_DEFAULT_LIMIT && (
-          <Card padding={12}>
-            <div
-              style={{
-                fontFamily: AC.font,
-                fontSize: 12.5,
-                color: "#7d5708",
-                background: AC.warnTint,
-                padding: "8px 12px",
-                borderRadius: 8,
-                lineHeight: 1.45,
-              }}
-            >
-              <strong>Showing the most recent {PAST_SHIFTS_DEFAULT_LIMIT.toLocaleString()} shifts.</strong>{" "}
-              Narrow the date window or search to see older results — the
-              archive may contain more shifts than are listed here.
-            </div>
-          </Card>
-        )}
-
         {/* Count subtitle — DESIGN.md §8. `rows` is the full dataset
             after the date-window fetch; `filtered` is what's visible
             after search + rep filter. */}
@@ -366,6 +382,37 @@ export default function PastShiftsPage() {
           />
         ) : (
           <GridView rows={filtered} photoCounts={photoCounts} />
+        )}
+
+        {/* Load older — grows the fetch cap so the archive tail stays
+            reachable past the default limit. Shown only while the last
+            fetch came back full (there may be more older shifts);
+            hides once the whole window is loaded. Rayhaan R9. */}
+        {filtered !== null && rows !== null && rows.length >= limit && (
+          <Card padding={12}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.mute }}>
+                Showing the {rows.length.toLocaleString()} most recent shifts in
+                this window — there may be older ones.
+              </span>
+              <Btn
+                size="sm"
+                icon="download"
+                onClick={loadOlder}
+                disabled={loadingMore}
+              >
+                {loadingMore ? "Loading older…" : "Load older"}
+              </Btn>
+            </div>
+          </Card>
         )}
       </div>
     </AdminShell>
