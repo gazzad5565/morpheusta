@@ -238,8 +238,17 @@ so the next page can reuse it.
 - **`FilterChip`** (from `Filters.tsx`) — the round pill that says "All"
   / "With shifts today" / "Managers" on list pages. Click to toggle.
 - **`FilterSelect`** (from `Filters.tsx`) — the canonical filter-row
-  **dropdown**. A `<select>` styled as a pill in the same family as
-  `FilterChip` (radius 99, same height/font, brand-tinted when a value
+  **dropdown**. Supports flat `options` OR grouped `groups`
+  (`<optgroup>`s, e.g. Manager types / Rep types) — both wear the
+  same pill look, so **every** filter/selection dropdown matches
+  (no raw `<select>` anywhere; Gary, May 28: "the drop-downs
+  everywhere should look the same"). **Vocabulary rule:** region /
+  group / store-type / rep-type options ALWAYS come from the Site
+  settings vocab (`getRegions` / `getGroups` / `getStoreTypes` /
+  `getRepTypes`) — NEVER derived from distinct values on data rows.
+  Deriving from data surfaces stale legacy values; the manager must
+  see exactly what they defined in Settings. A `<select>` styled as
+  a pill in the same family as `FilterChip` (radius 99, same height/font, brand-tinted when a value
   is chosen, native arrow suppressed + replaced with a brand chevron).
   **Every categorical filter dropdown on a list page must use this, not
   a bare `<select>`** — Gary's May 28 note: raw selects "don't look like

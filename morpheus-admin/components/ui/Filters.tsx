@@ -53,16 +53,27 @@ export interface FilterSelectOption {
  * DESIGN.md §6 documents this as the canonical filter-row dropdown —
  * every list-page categorical filter should use it, not a bare <select>.
  */
+export interface FilterSelectGroup {
+  label: string;
+  options: FilterSelectOption[];
+}
+
 export function FilterSelect({
   value,
   onChange,
   options,
+  groups,
   allLabel,
   title,
 }: {
   value: string;
   onChange: (next: string) => void;
-  options: FilterSelectOption[];
+  /** Flat options. Use EITHER this OR `groups`. */
+  options?: FilterSelectOption[];
+  /** Grouped options (rendered as <optgroup>s). Use EITHER this OR
+   *  `options`. Lets a grouped select (e.g. Manager types / Rep
+   *  types) wear the same pill look as a flat one. */
+  groups?: FilterSelectGroup[];
   /** Label for the "no filter" option (e.g. "All regions"). Selecting
    *  it clears the filter (empty value). */
   allLabel: string;
@@ -94,11 +105,21 @@ export function FilterSelect({
         }}
       >
         <option value="">{allLabel}</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
+        {groups
+          ? groups.map((g) => (
+              <optgroup key={g.label} label={g.label}>
+                {g.options.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))
+          : (options ?? []).map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
       </select>
       {/* Custom chevron — positioned over the suppressed native arrow.
           pointerEvents:none so clicks still fall through to the select. */}

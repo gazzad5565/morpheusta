@@ -16,10 +16,11 @@
  * "Specific" is chosen. Select all / Clear shortcuts above the list.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AC } from "@/lib/tokens";
 import { CustomerSwatch } from "@/components/ui/Avatars";
 import { FilterSelect } from "@/components/ui/Filters";
+import { getRegions, getGroups } from "@/lib/settings-store";
 import type { Customer } from "@/lib/types";
 
 export type CustomerScope = null | string[];
@@ -94,18 +95,27 @@ export function CustomerScopePicker({
   // region / group to the selection. The picker's value stays a list
   // of customer IDs (so callers are unchanged), which means this is a
   // STATIC bulk-select — a future customer added to that region won't
-  // auto-join. Options are derived from the customers actually present
-  // (only regions/groups that have customers show up).
-  const regionOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of customers) if (c.region) set.add(c.region);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [customers]);
-  const groupOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of customers) if (c.customerGroup) set.add(c.customerGroup);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [customers]);
+  // auto-join.
+  //
+  // Options come from the Site settings VOCABULARY (getRegions /
+  // getGroups), NOT from distinct values on customer rows — Gary
+  // (May 28): the dropdown must show what the manager defined in Site
+  // settings, never a stale legacy value. Empty vocab → the quick-add
+  // row hides itself (nudging the manager to define regions/groups
+  // first).
+  const [regionOptions, setRegionOptions] = useState<string[]>([]);
+  const [groupOptions, setGroupOptions] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([getRegions(), getGroups()]).then(([r, g]) => {
+      if (cancelled) return;
+      setRegionOptions(r);
+      setGroupOptions(g);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const addMatching = (predicate: (c: Customer) => boolean) => {
     const ids = customers.filter(predicate).map((c) => c.id);

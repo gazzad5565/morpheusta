@@ -25,6 +25,7 @@ import { RepAvatar } from "@/components/ui/Avatars";
 import { displayName, type Profile } from "@/lib/profiles-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
+import { FilterSelect } from "@/components/ui/Filters";
 
 export type RepScope = null | string[];
 
@@ -183,30 +184,14 @@ export function RepScopePicker({
                 borderBottom: `1px solid ${AC.lineDim}`,
               }}
             >
-              <select
+              <FilterSelect
                 value={typeFilter}
-                onChange={(e) => setTypeFilter(e.target.value)}
+                onChange={setTypeFilter}
+                allLabel="All rep types"
                 title="Narrow by rep type"
-                style={{
-                  flex: 1,
-                  padding: "7px 10px",
-                  borderRadius: 8,
-                  border: `1px solid ${typeFilter ? AC.brandDeep : AC.line}`,
-                  background: typeFilter ? AC.brandSoft : "#fff",
-                  color: typeFilter ? AC.brandInk : AC.ink2,
-                  fontFamily: AC.font,
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-              >
-                <option value="">All rep types</option>
-                {repTypes.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
+                options={repTypes.map((t) => ({ value: t.name, label: t.name }))}
+              />
+              <div style={{ flex: 1 }} />
               {typeFilter && visible.length > 0 && (
                 <button
                   type="button"

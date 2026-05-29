@@ -35,6 +35,8 @@ import { listProfiles, displayName, type Profile } from "@/lib/profiles-store";
 import {
   getRepTypes,
   getManagerTypes,
+  getRegions,
+  getGroups,
   type RepTypeConfig,
   type ManagerTypeConfig,
 } from "@/lib/settings-store";
@@ -83,6 +85,9 @@ export default function NotifyPage() {
   const [assignments, setAssignments] = useState<
     { rep_id: string; customer_id: string }[]
   >([]);
+  // Region / group vocab from Site settings — the dropdown options.
+  const [regionVocab, setRegionVocab] = useState<string[]>([]);
+  const [groupVocab, setGroupVocab] = useState<string[]>([]);
 
   // Recent messages list
   const [recent, setRecent] = useState<MessageRow[]>([]);
@@ -94,11 +99,15 @@ export default function NotifyPage() {
     void listProfiles().then((ps) => {
       if (!cancelled) setAllProfiles(ps);
     });
-    void Promise.all([getRepTypes(), getManagerTypes()]).then(([r, m]) => {
-      if (cancelled) return;
-      setRepTypes(r);
-      setManagerTypes(m);
-    });
+    void Promise.all([getRepTypes(), getManagerTypes(), getRegions(), getGroups()]).then(
+      ([r, m, rg, gr]) => {
+        if (cancelled) return;
+        setRepTypes(r);
+        setManagerTypes(m);
+        setRegionVocab(rg);
+        setGroupVocab(gr);
+      }
+    );
     void Promise.all([listCustomers(), listAllAssignments()]).then(
       ([cs, as]) => {
         if (cancelled) return;
@@ -158,20 +167,13 @@ export default function NotifyPage() {
   };
 
   // ── Target reps by the customers they serve (May 28) ────────────
-  // Region / group come off the customer roster; we map a chosen
-  // region|group → matching customer IDs → assigned rep IDs → add
-  // them to the picked set. Options only show regions/groups that
-  // actually have customers.
-  const customerRegionOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of customers) if (c.region) set.add(c.region);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [customers]);
-  const customerGroupOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const c of customers) if (c.customerGroup) set.add(c.customerGroup);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [customers]);
+  // Options come from the Site settings vocabulary (getRegions /
+  // getGroups), NOT from distinct values on customer rows — so the
+  // dropdown shows what the manager has actually defined, never a
+  // stale legacy value (Gary, May 28). Picking one maps region|group
+  // → matching customer IDs → assigned rep IDs → adds to the set.
+  const customerRegionOptions = regionVocab;
+  const customerGroupOptions = groupVocab;
 
   const addRepsServing = (predicate: (c: Customer) => boolean) => {
     const customerIds = new Set(
@@ -356,32 +358,36 @@ export default function NotifyPage() {
                     marginBottom: 8,
                   }}
                 >
-                  <select
+                  <FilterSelect
                     value={typeFilter}
-                    onChange={(e) => setTypeFilter(e.target.value)}
+                    onChange={setTypeFilter}
+                    allLabel="All types"
                     title="Narrow by manager or rep type"
-                    style={notifyFilterSelectStyle(typeFilter)}
-                  >
-                    <option value="">All types</option>
-                    {managerTypes.length > 0 && (
-                      <optgroup label="Manager types">
-                        {managerTypes.map((t) => (
-                          <option key={`m:${t.name}`} value={`manager:${t.name}`}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {repTypes.length > 0 && (
-                      <optgroup label="Rep types">
-                        {repTypes.map((t) => (
-                          <option key={`r:${t.name}`} value={`rep:${t.name}`}>
-                            {t.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
+                    groups={[
+                      ...(managerTypes.length > 0
+                        ? [
+                            {
+                              label: "Manager types",
+                              options: managerTypes.map((t) => ({
+                                value: `manager:${t.name}`,
+                                label: t.name,
+                              })),
+                            },
+                          ]
+                        : []),
+                      ...(repTypes.length > 0
+                        ? [
+                            {
+                              label: "Rep types",
+                              options: repTypes.map((t) => ({
+                                value: `rep:${t.name}`,
+                                label: t.name,
+                              })),
+                            },
+                          ]
+                        : []),
+                    ]}
+                  />
                   {typeFilter && filteredProfiles.length > 0 && (
                     <button
                       type="button"
@@ -843,26 +849,6 @@ export default function NotifyPage() {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
-
-/** Shared brand-tinted-when-active styling for the type / region /
- *  group selects inside the Pick-specific picker. Wider than the
- *  /reps filter dropdowns since the picker has more room to breathe.
- *  May 28 (Mariska G11a). */
-function notifyFilterSelectStyle(active: string): React.CSSProperties {
-  return {
-    padding: "8px 10px",
-    borderRadius: 8,
-    border: `1px solid ${active ? AC.brandDeep : AC.line}`,
-    background: active ? AC.brandSoft : "#fff",
-    color: active ? AC.brandInk : AC.ink2,
-    fontFamily: AC.font,
-    fontSize: 12.5,
-    fontWeight: 600,
-    cursor: "pointer",
-    flex: 1,
-    minWidth: 140,
-  };
-}
 
 function ChannelToggle({
   checked,
