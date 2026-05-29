@@ -19,7 +19,10 @@ import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
-import { inputStyle } from "@/components/ui/Filters";
+import { inputStyle, FilterSelect } from "@/components/ui/Filters";
+import { listCustomers } from "@/lib/customers-store";
+import { listAllAssignments } from "@/lib/assignments-store";
+import type { Customer } from "@/lib/types";
 import {
   composeMessage,
   cancelMessage,
@@ -70,10 +73,16 @@ export default function NotifyPage() {
   const [typeFilter, setTypeFilter] = useState<string>("");
   const [repTypes, setRepTypes] = useState<RepTypeConfig[]>([]);
   const [managerTypes, setManagerTypes] = useState<ManagerTypeConfig[]>([]);
-  // Region + Group filters were added on May 28 then removed same
-  // day: those tags belong to customers, not users. Region/group
-  // audience targeting will be reintroduced via assigned-customer
-  // joins in a follow-up (Mariska G11a — derived feature).
+  // Target reps by the CUSTOMER region/group they serve (Gary, May 28
+  // — "sending a message should let you select by group or region").
+  // Messages go to users, so we resolve: customers in region/group →
+  // their assigned reps → add those reps to the picked set. Needs the
+  // customer roster (for region/group) + the rep↔customer assignment
+  // map.
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [assignments, setAssignments] = useState<
+    { rep_id: string; customer_id: string }[]
+  >([]);
 
   // Recent messages list
   const [recent, setRecent] = useState<MessageRow[]>([]);
@@ -90,6 +99,13 @@ export default function NotifyPage() {
       setRepTypes(r);
       setManagerTypes(m);
     });
+    void Promise.all([listCustomers(), listAllAssignments()]).then(
+      ([cs, as]) => {
+        if (cancelled) return;
+        setCustomers(cs);
+        setAssignments(as);
+      }
+    );
     const loadRecent = () => {
       void listMessages({ limit: 25 }).then((rows) => {
         if (!cancelled) setRecent(rows);
@@ -139,6 +155,38 @@ export default function NotifyPage() {
       else next.add(id);
       return next;
     });
+  };
+
+  // ── Target reps by the customers they serve (May 28) ────────────
+  // Region / group come off the customer roster; we map a chosen
+  // region|group → matching customer IDs → assigned rep IDs → add
+  // them to the picked set. Options only show regions/groups that
+  // actually have customers.
+  const customerRegionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of customers) if (c.region) set.add(c.region);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [customers]);
+  const customerGroupOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of customers) if (c.customerGroup) set.add(c.customerGroup);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [customers]);
+
+  const addRepsServing = (predicate: (c: Customer) => boolean) => {
+    const customerIds = new Set(
+      customers.filter(predicate).map((c) => c.id)
+    );
+    const repIds = assignments
+      .filter((a) => customerIds.has(a.customer_id))
+      .map((a) => a.rep_id);
+    if (repIds.length === 0) {
+      setFlash(
+        "No reps are assigned to customers in that region/group yet."
+      );
+      return;
+    }
+    setPickedIds((prev) => new Set([...prev, ...repIds]));
   };
 
   const audienceLabel = useMemo(() => {
@@ -363,6 +411,63 @@ export default function NotifyPage() {
                   )}
                 </div>
               )}
+
+              {/* Target reps by the CUSTOMER region/group they serve
+                  (May 28). Picking one adds every rep assigned to a
+                  customer in that region/group to the selection. Only
+                  shows once customers carry regions/groups. */}
+              {(customerRegionOptions.length > 0 ||
+                customerGroupOptions.length > 0) && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    marginBottom: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: AC.font,
+                      fontSize: 11,
+                      color: AC.mute,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Add reps serving:
+                  </span>
+                  {customerRegionOptions.length > 0 && (
+                    <FilterSelect
+                      value=""
+                      onChange={(region) =>
+                        region && addRepsServing((c) => c.region === region)
+                      }
+                      allLabel="Customer region…"
+                      title="Add reps assigned to customers in a region"
+                      options={customerRegionOptions.map((r) => ({
+                        value: r,
+                        label: r,
+                      }))}
+                    />
+                  )}
+                  {customerGroupOptions.length > 0 && (
+                    <FilterSelect
+                      value=""
+                      onChange={(group) =>
+                        group && addRepsServing((c) => c.customerGroup === group)
+                      }
+                      allLabel="Customer group…"
+                      title="Add reps assigned to customers in a group"
+                      options={customerGroupOptions.map((g) => ({
+                        value: g,
+                        label: g,
+                      }))}
+                    />
+                  )}
+                </div>
+              )}
+
               <input
                 value={profileSearch}
                 onChange={(e) => setProfileSearch(e.target.value)}
