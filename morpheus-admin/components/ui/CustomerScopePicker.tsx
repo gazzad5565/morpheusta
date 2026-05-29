@@ -19,6 +19,7 @@
 import { useMemo, useState } from "react";
 import { AC } from "@/lib/tokens";
 import { CustomerSwatch } from "@/components/ui/Avatars";
+import { FilterSelect } from "@/components/ui/Filters";
 import type { Customer } from "@/lib/types";
 
 export type CustomerScope = null | string[];
@@ -87,6 +88,30 @@ export function CustomerScopePicker({
   };
   const clearAll = () => onChange([]);
 
+  // ── Quick-add by region / group (May 28) ────────────────────────
+  // Gary: "select by their group or region wherever you pick a
+  // customer." These dropdowns bulk-add every customer in the chosen
+  // region / group to the selection. The picker's value stays a list
+  // of customer IDs (so callers are unchanged), which means this is a
+  // STATIC bulk-select — a future customer added to that region won't
+  // auto-join. Options are derived from the customers actually present
+  // (only regions/groups that have customers show up).
+  const regionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of customers) if (c.region) set.add(c.region);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [customers]);
+  const groupOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of customers) if (c.customerGroup) set.add(c.customerGroup);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [customers]);
+
+  const addMatching = (predicate: (c: Customer) => boolean) => {
+    const ids = customers.filter(predicate).map((c) => c.id);
+    onChange(Array.from(new Set([...selectedIds, ...ids])));
+  };
+
   return (
     <div>
       {allowAll && (
@@ -150,6 +175,55 @@ export function CustomerScopePicker({
               Clear
             </button>
           </div>
+
+          {/* Quick-add by region / group — bulk-selects matching
+              customers. Hidden until the tenant has regions/groups
+              assigned to customers. */}
+          {(regionOptions.length > 0 || groupOptions.length > 0) && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 12px",
+                borderBottom: `1px solid ${AC.lineDim}`,
+                flexWrap: "wrap",
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: AC.font,
+                  fontSize: 11,
+                  color: AC.mute,
+                  fontWeight: 600,
+                }}
+              >
+                Quick add:
+              </span>
+              {regionOptions.length > 0 && (
+                <FilterSelect
+                  value=""
+                  onChange={(region) =>
+                    region && addMatching((c) => c.region === region)
+                  }
+                  allLabel="By region…"
+                  title="Add all customers in a region"
+                  options={regionOptions.map((r) => ({ value: r, label: r }))}
+                />
+              )}
+              {groupOptions.length > 0 && (
+                <FilterSelect
+                  value=""
+                  onChange={(group) =>
+                    group && addMatching((c) => c.customerGroup === group)
+                  }
+                  allLabel="By group…"
+                  title="Add all customers in a group"
+                  options={groupOptions.map((g) => ({ value: g, label: g }))}
+                />
+              )}
+            </div>
+          )}
 
           {/* Inline search — same pattern as RepScopePicker. Mirrors the
               search on the customers list page so anywhere a manager

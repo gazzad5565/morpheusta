@@ -18,9 +18,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card, SectionTitle } from "@/components/ui/Card";
-import { CustomerSwatch } from "@/components/ui/Avatars";
 import { AGlyph } from "@/components/ui/AGlyph";
 import { inputStyle } from "@/components/ui/Filters";
+import { CustomerScopePicker } from "@/components/ui/CustomerScopePicker";
 import { AC } from "@/lib/tokens";
 import { listCustomers } from "@/lib/customers-store";
 import { createTask } from "@/lib/tasks-store";
@@ -89,17 +89,6 @@ function NewTaskPage() {
     };
   }, [fromCustomer]);
 
-  const toggleCustomer = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const selectAll = () => setSelectedIds(new Set(customers.map((c) => c.id)));
-  const clearAll = () => setSelectedIds(new Set());
 
   const previewLabel = useMemo(() => {
     if (scope === "all") return "All customers";
@@ -192,146 +181,28 @@ function NewTaskPage() {
           </div>
 
           <Field label="Applies to" required>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <ScopeButton
-                active={scope === "all"}
-                onClick={() => setScope("all")}
-                title="All customers"
-                sub="One row · universal task"
-              />
-              <ScopeButton
-                active={scope === "specific"}
-                onClick={() => setScope("specific")}
-                title="Specific customers"
-                sub="Pick one or many"
-              />
-            </div>
-
-            {scope === "specific" && (
-              <div
-                style={{
-                  border: `1px solid ${AC.line}`,
-                  borderRadius: 10,
-                  background: "#fff",
-                  maxHeight: 240,
-                  overflowY: "auto",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "8px 12px",
-                    borderBottom: `1px solid ${AC.lineDim}`,
-                    background: AC.bg,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: AC.font,
-                      fontSize: 11,
-                      color: AC.mute,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {selectedIds.size} of {customers.length} selected
-                  </span>
-                  <div style={{ flex: 1 }} />
-                  <button
-                    type="button"
-                    onClick={selectAll}
-                    style={linkBtn}
-                  >
-                    Select all
-                  </button>
-                  <span style={{ color: AC.faint }}>·</span>
-                  <button
-                    type="button"
-                    onClick={clearAll}
-                    style={linkBtn}
-                  >
-                    Clear
-                  </button>
-                </div>
-
-                {loading ? (
-                  <div
-                    style={{
-                      padding: 14,
-                      fontFamily: AC.font,
-                      fontSize: 12.5,
-                      color: AC.mute,
-                      textAlign: "center",
-                    }}
-                  >
-                    Loading customers…
-                  </div>
-                ) : customers.length === 0 ? (
-                  <div
-                    style={{
-                      padding: 14,
-                      fontFamily: AC.font,
-                      fontSize: 12.5,
-                      color: AC.mute,
-                      textAlign: "center",
-                    }}
-                  >
-                    No customers yet. Add one first.
-                  </div>
-                ) : (
-                  customers.map((c) => {
-                    const checked = selectedIds.has(c.id);
-                    return (
-                      <label
-                        key={c.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          padding: "9px 12px",
-                          borderBottom: `1px solid ${AC.lineDim}`,
-                          cursor: "pointer",
-                          background: checked ? AC.brandSoft : "#fff",
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleCustomer(c.id)}
-                          style={{ width: 16, height: 16, accentColor: AC.brand }}
-                        />
-                        <CustomerSwatch customer={c} size={22} />
-                        <span
-                          style={{
-                            flex: 1,
-                            minWidth: 0,
-                            fontFamily: AC.font,
-                            fontSize: 13,
-                            color: AC.ink,
-                            fontWeight: 500,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {c.name}
-                        </span>
-                        <span
-                          style={{
-                            fontFamily: AC.font,
-                            fontSize: 11.5,
-                            color: AC.mute,
-                          }}
-                        >
-                          #{c.code}
-                        </span>
-                      </label>
-                    );
-                  })
-                )}
-              </div>
-            )}
+            {/* Shared CustomerScopePicker (May 28) — gives Tasks the
+                same All / Specific / by-region / by-group selection as
+                Library + schedule. value null = universal (one row,
+                customer_id NULL); string[] = one row per customer. */}
+            <CustomerScopePicker
+              customers={customers}
+              loading={loading}
+              value={scope === "all" ? null : Array.from(selectedIds)}
+              onChange={(next) => {
+                if (next === null) {
+                  setScope("all");
+                  setSelectedIds(new Set());
+                } else {
+                  setScope("specific");
+                  setSelectedIds(new Set(next));
+                }
+              }}
+              allLabel="All customers"
+              allSubLabel="Universal task"
+              specificLabel="Specific customers"
+              specificSubLabel="Pick one or many · or by region / group"
+            />
           </Field>
 
           <Field label="Task name" required>
@@ -624,67 +495,6 @@ function NewTaskPage() {
         </Card>
       </div>
     </AdminShell>
-  );
-}
-
-const linkBtn: React.CSSProperties = {
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  fontFamily: AC.font,
-  fontSize: 11,
-  color: AC.brandDeep,
-  fontWeight: 600,
-  padding: "2px 4px",
-};
-
-function ScopeButton({
-  active,
-  onClick,
-  title,
-  sub,
-}: {
-  active: boolean;
-  onClick: () => void;
-  title: string;
-  sub: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        flex: 1,
-        padding: "10px 12px",
-        borderRadius: 10,
-        background: active ? AC.brandSoft : "#fff",
-        border: `1px solid ${active ? AC.brand : AC.line}`,
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-    >
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 13,
-          fontWeight: 600,
-          color: active ? AC.brandInk : AC.ink,
-          letterSpacing: -0.1,
-        }}
-      >
-        {title}
-      </div>
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 11,
-          color: active ? AC.brandDeep : AC.mute,
-          marginTop: 2,
-        }}
-      >
-        {sub}
-      </div>
-    </button>
   );
 }
 
