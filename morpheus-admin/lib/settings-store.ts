@@ -6,6 +6,7 @@
 
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { notifySaved, notifySaveError } from "./save-status";
+import { setDateFormatPref, type DateFormat } from "./format";
 
 interface SettingRow {
   key: string;
@@ -92,6 +93,33 @@ export async function setAutoCheckoutTime(
     return { ok: false, error: "Time must be in HH:MM (24-hour) format, e.g. 23:59." };
   }
   return writeSetting("auto_checkout_time", t);
+}
+
+// ─── Tenant date format (G15) ───────────────────────────────────────────
+//
+// Org-wide preference for how numeric dates render (Site settings →
+// Date format). The actual formatting lives in lib/format.ts, which
+// keeps a synchronous cache (formatDate is called from many render
+// paths and can't await). getDateFormat syncs that cache from the DB
+// on boot; setDateFormat updates it immediately on save so the UI
+// reflects the change without a reload.
+function coerceDateFormat(v: unknown): DateFormat {
+  return v === "DMY" || v === "MDY" || v === "ISO" ? v : "auto";
+}
+
+export async function getDateFormat(): Promise<DateFormat> {
+  const v = await readSetting<DateFormat>("date_format", "auto");
+  const fmt = coerceDateFormat(v);
+  setDateFormatPref(fmt);
+  return fmt;
+}
+
+export async function setDateFormat(
+  f: DateFormat
+): Promise<{ ok: boolean; error?: string }> {
+  const fmt = coerceDateFormat(f);
+  setDateFormatPref(fmt);
+  return writeSetting("date_format", fmt, "date format");
 }
 
 // Default geofence radius for new customers (per-customer override on

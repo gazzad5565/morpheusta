@@ -14,6 +14,7 @@ import {
   getOrganisationLogoUrl,
   getOrganisationNameColor,
   subscribeOrgChanges,
+  getDateFormat,
 } from "@/lib/settings-store";
 import { useNeedsAction } from "@/lib/needs-action-context";
 import { nameFromEmail, initialsFromNameOrEmail } from "@/lib/format";
@@ -96,6 +97,11 @@ export function Sidebar() {
     getUser().then((u) => {
       if (!cancelled) setUserEmail(u?.email || "");
     });
+    // Seed the tenant date-format cache (G15) from the DB once on boot.
+    // formatDate reads a synchronous cache that's already been primed
+    // from localStorage; this revalidates it against app_settings so a
+    // fresh device picks up the org's chosen format.
+    void getDateFormat();
     const fetchOrg = () => {
       Promise.all([
         getOrganisationName(),

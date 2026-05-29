@@ -104,15 +104,88 @@ export function minToTime(m: number): string {
 }
 
 /** "Jan 12, 2026" or "Friday, January 12, 2026" if `long: true`. */
-export function formatDate(iso: string, opts?: { long?: boolean }): string {
+// ─── Tenant date format (G15) ───────────────────────────────────────────
+//
+// The admin picks how numeric dates render org-wide (Site settings →
+// Date format). formatDate is synchronous and called from dozens of
+// client components, so the preference lives in a module-level cache:
+// seeded synchronously from localStorage on first import (instant, no
+// flash of the wrong format) and revalidated against app_settings on
+// app boot — see settings-store.getDateFormat, invoked from the Sidebar.
+// "auto" keeps the browser-locale textual format the app shipped with.
+export type DateFormat = "auto" | "DMY" | "MDY" | "ISO";
+
+const DATE_FORMAT_STORAGE_KEY = "morpheus_date_format";
+
+function readCachedDateFormat(): DateFormat {
+  if (typeof window === "undefined") return "auto";
+  try {
+    const v = window.localStorage.getItem(DATE_FORMAT_STORAGE_KEY);
+    if (v === "DMY" || v === "MDY" || v === "ISO" || v === "auto") return v;
+  } catch {
+    /* localStorage blocked — fall through to default */
+  }
+  return "auto";
+}
+
+let _dateFormat: DateFormat = readCachedDateFormat();
+
+/** Update the org date-format preference used by formatDate. Persists
+ *  to localStorage so the next page load paints in the chosen format
+ *  immediately. Called by settings-store on read (boot) + on save. */
+export function setDateFormatPref(f: DateFormat): void {
+  _dateFormat = f;
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(DATE_FORMAT_STORAGE_KEY, f);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export function getDateFormatPref(): DateFormat {
+  return _dateFormat;
+}
+
+/** Render an ISO date in an EXPLICIT format — used by the Site settings
+ *  preview so each option can show a live example regardless of the
+ *  currently-saved preference. */
+export function formatDateAs(
+  iso: string,
+  f: DateFormat,
+  opts?: { long?: boolean }
+): string {
   if (!iso) return "—";
   const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString(
-    undefined,
-    opts?.long
-      ? { weekday: "long", month: "long", day: "numeric", year: "numeric" }
-      : { month: "short", day: "numeric", year: "numeric" }
-  );
+  if (!opts?.long) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    if (f === "ISO") return `${yyyy}-${mm}-${dd}`;
+    if (f === "DMY") return `${dd}/${mm}/${yyyy}`;
+    if (f === "MDY") return `${mm}/${dd}/${yyyy}`;
+    return d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+  if (f === "auto") {
+    return d.toLocaleDateString(undefined, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+  // Explicit numeric formats keep the weekday prefix for the long form.
+  const weekday = d.toLocaleDateString(undefined, { weekday: "long" });
+  return `${weekday}, ${formatDateAs(iso, f)}`;
+}
+
+export function formatDate(iso: string, opts?: { long?: boolean }): string {
+  return formatDateAs(iso, _dateFormat, opts);
 }
 
 /** "57s" / "12m" / "3h" / "5d" — relative time, no units below seconds. */
