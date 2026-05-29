@@ -117,6 +117,25 @@ customer migrations (`2026_05_28_customer_store_type_and_primary_contact.sql`,
   point-in-time IDs are correct). Kept the static bulk-select for now;
   parked in ROADMAP deferred. Don't re-propose unprompted.
 
+- **Imports audit + clarity.** Verified the new fields import: customer
+  `region` / `customer_group` / `store_type` / `phone` (free text,
+  auto-mapped) and rep `rep_type` (validated server-side vs the live
+  `app_settings.rep_types`, rejects unknowns). Role is set by WHICH
+  import you run (Reps→rep, Managers→manager), not a column. Fixes:
+  `public/import-templates/customers.csv` now includes
+  customer_group/store_type/phone columns; the import wizard spells out
+  per-entity how role/type is assigned (+ that customer region/group/
+  store_type are free text to also add under Site settings for the
+  filters). Deferred: `manager_type` on the Managers import (blocked on
+  the PENDING `2026_05_28_profiles_manager_type.sql`); auto-registering
+  imported vocab values (needs an afterCommit adapter hook).
+
+- **Settings pages full-width.** `SettingsShell` wrapped every page in
+  `maxWidth:1080`, so the table pages (Manage users, Audit log) stopped
+  short of the viewport vs /reps et al — Gary read it as "borders
+  limiting the size." Dropped the cap; form pages keep their own inner
+  ~760 width. (`cf2307c`)
+
 ---
 
 ### Today's session — what shipped (May 28, 2026, customer-selection + audit log)
