@@ -184,9 +184,14 @@ export function SettingsShell({
       <RequireCapability cap="canManageSettings" action="open Settings">
         {/* Settings page body — no sticky rail anymore (sidebar drawer
             handles inter-section nav). Just a heading + the section's
-            own content. Max-width keeps long pages readable on wide
-            desktops without forcing every page to set its own. */}
-        <div style={{ padding: 20, maxWidth: 1080 }}>
+            own content. Full-width like every other AdminShell page
+            (Gary, May 29: settings pages looked "limited / boxed-in"
+            next to the rest — the old maxWidth:1080 cap made the table
+            pages, e.g. Manage users + Audit log, narrower than /reps).
+            Form-style pages (organisation, site tabs) set their OWN
+            inner max-width (~760) for readability, so they're
+            unaffected. */}
+        <div style={{ padding: 20 }}>
           <div style={{ marginBottom: 18 }}>
             <div
               style={{
