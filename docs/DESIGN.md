@@ -315,6 +315,17 @@ so the next page can reuse it.
 - **`LoadingBar`** — top-of-page progress bar for slow loads.
 - **`SaveIndicator`** — bottom-right toast that fires from
   `notifySaved()` / `notifySaveError()`. Don't show your own toast.
+- **`formatDate(iso)` / `formatDateAs(iso, fmt)`** (`lib/format.ts`) —
+  the canonical date renderer. `formatDate` honours the tenant's
+  org-wide **Date format** preference (Site settings → Date format;
+  G15): Automatic (browser-locale textual), `DMY`, `MDY`, or `ISO`.
+  The preference is a synchronous module cache seeded from localStorage
+  on import (no flash) + revalidated from `app_settings.date_format` on
+  boot (Sidebar). **Don't call `toLocaleDateString` directly** for a
+  display date — use `formatDate` so the tenant setting applies
+  everywhere. `formatDateAs` forces a specific format (used by the
+  settings preview); `setDateFormatPref` / `getDateFormatPref` manage
+  the cache (called by `settings-store.get/setDateFormat`).
 
 ### Content composers
 
@@ -557,6 +568,18 @@ or edit page. Patterns:
 - Tabs share `tabStyles.ts` so they all read identically.
 - **Don't build a tabbed page without using `TabHeader`** — it owns
   the visual grammar (active-tab underline, hover states).
+
+### Tabbed page — rep detail (persistent rail + SegTabs)
+
+`/reps/[id]` (May 29, R4/R6) is the other tabbed-detail shape: a
+**persistent left rail** (320px — profile card + `CustomFieldsCard`)
+beside a right column whose content switches via **`SegTabs`** (with
+per-tab counts), not `TabHeader`. Tabs: Today / History / Tasks /
+Customers. Use this shape when the entity has stable "vitals" worth
+keeping on screen across every tab (identity, custom fields); use the
+`TabHeader` shape (customer detail) when the whole page is the tab set.
+History + Today reuse one local `ShiftLine` row renderer so the two
+shift lists are visually identical.
 
 ### Settings page — settings-shell pattern
 

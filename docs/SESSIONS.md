@@ -14,6 +14,7 @@
 
 ## Quick TOC
 
+- [May 29, 2026 — rep detail tabs + shift history (R4/R6), Past Shifts load-older (R9), tenant date format (G15)](#todays-session--what-shipped-may-29-2026)
 - [May 28, 2026 — B5/B4/B6 from rep feedback + manager roles & permissions v1](#todays-session--what-shipped-may-28-2026)
 - [May 27, 2026 (post-very-very-late) — undo rep-types-in-rail, customers columns, managers off /reps, list count at top](#todays-session--what-shipped-may-27-2026-post-very-very-late)
 - [May 27, 2026 (very-very late) — /settings/rep-types page + Users page UX parity](#todays-session--what-shipped-may-27-2026-very-very-late)
@@ -31,6 +32,56 @@
 - [May 8, 2026 — multi-site customers schema + admin Sites tab](#todays-session--what-shipped-may-8-2026)
 - [May 7, 2026 — calendar, schedule rewrites, broad UX pass](#todays-session--what-shipped-may-7-2026)
 - [May 6, 2026 — auto-checkout, organisation settings, indexes](#todays-session--what-shipped-may-6-2026)
+
+---
+
+### Today's session — what shipped (May 29, 2026)
+
+Three reviewer-backlog items — Rayhaan **R4/R6**, **R9**; Gary **G15** —
+each its own commit, admin `next build` clean after each.
+
+- **Rep detail → tabbed (R4 + R6).** `e98b…`→ `31e81b8`. `/reps/[id]`
+  is now a persistent profile + custom-fields left rail beside a
+  four-tab right column (`SegTabs`, per-tab counts): **Today**
+  (today-scoped stats + schedule), **History** (chronological
+  completed shifts, newest first, with a date column — the rep's real
+  track record), **Tasks** (universal + every assigned-customer's
+  tasks, grouped, read-only — editing stays on /tasks), **Customers**
+  (the existing assignment editor). New `listShiftsForRep(repId)` in
+  shifts-store fetches the rep's FULL timeline (cap 500) instead of the
+  old today-only `listShifts()` slice — which also fixes "Last active"
+  (previously only saw today's check-ins). Today + History share one
+  `ShiftLine` renderer. Dropped the dead "Other shifts (recent)" card
+  (it could never render under the old today-only fetch).
+
+- **Past Shifts "Load older" (R9).** `33ba2dc`. The 7/30/90/all chips
+  all look backward from today, but `listPastShifts` caps each fetch —
+  so the OLDEST shifts were unreachable once an org crossed the cap
+  (the old banner's "narrow the window" advice didn't help reach
+  them). Added a footer **Load older** button that grows the cap by one
+  page and refetches, keeping current rows on screen (no blank flash);
+  it shows only while the last fetch came back full and hides once the
+  whole window is loaded. No store change — `limit` was already a
+  param.
+
+- **Tenant date format (G15).** `e98b824`. New Site settings →
+  **Date format** tab: Automatic / Day-Month-Year / Month-Day-Year /
+  ISO, each previewing today's date live. `formatDate()` is
+  synchronous and called from dozens of client components, so the
+  preference lives in a module cache in `lib/format.ts` — seeded from
+  localStorage on import (no flash of the wrong format) + revalidated
+  from `app_settings.date_format` on boot via the Sidebar. Saving
+  updates the cache immediately; already-open pages reflect it on next
+  navigation. New `formatDateAs(iso, fmt)` powers the previews. No
+  migration (the k/v row is created on first save; default "auto").
+
+Confirmed, no code change: **rep selection by role/all is already in
+place** — `RepScopePicker` (schedule/new + shift edit) and the
+Messaging type filter both source roles from `getRepTypes()`.
+
+Still pending operator action (unchanged from May 28): run the two
+customer migrations (`2026_05_28_customer_store_type_and_primary_contact.sql`,
+`2026_05_28_customers_phone.sql`) + set `RESEND_FROM` in Vercel.
 
 ---
 
