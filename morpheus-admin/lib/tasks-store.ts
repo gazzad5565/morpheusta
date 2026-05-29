@@ -9,6 +9,7 @@
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent } from "./events-store";
 import { notifySaved, notifySaveError } from "./save-status";
+import { TASK_SELECT } from "./db/selects";
 
 export interface TaskRow {
   id: string;
@@ -67,7 +68,7 @@ export async function listAllTasks(): Promise<TaskRow[]> {
   const { data, error } = await supabase
     .from("customer_tasks")
     .select(
-      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory, requires_signature, customers(id,name,initials,color,code)"
+      TASK_SELECT
     )
     .order("sort_order", { ascending: true })
     .order("name", { ascending: true });
@@ -222,7 +223,7 @@ export async function getTask(id: string): Promise<TaskRow | null> {
   const { data, error } = await supabase
     .from("customer_tasks")
     .select(
-      "id, customer_id, name, description, duration_min, compulsory, sort_order, created_at, photo_count, photos_compulsory, requires_signature, customers(id,name,initials,color,code)"
+      TASK_SELECT
     )
     .eq("id", id)
     .maybeSingle();

@@ -11,6 +11,7 @@ import { getAutoCheckoutTime } from "./settings-store";
 import { todayLocalISO } from "./format";
 import { notifySaved, notifySaveError } from "./save-status";
 import { notifyShiftEvent } from "./push-notify";
+import { SHIFT_SELECT } from "./db/selects";
 
 export interface ShiftRow {
   id: string;
@@ -91,7 +92,7 @@ export async function listShifts(opts?: {
   const date = opts?.date || todayLocalISO();
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
+    .select(SHIFT_SELECT)
     .eq("shift_date", date)
     .order("start_time", { ascending: true })
     .limit(opts?.limit ?? 100);
@@ -114,7 +115,7 @@ export async function listShiftsInRange(
   if (!isSupabaseConfigured() || !supabase) return [];
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
+    .select(SHIFT_SELECT)
     .gte("shift_date", startISO)
     .lte("shift_date", endISO)
     .order("shift_date", { ascending: true })
@@ -153,7 +154,7 @@ export async function listPastShifts(opts: {
   const { data, error } = await supabase
     .from("shifts")
     .select(
-      "*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)"
+      SHIFT_SELECT
     )
     .in("state", states)
     .gte("shift_date", opts.startISO)
@@ -189,7 +190,7 @@ export async function listShiftsForRep(
   const { data, error } = await supabase
     .from("shifts")
     .select(
-      "*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)"
+      SHIFT_SELECT
     )
     .eq("rep_id", repId)
     .order("shift_date", { ascending: false })
@@ -330,7 +331,7 @@ export async function getShiftById(id: string): Promise<ShiftRow | null> {
   if (!isSupabaseConfigured() || !supabase) return null;
   const { data, error } = await supabase
     .from("shifts")
-    .select("*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)")
+    .select(SHIFT_SELECT)
     .eq("id", id)
     .maybeSingle();
   if (error) {
@@ -1165,7 +1166,7 @@ export async function listOpenAttentionShifts(): Promise<ShiftRow[]> {
   const { data, error } = await supabase
     .from("shifts")
     .select(
-      "*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)"
+      SHIFT_SELECT
     )
     .not("attention", "is", null)
     .is("attention_resolved_at", null)
