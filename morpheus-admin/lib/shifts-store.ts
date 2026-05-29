@@ -170,6 +170,40 @@ export async function listPastShifts(opts: {
 }
 
 /**
+ * Every shift for one rep, newest first — powers the rep detail page's
+ * Today / History tabs (Rayhaan R4 + R6). Unlike listShifts (which is
+ * date-scoped to today) this returns the rep's full timeline so the
+ * History tab can show a chronological completed-shift log, and so
+ * "Last active" / today's-shift derivation see the rep's real data
+ * rather than just today's slice.
+ *
+ * Capped at `limit` newest rows (default 500) so a long-tenured rep
+ * doesn't pull thousands of rows into the browser in one go. The
+ * History tab surfaces a "load older" affordance when the cap is hit.
+ */
+export async function listShiftsForRep(
+  repId: string,
+  opts?: { limit?: number }
+): Promise<ShiftRow[]> {
+  if (!isSupabaseConfigured() || !supabase) return [];
+  const { data, error } = await supabase
+    .from("shifts")
+    .select(
+      "*, customers(id,name,initials,color,code), site:customer_sites(id,name,address,latitude,longitude,geofence_radius_m,contact_name,contact_phone,contact_email,notes)"
+    )
+    .eq("rep_id", repId)
+    .order("shift_date", { ascending: false })
+    .order("start_time", { ascending: false })
+    .limit(opts?.limit ?? 500);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[shifts] listForRep:", error.message);
+    return [];
+  }
+  return data as ShiftRow[];
+}
+
+/**
  * Per-rep last-activity timestamps — Rayhaan R5.
  *
  * "Last active" is currently derived from shifts.check_in_at since

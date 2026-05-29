@@ -10,7 +10,9 @@ import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { AC } from "@/lib/tokens";
 import { supabase } from "@/lib/supabase";
 import { type Profile, displayName } from "@/lib/profiles-store";
-import { listShifts, shiftHref, type ShiftRow } from "@/lib/shifts-store";
+import { listShiftsForRep, shiftHref, type ShiftRow } from "@/lib/shifts-store";
+import { listAllTasks, type TaskRow } from "@/lib/tasks-store";
+import { SegTabs } from "@/components/ui/SegTabs";
 import Link from "next/link";
 import { listCustomers } from "@/lib/customers-store";
 import {
@@ -19,7 +21,7 @@ import {
 } from "@/lib/assignments-store";
 import { CustomFieldsCard } from "@/components/ui/CustomFieldsCard";
 import { FilterChip, inputStyle } from "@/components/ui/Filters";
-import { initialsFromNameOrEmail, formatTimeRange, formatRelative } from "@/lib/format";
+import { initialsFromNameOrEmail, formatTimeRange, formatRelative, formatDate } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 import { EmailUserModal } from "@/components/users/EmailUserModal";
 
@@ -47,6 +49,10 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [tasks, setTasks] = useState<TaskRow[]>([]);
+  const [tab, setTab] = useState<"Today" | "History" | "Tasks" | "Customers">(
+    "Today"
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -68,19 +74,21 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
       }
       setProfile(profileData as Profile);
 
-      // Fetch all shifts; filter to this rep client-side. Cheap at small scale.
-      const allShifts = await listShifts();
-      if (cancelled) return;
-      setShifts(allShifts.filter((s) => s.rep_id === id));
-
-      // Customer roster + this rep's existing assignments.
-      const [customers, assigned] = await Promise.all([
+      // This rep's full shift timeline (newest first), the customer
+      // roster, their existing assignments, and the task catalogue —
+      // fetched together so the tabbed detail (Today · History ·
+      // Tasks · Customers) has everything it needs in one pass.
+      const [repShifts, customers, assigned, allTasks] = await Promise.all([
+        listShiftsForRep(id),
         listCustomers(),
         listCustomersForRep(id),
+        listAllTasks(),
       ]);
       if (cancelled) return;
+      setShifts(repShifts);
       setAllCustomers(customers);
       setAssignedCustomerIds(assigned);
+      setTasks(allTasks);
       setLoading(false);
     })();
     return () => {
@@ -118,12 +126,37 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
 
   const name = displayName(profile);
   const initials = deriveInitials(profile.name || "", profile.email);
-  const todayShifts = shifts.filter((s) => {
-    const today = new Date().toISOString().slice(0, 10);
-    return s.shift_date === today;
-  });
-  const completed = shifts.filter((s) => s.state === "complete").length;
-  const inProgress = shifts.filter((s) => s.state === "in-progress").length;
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const todayShifts = shifts.filter((s) => s.shift_date === todayISO);
+  // Today panel stats are TODAY-scoped (the full-history counts now
+  // live on the History tab, so an "all-time completed" number here
+  // would mislead).
+  const todayInProgress = todayShifts.filter(
+    (s) => s.state === "in-progress"
+  ).length;
+  const todayCompleted = todayShifts.filter(
+    (s) => s.state === "complete"
+  ).length;
+
+  // History = completed shifts, newest first (the listShiftsForRep
+  // query already ordered shift_date desc, start_time desc). The rep's
+  // track record across all time (Rayhaan R4 + R6).
+  const history = shifts.filter((s) => s.state === "complete");
+
+  // Tasks applicable to this rep = universal tasks (customer_id NULL)
+  // + tasks defined at any customer they're assigned to. Read-only
+  // here; editing happens on the Tasks page.
+  const assignedSet = new Set(assignedCustomerIds);
+  const applicableTasks = tasks.filter(
+    (t) => t.customer_id === null || assignedSet.has(t.customer_id)
+  );
+
+  const tabCounts: Record<string, number> = {
+    Today: todayShifts.length,
+    History: history.length,
+    Tasks: applicableTasks.length,
+    Customers: assignedCustomerIds.length,
+  };
 
   return (
     <AdminShell
@@ -148,26 +181,21 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
         </div>
       }
     >
-      <div
-        style={{
-          padding: 20,
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
-        }}
-      >
-        {/* Top row: profile card + today's shifts. Grid items stretch
-            by default, so both cards share the same row height — the
-            bottom of "Today's shifts" lines up with the bottom of the
-            rep details card on the left. */}
+      <div style={{ padding: 20 }}>
+        {/* Persistent profile + custom-fields rail on the left; tabbed
+            activity (Today · History · Tasks · Customers) on the right
+            — Rayhaan R4 + R6. */}
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "320px 1fr",
             gap: 16,
+            alignItems: "start",
           }}
         >
-          <Card padding={20} style={{ height: "100%" }}>
+          {/* ── Left rail: identity + custom fields ───────────────── */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Card padding={20}>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
               {profile.avatar_url ? (
                 <div
@@ -285,142 +313,121 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
             </div>
           </Card>
 
-          <Card padding={0} style={{ height: "100%" }}>
-            <div style={{ padding: 16 }}>
-              <SectionTitle>Today’s shifts</SectionTitle>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, 1fr)",
-                  gap: 12,
-                  marginBottom: 18,
-                }}
-              >
-                <MiniStat label="Today" value={`${todayShifts.length}`} tone="ok" />
-                <MiniStat label="In progress" value={`${inProgress}`} tone="ok" />
-                <MiniStat label="Completed" value={`${completed}`} tone="neutral" />
-              </div>
+          <CustomFieldsCard entity="rep" entityId={profile.id} />
+          </div>
 
-              {todayShifts.length === 0 ? (
+          {/* ── Right column: tabbed activity (Rayhaan R4 + R6) ───── */}
+          <div>
+            <div style={{ marginBottom: 14 }}>
+              <SegTabs
+                tabs={["Today", "History", "Tasks", "Customers"] as const}
+                active={tab}
+                onChange={(t) => setTab(t as typeof tab)}
+                counts={tabCounts}
+              />
+            </div>
+
+            {/* Today — today-scoped stats + schedule */}
+            {tab === "Today" && (
+              <Card padding={16}>
                 <div
                   style={{
-                    padding: 20,
-                    background: AC.bg,
-                    borderRadius: 10,
-                    fontFamily: AC.font,
-                    fontSize: 13,
-                    color: AC.mute,
-                    textAlign: "center",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: 12,
+                    marginBottom: 16,
                   }}
                 >
-                  No shifts assigned to this rep today.
+                  <MiniStat label="Today" value={`${todayShifts.length}`} tone="ok" />
+                  <MiniStat
+                    label="In progress"
+                    value={`${todayInProgress}`}
+                    tone="ok"
+                  />
+                  <MiniStat
+                    label="Completed"
+                    value={`${todayCompleted}`}
+                    tone="neutral"
+                  />
                 </div>
-              ) : (
-                <div
-                  style={{
-                    border: `1px solid ${AC.line}`,
-                    borderRadius: 10,
-                    overflow: "hidden",
-                  }}
-                >
-                  {todayShifts.map((s, i) => (
-                    <Link
-                      key={s.id}
-                      href={shiftHref(s)}
+                {todayShifts.length === 0 ? (
+                  <EmptyPanel text="No shifts assigned to this rep today." />
+                ) : (
+                  <div
+                    style={{
+                      border: `1px solid ${AC.line}`,
+                      borderRadius: 10,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {todayShifts.map((s, i) => (
+                      <ShiftLine
+                        key={s.id}
+                        shift={s}
+                        last={i === todayShifts.length - 1}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {/* History — completed shifts, newest first */}
+            {tab === "History" && (
+              <Card padding={16}>
+                <SectionTitle>Completed shifts</SectionTitle>
+                {history.length === 0 ? (
+                  <EmptyPanel text="No completed shifts yet. Once this rep checks out of a shift it lands here, newest first." />
+                ) : (
+                  <>
+                    <div
                       style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 140px 110px",
-                        gap: 12,
-                        alignItems: "center",
-                        padding: "10px 14px",
-                        borderBottom:
-                          i < todayShifts.length - 1 ? `1px solid ${AC.lineDim}` : "none",
-                        background: "#fff",
-                        textDecoration: "none",
-                        color: "inherit",
+                        border: `1px solid ${AC.line}`,
+                        borderRadius: 10,
+                        overflow: "hidden",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        {s.customers && (
-                          <div
-                            style={{
-                              width: 22,
-                              height: 22,
-                              borderRadius: 5,
-                              background: s.customers.color,
-                              color: "#fff",
-                              fontFamily: AC.font,
-                              fontSize: 9,
-                              fontWeight: 700,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
-                          >
-                            {s.customers.initials}
-                          </div>
-                        )}
-                        <div
-                          style={{
-                            fontFamily: AC.font,
-                            fontSize: 12.5,
-                            color: AC.ink,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {s.customers?.name || s.customer_id}
-                        </div>
-                      </div>
+                      {history.map((s, i) => (
+                        <ShiftLine
+                          key={s.id}
+                          shift={s}
+                          showDate
+                          last={i === history.length - 1}
+                        />
+                      ))}
+                    </div>
+                    {shifts.length >= 500 && (
                       <div
                         style={{
+                          marginTop: 10,
                           fontFamily: AC.font,
-                          fontSize: 12,
-                          color: AC.ink2,
-                          fontWeight: 600,
+                          fontSize: 11.5,
+                          color: AC.mute,
                         }}
                       >
-                        {formatTimeRange(s.start_time, s.end_time)}
+                        Showing this rep&rsquo;s most recent 500 shifts.
                       </div>
-                      <div
-                        style={{
-                          fontFamily: AC.font,
-                          fontSize: 11,
-                          fontWeight: 600,
-                          color:
-                            s.state === "complete"
-                              ? AC.ok
-                              : s.state === "in-progress"
-                              ? AC.brandDeep
-                              : AC.mute,
-                          textTransform: "capitalize",
-                        }}
-                      >
-                        {s.state.replace("-", " ")}
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Card>
-        </div>
+                    )}
+                  </>
+                )}
+              </Card>
+            )}
 
-        {/* Second row: custom fields on the left, assigned customers
-            + other shifts on the right. Independent column heights —
-            only the top row needs to stay bottom-aligned. */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "320px 1fr",
-            gap: 16,
-            alignItems: "start",
-          }}
-        >
-          <CustomFieldsCard entity="rep" entityId={profile.id} />
+            {/* Tasks — universal + assigned-customer tasks (read-only) */}
+            {tab === "Tasks" && (
+              <Card padding={16}>
+                <SectionTitle>Tasks for this rep</SectionTitle>
+                {applicableTasks.length === 0 ? (
+                  <EmptyPanel text="No tasks apply to this rep yet. Tasks are defined per customer (or universally) on the Tasks page." />
+                ) : (
+                  <TaskGroups tasks={applicableTasks} customers={allCustomers} />
+                )}
+              </Card>
+            )}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {/* Assigned customers editor */}
-          <Card padding={0}>
+            {/* Customers — assigned-customers editor */}
+            {tab === "Customers" && (
+            <Card padding={0}>
             <TabHeader
               title="Assigned customers"
               count={assignedCustomerIds.length}
@@ -481,17 +488,7 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
               )}
             </div>
           </Card>
-
-          {/* All shifts (excluding today, capped) */}
-          {shifts.length > todayShifts.length && (
-            <Card padding={16}>
-              <SectionTitle>Other shifts (recent)</SectionTitle>
-              <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.mute }}>
-                {shifts.length - todayShifts.length} other shift
-                {shifts.length - todayShifts.length === 1 ? "" : "s"} on file.
-              </div>
-            </Card>
-          )}
+            )}
           </div>
         </div>
       </div>
@@ -813,6 +810,290 @@ function CustomerMultiSelect({
         })
       )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * One shift row — shared by the Today and History tabs so both lists
+ * look identical. `showDate` adds a date column (History); `last`
+ * suppresses the trailing divider. Routes via shiftHref so a still-
+ * scheduled shift opens its edit form and everything else opens the
+ * read-only detail.
+ */
+function ShiftLine({
+  shift,
+  showDate,
+  last,
+}: {
+  shift: ShiftRow;
+  showDate?: boolean;
+  last?: boolean;
+}) {
+  const stateColor =
+    shift.state === "complete"
+      ? AC.ok
+      : shift.state === "in-progress"
+      ? AC.brandDeep
+      : AC.mute;
+  return (
+    <Link
+      href={shiftHref(shift)}
+      style={{
+        display: "grid",
+        gridTemplateColumns: showDate
+          ? "minmax(0,1fr) 92px 112px 52px 84px"
+          : "minmax(0,1fr) 112px 52px 96px",
+        gap: 10,
+        alignItems: "center",
+        padding: "10px 14px",
+        borderBottom: last ? "none" : `1px solid ${AC.lineDim}`,
+        background: "#fff",
+        textDecoration: "none",
+        color: "inherit",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        {shift.customers && (
+          <div
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 5,
+              background: shift.customers.color,
+              color: "#fff",
+              fontFamily: AC.font,
+              fontSize: 9,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            {shift.customers.initials}
+          </div>
+        )}
+        <div
+          style={{
+            fontFamily: AC.font,
+            fontSize: 12.5,
+            color: AC.ink,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {shift.customers?.name || shift.customer_id}
+        </div>
+      </div>
+      {showDate && (
+        <div
+          style={{ fontFamily: AC.font, fontSize: 11.5, color: AC.mute, fontWeight: 600 }}
+        >
+          {formatDate(shift.shift_date)}
+        </div>
+      )}
+      <div style={{ fontFamily: AC.font, fontSize: 12, color: AC.ink2, fontWeight: 600 }}>
+        {formatTimeRange(shift.start_time, shift.end_time)}
+      </div>
+      <div
+        style={{ fontFamily: AC.font, fontSize: 11.5, color: AC.mute, fontWeight: 600 }}
+        title="Tasks completed / total"
+      >
+        {shift.tasks_done}/{shift.tasks_total}
+      </div>
+      <div
+        style={{
+          fontFamily: AC.font,
+          fontSize: 11,
+          fontWeight: 600,
+          color: stateColor,
+          textTransform: "capitalize",
+        }}
+      >
+        {shift.state.replace("-", " ")}
+      </div>
+    </Link>
+  );
+}
+
+/** Shared empty-state panel for the tabs. */
+function EmptyPanel({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        padding: 20,
+        background: AC.bg,
+        borderRadius: 10,
+        fontFamily: AC.font,
+        fontSize: 13,
+        color: AC.mute,
+        textAlign: "center",
+        lineHeight: 1.5,
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+/**
+ * Tasks tab body — groups the rep's applicable tasks by customer
+ * (universal tasks first, then one section per assigned customer that
+ * has tasks). Read-only; the catalogue is edited on the Tasks page.
+ */
+function TaskGroups({
+  tasks,
+  customers,
+}: {
+  tasks: TaskRow[];
+  customers: Customer[];
+}) {
+  const byId = new Map(customers.map((c) => [c.id, c]));
+  const universal = tasks.filter((t) => t.customer_id === null);
+  const groups = new Map<string, TaskRow[]>();
+  for (const t of tasks) {
+    if (t.customer_id === null) continue;
+    const list = groups.get(t.customer_id) || [];
+    list.push(t);
+    groups.set(t.customer_id, list);
+  }
+  const sections: {
+    key: string;
+    label: string;
+    sub: string;
+    color?: string;
+    initials?: string;
+    items: TaskRow[];
+  }[] = [];
+  if (universal.length > 0) {
+    sections.push({
+      key: "__universal__",
+      label: "All customers",
+      sub: "Universal — applies everywhere",
+      items: universal,
+    });
+  }
+  for (const [cid, items] of groups.entries()) {
+    const c = byId.get(cid);
+    sections.push({
+      key: cid,
+      label: c?.name || cid,
+      sub: c ? `#${c.code}` : "",
+      color: c?.color,
+      initials: c?.initials,
+      items,
+    });
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {sections.map((sec) => (
+        <div key={sec.key}>
+          <div
+            style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}
+          >
+            {sec.color ? (
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 5,
+                  background: sec.color,
+                  color: "#fff",
+                  fontFamily: AC.font,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {sec.initials}
+              </div>
+            ) : (
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 5,
+                  background: AC.brandSoft,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <AGlyph name="tasks" size={11} color={AC.brandDeep} />
+              </div>
+            )}
+            <div style={{ fontFamily: AC.font, fontSize: 12.5, fontWeight: 700, color: AC.ink }}>
+              {sec.label}
+            </div>
+            <div style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute }}>{sec.sub}</div>
+          </div>
+          <div style={{ border: `1px solid ${AC.line}`, borderRadius: 10, overflow: "hidden" }}>
+            {sec.items.map((t, i) => (
+              <div
+                key={t.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "9px 12px",
+                  borderBottom:
+                    i < sec.items.length - 1 ? `1px solid ${AC.lineDim}` : "none",
+                  background: "#fff",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: AC.font, fontSize: 12.5, color: AC.ink, fontWeight: 600 }}>
+                    {t.name}
+                  </div>
+                  {t.description && (
+                    <div
+                      style={{
+                        fontFamily: AC.font,
+                        fontSize: 11,
+                        color: AC.mute,
+                        marginTop: 1,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {t.description}
+                    </div>
+                  )}
+                </div>
+                <span
+                  style={{
+                    fontFamily: AC.font,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    color: t.compulsory ? "#9c1a3c" : AC.mute,
+                    background: t.compulsory ? AC.dangerTint : AC.bg,
+                    padding: "2px 7px",
+                    borderRadius: 99,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {t.compulsory ? "Required" : "Optional"}
+                </span>
+                {t.duration_min > 0 && (
+                  <span
+                    style={{ fontFamily: AC.font, fontSize: 11, color: AC.mute, fontWeight: 600 }}
+                  >
+                    {t.duration_min}m
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
