@@ -13,6 +13,7 @@ import { type Profile, displayName } from "@/lib/profiles-store";
 import { listShiftsForRep, shiftHref, type ShiftRow } from "@/lib/shifts-store";
 import { listAllTasks, type TaskRow } from "@/lib/tasks-store";
 import { SegTabs } from "@/components/ui/SegTabs";
+import { PageLoading } from "@/components/ui/PageLoading";
 import Link from "next/link";
 import { listCustomers } from "@/lib/customers-store";
 import {
@@ -99,9 +100,7 @@ export default function RepDetailPage({ params }: { params: Promise<{ id: string
   if (loading) {
     return (
       <AdminShell breadcrumbs={["Home", "Reps", "…"]}>
-        <div style={{ padding: 32, fontFamily: AC.font, fontSize: 13, color: AC.mute }}>
-          Loading rep…
-        </div>
+        <PageLoading label="Loading rep…" />
       </AdminShell>
     );
   }

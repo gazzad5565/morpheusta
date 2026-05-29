@@ -26,6 +26,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { AGlyph, type GlyphName } from "@/components/ui/AGlyph";
 import { LoadingBar } from "@/components/ui/LoadingBar";
+import { PageLoading } from "@/components/ui/PageLoading";
 import { SitesTab } from "@/components/customers/SitesTab";
 import { OverviewTab } from "@/components/customers/OverviewTab";
 import { ContactsTab } from "@/components/customers/ContactsTab";
@@ -175,7 +176,7 @@ export default function CustomerDetailPage() {
   if (loading) {
     return (
       <AdminShell breadcrumbs={["Home", "Customers", "…"]}>
-        <div style={{ padding: 20, color: AC.mute, fontFamily: AC.font }}>Loading…</div>
+        <PageLoading label="Loading customer…" />
       </AdminShell>
     );
   }

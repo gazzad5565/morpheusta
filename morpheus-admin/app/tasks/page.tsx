@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AdminShell } from "@/components/shell/AdminShell";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
@@ -28,9 +29,13 @@ import { PageLoading } from "@/components/ui/PageLoading";
 import { useColumnWidths } from "@/lib/use-column-widths";
 import { ColumnResizer } from "@/components/ui/ColumnResizer";
 
-// Default column widths for /tasks. localStorage takes over once the
+// Default column widths for /tasks: Task · Customer · Type ·
+// Requirements · Order · (delete). localStorage takes over once the
 // user resizes (per-browser persistence; key `morpheus.cols.tasks.v1`).
-const TASKS_COLUMNS = [360, 240, 100, 100, 80, 90] as const;
+// Gary (May 29): dropped Duration, added a Requirements column (photo
+// / signature gates) — the at-a-glance "what evidence does this task
+// demand" is more useful here than the minute estimate.
+const TASKS_COLUMNS = [360, 240, 120, 150, 90, 70] as const;
 
 export default function TasksPage() {
   const [rows, setRows] = useState<TaskRow[]>([]);
@@ -49,6 +54,7 @@ export default function TasksPage() {
   const [page, setPage] = useState(0);
   // Resizable columns — widths persisted per-browser via localStorage.
   const cols = useColumnWidths("tasks", TASKS_COLUMNS);
+  const router = useRouter();
 
   const reload = () => {
     listAllTasks().then((r) => {
@@ -252,8 +258,8 @@ export default function TasksPage() {
           >
             <div style={{ position: "relative" }}>Task<ColumnResizer index={0} cols={cols} /></div>
             <div style={{ position: "relative" }}>Customer<ColumnResizer index={1} cols={cols} /></div>
-            <div style={{ position: "relative" }}>Duration<ColumnResizer index={2} cols={cols} /></div>
-            <div style={{ position: "relative" }}>Type<ColumnResizer index={3} cols={cols} /></div>
+            <div style={{ position: "relative" }}>Type<ColumnResizer index={2} cols={cols} /></div>
+            <div style={{ position: "relative" }}>Requirements<ColumnResizer index={3} cols={cols} /></div>
             <div style={{ position: "relative" }}>Order<ColumnResizer index={4} cols={cols} /></div>
             <div></div>
           </div>
@@ -283,17 +289,28 @@ export default function TasksPage() {
               )}
             </div>
           ) : (
-            pageItems.map((t) => (
+            pageItems.map((t, i) => (
               <div
                 key={t.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => router.push(`/tasks/${t.id}/edit`)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    router.push(`/tasks/${t.id}/edit`);
+                  }
+                }}
                 style={{
                   display: "grid",
                   gridTemplateColumns: cols.gridTemplateColumns,
                   gap: 14,
                   alignItems: "center",
                   padding: "12px 16px",
-                  borderBottom: `1px solid ${AC.lineDim}`,
+                  borderBottom:
+                    i < pageItems.length - 1 ? `1px solid ${AC.lineDim}` : "none",
                   background: "#fff",
+                  cursor: "pointer",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
@@ -402,16 +419,6 @@ export default function TasksPage() {
                     </>
                   )}
                 </div>
-                <div
-                  style={{
-                    fontFamily: AC.fontMono,
-                    fontSize: 12,
-                    color: AC.ink2,
-                    fontWeight: 600,
-                  }}
-                >
-                  {t.duration_min}m
-                </div>
                 <div>
                   <span
                     style={{
@@ -431,6 +438,68 @@ export default function TasksPage() {
                 </div>
                 <div
                   style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  {(t.photo_count ?? 0) > 0 && (
+                    <span
+                      title={`${t.photo_count} photo${
+                        t.photo_count === 1 ? "" : "s"
+                      }${t.photos_compulsory ? " · required" : ""}`}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        padding: "2px 7px",
+                        borderRadius: 99,
+                        background: AC.bg,
+                        border: `1px solid ${AC.line}`,
+                        fontFamily: AC.font,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: AC.ink2,
+                      }}
+                    >
+                      <AGlyph name="camera" size={12} color={AC.mute} />
+                      {t.photo_count}
+                    </span>
+                  )}
+                  {t.requires_signature && (
+                    <span
+                      title="Customer signature required"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        padding: "2px 7px",
+                        borderRadius: 99,
+                        background: AC.bg,
+                        border: `1px solid ${AC.line}`,
+                        fontFamily: AC.font,
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                        letterSpacing: 0.2,
+                        textTransform: "uppercase",
+                        color: AC.ink2,
+                      }}
+                    >
+                      <AGlyph name="edit" size={11} color={AC.mute} />
+                      Sig
+                    </span>
+                  )}
+                  {!((t.photo_count ?? 0) > 0) && !t.requires_signature && (
+                    <span
+                      style={{ fontFamily: AC.font, fontSize: 12, color: AC.faint }}
+                    >
+                      —
+                    </span>
+                  )}
+                </div>
+                <div
+                  style={{
                     fontFamily: AC.fontMono,
                     fontSize: 12,
                     color: AC.mute,
@@ -440,26 +509,15 @@ export default function TasksPage() {
                   {t.sort_order}
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
-                  <Link
-                    href={`/tasks/${t.id}/edit`}
-                    title="Edit task"
-                    aria-label="Edit task"
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 6,
-                      background: "transparent",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      textDecoration: "none",
-                    }}
-                  >
-                    <AGlyph name="edit" size={14} color={AC.mute} />
-                  </Link>
+                  {/* Row click → edit (matches /reps, /customers, Users).
+                      Delete stops propagation so it doesn't also
+                      navigate. */}
                   <button
                     type="button"
-                    onClick={() => onDelete(t)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(t);
+                    }}
                     disabled={busyId === t.id}
                     title="Delete task"
                     aria-label="Delete task"
@@ -476,7 +534,7 @@ export default function TasksPage() {
                       opacity: busyId === t.id ? 0.4 : 1,
                     }}
                   >
-                    <AGlyph name="x" size={14} color={AC.mute} />
+                    <AGlyph name="trash" size={14} color={AC.mute} />
                   </button>
                 </div>
               </div>
