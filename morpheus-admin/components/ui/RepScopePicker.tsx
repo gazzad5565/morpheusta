@@ -26,6 +26,11 @@ import { displayName, type Profile } from "@/lib/profiles-store";
 import { initialsFromNameOrEmail } from "@/lib/format";
 import { getRepTypes, type RepTypeConfig } from "@/lib/settings-store";
 import { FilterSelect } from "@/components/ui/Filters";
+import {
+  ScopeButton,
+  ScopeEmpty as Empty,
+  scopeLinkBtn as linkBtn,
+} from "@/components/ui/ScopePickerPrimitives";
 
 export type RepScope = null | string[];
 
@@ -325,79 +330,5 @@ export function RepScopePicker({
   );
 }
 
-function ScopeButton({
-  active,
-  onClick,
-  title,
-  sub,
-}: {
-  active: boolean;
-  onClick: () => void;
-  title: string;
-  sub: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        flex: 1,
-        padding: "10px 12px",
-        borderRadius: 10,
-        background: active ? AC.brandSoft : "#fff",
-        border: `1px solid ${active ? AC.brand : AC.line}`,
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-    >
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 13,
-          fontWeight: 600,
-          color: active ? AC.brandInk : AC.ink,
-          letterSpacing: -0.1,
-        }}
-      >
-        {title}
-      </div>
-      <div
-        style={{
-          fontFamily: AC.font,
-          fontSize: 11,
-          color: active ? AC.brandDeep : AC.mute,
-          marginTop: 2,
-        }}
-      >
-        {sub}
-      </div>
-    </button>
-  );
-}
-
-function Empty({ text }: { text: string }) {
-  return (
-    <div
-      style={{
-        padding: 14,
-        fontFamily: AC.font,
-        fontSize: 12.5,
-        color: AC.mute,
-        textAlign: "center",
-      }}
-    >
-      {text}
-    </div>
-  );
-}
-
-const linkBtn: React.CSSProperties = {
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  fontFamily: AC.font,
-  fontSize: 11,
-  color: AC.brandDeep,
-  fontWeight: 600,
-  padding: "2px 4px",
-};
+// ScopeButton / Empty / linkBtn now live in ./ScopePickerPrimitives
+// (shared with CustomerScopePicker — were previously duplicated verbatim).
