@@ -126,6 +126,17 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     available: true,
   },
   {
+    // Audit log (May 28) — Mariska G1 + Rayhaan R1. Browse the
+    // shift_events activity trail: who changed what, when. Gated by
+    // canManageSettings (sensitive).
+    id: "audit",
+    label: "Audit log",
+    href: "/settings/audit",
+    glyph: "audit",
+    description: "Who changed what, and when — across shifts, customers, library, tasks, and imports.",
+    available: true,
+  },
+  {
     id: "billing",
     label: "Billing",
     href: "/settings/billing",
