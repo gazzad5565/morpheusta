@@ -10,56 +10,15 @@ import { supabase, isSupabaseConfigured } from "./supabase";
 import { logEvent } from "./events-store";
 import { notifySaved, notifySaveError } from "./save-status";
 import { formatCustomerCode } from "./format";
+import { customerRowSchema, type CustomerRow } from "./db/schemas";
+import { parseRows, parseRow } from "./db/validate";
 import type { Customer } from "./types";
 
-interface DbRow {
-  id: string;
-  name: string;
-  initials: string;
-  color: string;
-  /** Opaque tenant-supplied identifier. Was `integer` pre-May-28
-   *  (Mariska B5); now `text` to accommodate SKU-style codes like
-   *  SP-001, ACME-JHB. The DB still enforces NOT NULL + UNIQUE. */
-  code: string;
-  region: string | null;
-  city: string | null;
-  address: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  active: boolean | null;
-  geofence_radius_m: number | null;
-  location_exceptions_enabled: boolean | null;
-  timing_exceptions_enabled: boolean | null;
-  /** Base64 data URL of the customer's logo (small JPEG). Added by
-   *  the 2026_05_11_customers_logo migration. Null until a manager
-   *  uploads one — the rep app keeps showing the coloured-initials
-   *  tile in that case. See compressCustomerLogo below for the
-   *  size/quality recipe. */
-  logo_url: string | null;
-  /** Rep's profile id when this customer was created via mobile
-   *  /add-customer (Feature A — May 13). NULL when admin-created.
-   *  Drives the "NEW" badge on the customers list. */
-  created_by_rep_id: string | null;
-  /** Supabase auto-managed timestamp. Used by the admin /customers
-   *  list to surface recently-added customers + power the "New"
-   *  filter chip. */
-  created_at?: string | null;
-  /** Background-geocoder status from the Phase A migration. */
-  geocode_status?: "pending" | "done" | "failed" | "skipped" | null;
-  /** Why this row has its current lat/lng. Added May 28 — Mariska B4. */
-  coords_source?: "manual" | "address_geocode" | "rep_pinned" | null;
-  /** Tenant customer-cohort tag (e.g. "Premium", "Spaza"). Vocabulary
-   *  in app_settings.groups. NULL = unassigned. Added May 28 (later) —
-   *  Mariska G5a, after Gary's correction that region + group are
-   *  customer attributes, not user attributes. */
-  customer_group?: string | null;
-  /** Tenant store classification (Supermarket / Spaza / Pharmacy …).
-   *  Vocabulary in app_settings.store_types. NULL = unassigned.
-   *  Rayhaan R7, May 28. */
-  store_type?: string | null;
-  /** Customer/outlet main phone (free text). Rayhaan R7, May 28. */
-  phone?: string | null;
-}
+// The customers row shape is now the zod-inferred `CustomerRow` (single
+// source of truth in lib/db/schemas.ts — used to validate reads). Kept
+// as the `DbRow` alias so rowToCustomer + the existing cast sites are
+// unchanged.
+type DbRow = CustomerRow;
 
 function rowToCustomer(row: DbRow): Customer {
   return {
@@ -100,7 +59,7 @@ export async function listCustomers(): Promise<Customer[]> {
     console.warn("[customers] list error:", error.message);
     return [];
   }
-  return (data as DbRow[]).map(rowToCustomer);
+  return parseRows(customerRowSchema, data, "customers.list").map(rowToCustomer);
 }
 
 export async function getCustomer(id: string): Promise<Customer | null> {
@@ -115,7 +74,8 @@ export async function getCustomer(id: string): Promise<Customer | null> {
     console.warn("[customers] get error:", error.message);
     return null;
   }
-  return data ? rowToCustomer(data as DbRow) : null;
+  const row = parseRow(customerRowSchema, data, "customers.get");
+  return row ? rowToCustomer(row) : null;
 }
 
 export interface NewCustomer {
