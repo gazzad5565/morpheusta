@@ -53,14 +53,13 @@ const SWATCHES = [
   "#1FA971",
   "#5B7DC2",
 ];
-// Legacy hardcoded fallback. The customer-region vocabulary is now
-// tenant-managed (app_settings.regions, edited at Settings →
-// Organisation → Customer regions). These four values still show up
-// as fallback options ONLY when the tenant hasn't populated their
-// own vocabulary yet — without that, the form would render an empty
-// dropdown which breaks the "save without making any change"
-// expectation for legacy customers carrying region="North" / etc.
-const LEGACY_REGIONS = ["North", "South", "East", "West"];
+// Customer region is a tenant-managed vocabulary (app_settings.regions,
+// edited at Settings → Site settings → Customer regions). The edit-form
+// dropdown sources ONLY from that vocab — no hardcoded fallback. A
+// legacy value already on the customer (e.g. "North") is preserved via
+// the current-value branch in the options builder so editing never
+// blanks it. (Jun 1: removed a North/South/East/West fallback that was
+// showing as static data when the vocab hadn't loaded — Gary report.)
 
 // Local deriveInitials removed — wraps shared helper from lib/format.ts.
 const deriveInitials = (name: string) => initialsFromNameOrEmail(name, "");
@@ -84,9 +83,10 @@ export default function EditCustomerPage() {
   const [region, setRegion] = useState<string>("");
   // Mariska G5a (May 28 later) — Customer region + Customer group
   // are tenant-managed vocabularies. Loaded from app_settings.regions
-  // / .groups. Empty array = vocab not populated yet; dropdown falls
-  // back to LEGACY_REGIONS for Region and shows the current value +
-  // an "Unassigned" option for Group.
+  // / .groups. Empty array = vocab not populated yet; the dropdowns
+  // then show only the customer's current value (if any) — never a
+  // hardcoded list — nudging the manager to define them in Site
+  // settings.
   const [customerGroup, setCustomerGroup] = useState<string>("");
   // Store type — third customer vocabulary (Rayhaan R7, May 28).
   const [storeType, setStoreType] = useState<string>("");
@@ -630,14 +630,16 @@ export default function EditCustomerPage() {
                 triggerIcon="pin"
                 clearable={false}
                 options={(() => {
-                  const base = regionVocab.length > 0 ? regionVocab : LEGACY_REGIONS;
-                  const set = new Set(base);
-                  // Preserve the current saved value even if it's
-                  // not in the active vocabulary.
+                  // Vocab-sourced ONLY (Site settings → Customer
+                  // regions) — same as Customer group / Store type
+                  // below. Preserve the customer's current saved value
+                  // if it's a legacy one not in the active vocab, so
+                  // editing never blanks it on save.
+                  const set = new Set(regionVocab);
                   if (region && !set.has(region)) {
-                    return [region, ...base].map((r) => ({ value: r, label: r }));
+                    return [region, ...regionVocab].map((r) => ({ value: r, label: r }));
                   }
-                  return base.map((r) => ({ value: r, label: r }));
+                  return regionVocab.map((r) => ({ value: r, label: r }));
                 })()}
               />
             </Field>
