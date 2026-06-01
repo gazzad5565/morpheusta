@@ -243,14 +243,14 @@ These are the next obvious chunks of work, roughly in order of impact:
 
 ### Architecture-review epics (deferred May 29 — see SESSIONS "Architecture review" entry)
 
-> **Greenlit by Gary (May 29) for an upcoming session — start with #14 (RLS) then #11 (zod): highest correctness/security upside. Each gets its own change + verification (and #14 needs a migration Gary runs + a test pass).**
+> **Progress (May 29, later): #14 DRAFTED, #11 STARTED.** #12 (monorepo) + #13 (caching) remain — both need deploy/build-config coordination, so still queued.
 
 The May 29 senior-eng review shipped the four safe refactors (#1–#4). These four were flagged as epics that each need their own change + verification — **not** rammed in the review pass:
 
-11. **zod at the store boundary.** ~50 `data as T` casts bypass validation; a renamed/dropped DB column surfaces as `undefined` silently (the class of bug behind the "North" fix). Add per-store row schemas, parse once in each `rowToX`. Needs a test pass against real data so it logs/handles drift rather than throwing on valid rows.
+11. **zod at the store boundary.** ~50 `data as T` casts bypass validation; a renamed/dropped DB column surfaces as `undefined` silently (the class of bug behind the "North" fix). Add per-store row schemas, parse once in each `rowToX`. Needs a test pass against real data so it logs/handles drift rather than throwing on valid rows. — **STARTED May 29 (`1`…):** zod added; `lib/db/validate.ts` (parseRows/parseRow — logs + degrades on drift, never throws on valid data) + `lib/db/schemas.ts` (customerRowSchema); the **customers store now validates its reads**. Remaining ~16 stores adopt the same schema-per-row pattern incrementally.
 12. **`packages/shared` monorepo.** `morpheus-admin` and `morpheus-mobile` copy-paste `format.ts` / `supabase.ts` / `auth.ts` and the `Customer` type already diverges between them (admin rich, mobile light). Extract a workspace package both import. **Changes BOTH Vercel projects' build config** — plan + deploy coordination required.
 13. **Client-side data-fetching → SWR/React Query.** All ~53 pages are `"use client"` + ad-hoc `useEffect` fetch (no cache, no dedup, waterfalls, refetch on every nav). Adopt a cache/query layer. Large (53-page migration + new dep).
-14. **RLS capability hardening.** `settings-store` comments flag "client-side enforcement only" for `canCreateCustomers` / manager capabilities — a motivated rep with their JWT could bypass the UI gate. Make the DB the real boundary (capability-aware policies). Security-critical: needs a migration Gary runs + a full test pass (a wrong policy locks users out).
+14. **RLS capability hardening.** `settings-store` comments flag "client-side enforcement only" for `canCreateCustomers` / manager capabilities — a motivated rep with their JWT could bypass the UI gate. Make the DB the real boundary (capability-aware policies). Security-critical: needs a migration Gary runs + a full test pass (a wrong policy locks users out). — **DRAFTED May 29:** `db/migrations/2026_05_29_rls_capability_hardening.sql` (two lenient-default SECURITY DEFINER helpers + tightened customer-insert / app_settings-write / shift-write policies; manager READ preserved; NULL-type users unaffected). In OPS pending — **Gary applies + works the in-file TEST CHECKLIST**; one-line lockout recovery.
 
 ---
 

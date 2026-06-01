@@ -353,6 +353,14 @@ so the next page can reuse it.
   sites. **And map nullable DB columns to nullable app types — never a
   fake default** (the May 29 `region: || "North"` bug is the cautionary
   tale: it minted a phantom region that polluted the filter dropdowns).
+- **`lib/db/validate.ts` + `lib/db/schemas.ts`** (May 29 review #11) —
+  validate Supabase reads with `parseRows(schema, data, tag)` /
+  `parseRow(...)` instead of a blind `data as T[]` cast. On schema drift
+  (a known column retyped/dropped) they **log loudly + degrade to the
+  raw rows** — never a new crash path on valid data; unknown columns are
+  stripped, not rejected. `customerRowSchema` is the first adopter; new
+  / edited stores should add a row schema here and parse rather than
+  cast.
 
 ### Content composers
 

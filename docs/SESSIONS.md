@@ -82,6 +82,26 @@ two need deploy/migration coordination — not safe to ram).
   only" gap (`settings-store` comments). Security-critical: needs a
   migration Gary runs + a full test pass.
 
+**Continued (later, May 29) — took the two Gary greenlit:**
+- **#8 RLS (ROADMAP #14) — DRAFTED.** Wrote
+  `db/migrations/2026_05_29_rls_capability_hardening.sql`: two
+  lenient-default SECURITY DEFINER helpers (`rep_can_create_customers()`,
+  `manager_can(text)`) that mirror `repTypeCan`/`managerTypeCan` (deny
+  only on an explicit `false`), then tightened the rep customer-INSERT
+  (`canCreateCustomers`), `app_settings` writes (`canManageSettings`),
+  and shift writes (`canScheduleShifts`) — splitting `shifts_manager_all`
+  so managers keep READ; rep self-policies untouched. NULL-type users
+  (incl. owner) unaffected. In **OPS pending** — Gary applies + works the
+  in-file TEST CHECKLIST; one-line lockout recovery. No app-code change
+  (stores already surface RLS errors; service-role /api routes bypass
+  RLS).
+- **#5 zod (ROADMAP #11) — STARTED.** Added zod + `lib/db/validate.ts`
+  (`parseRows`/`parseRow`: log loudly + degrade to raw on drift, so
+  validation never throws on valid data) + `lib/db/schemas.ts`
+  (`customerRowSchema`). The **customers store now validates its reads**
+  (and `DbRow` is the zod-inferred type). Remaining ~16 stores adopt the
+  same pattern incrementally. `next build` clean.
+
 ---
 
 ### Today's session — what shipped (May 29, 2026)
