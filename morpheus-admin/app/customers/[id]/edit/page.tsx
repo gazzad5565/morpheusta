@@ -616,31 +616,25 @@ export default function EditCustomerPage() {
           {tab === "location" && (
           <Card padding={20}>
             {/* Customer region — vocabulary lives in
-                app_settings.regions, edited at Settings →
-                Organisation → Customer regions. Falls back to the
-                legacy hardcoded list when the tenant hasn't
-                populated their own vocab yet. We always include the
-                CURRENT saved value as an option (even if it's not
-                in the vocab) so a legacy "North"/"South"/etc. row
-                doesn't get blank-out on save. May 28 (Mariska G5a). */}
+                app_settings.regions, edited at Settings → Site
+                settings → Customer regions. The dropdown LIST shows
+                ONLY that vocab — never a hardcoded list, never the
+                customer's own value (Gary, Jun 1: "inherit from site
+                settings only, everywhere — no static data"). A legacy
+                value already on the customer that isn't in the vocab
+                still DISPLAYS via triggerLabel (so it isn't hidden or
+                lost) but is NOT a pickable option. Same for group +
+                store type below. */}
             <Field label="Customer region">
               <Combobox
                 value={region}
                 onChange={(v) => setRegion(v ?? "")}
                 triggerIcon="pin"
                 clearable={false}
-                options={(() => {
-                  // Vocab-sourced ONLY (Site settings → Customer
-                  // regions) — same as Customer group / Store type
-                  // below. Preserve the customer's current saved value
-                  // if it's a legacy one not in the active vocab, so
-                  // editing never blanks it on save.
-                  const set = new Set(regionVocab);
-                  if (region && !set.has(region)) {
-                    return [region, ...regionVocab].map((r) => ({ value: r, label: r }));
-                  }
-                  return regionVocab.map((r) => ({ value: r, label: r }));
-                })()}
+                triggerLabel={
+                  region && !regionVocab.includes(region) ? region : undefined
+                }
+                options={regionVocab.map((r) => ({ value: r, label: r }))}
               />
             </Field>
 
@@ -654,16 +648,12 @@ export default function EditCustomerPage() {
                   onChange={(v) => setCustomerGroup(v ?? "")}
                   triggerIcon="customer"
                   clearable
-                  options={(() => {
-                    const set = new Set(groupVocab);
-                    if (customerGroup && !set.has(customerGroup)) {
-                      return [customerGroup, ...groupVocab].map((g) => ({
-                        value: g,
-                        label: g,
-                      }));
-                    }
-                    return groupVocab.map((g) => ({ value: g, label: g }));
-                  })()}
+                  triggerLabel={
+                    customerGroup && !groupVocab.includes(customerGroup)
+                      ? customerGroup
+                      : undefined
+                  }
+                  options={groupVocab.map((g) => ({ value: g, label: g }))}
                 />
               </Field>
             )}
@@ -677,16 +667,12 @@ export default function EditCustomerPage() {
                   onChange={(v) => setStoreType(v ?? "")}
                   triggerIcon="building"
                   clearable
-                  options={(() => {
-                    const set = new Set(storeTypeVocab);
-                    if (storeType && !set.has(storeType)) {
-                      return [storeType, ...storeTypeVocab].map((s) => ({
-                        value: s,
-                        label: s,
-                      }));
-                    }
-                    return storeTypeVocab.map((s) => ({ value: s, label: s }));
-                  })()}
+                  triggerLabel={
+                    storeType && !storeTypeVocab.includes(storeType)
+                      ? storeType
+                      : undefined
+                  }
+                  options={storeTypeVocab.map((s) => ({ value: s, label: s }))}
                 />
               </Field>
             )}
