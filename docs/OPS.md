@@ -22,6 +22,8 @@
 
 **Status — Gary ran the outstanding SQL on May 29; the batch below is now APPLIED in cloud.**
 - May 21 and earlier — all applied.
+- **⚠ PENDING — drafted May 29, NOT yet applied (needs Gary to run + TEST):**
+  - `db/migrations/2026_05_29_rls_capability_hardening.sql` (review epic #14 — makes the per-type capability flags real at the DB instead of client-side-only). Adds two SECURITY DEFINER helpers (`rep_can_create_customers()`, `manager_can(text)`) that mirror settings-store's **lenient default-allow** (deny ONLY on an explicit `false`), then tightens: rep customer INSERT → requires `canCreateCustomers`; `app_settings` writes → require `canManageSettings`; shift writes → require `canScheduleShifts` (manager SELECT preserved by splitting `shifts_manager_all`). **NULL-type users (incl. the owner account) are completely unaffected** — only deliberately-restricted types tighten. Idempotent. **Has a TEST CHECKLIST at the bottom of the file — work through it after applying; lockout recovery is one SQL line (set the type back to NULL).**
 - **Applied May 29 (Gary ran them — were pending through May 28):**
   - `db/migrations/2026_05_25_import_runs_and_geocode_status.sql` (Phase A — Import hub foundation: new `import_runs` table, `geocode_status` + `geocode_attempted_at` on customers + customer_sites with backfill, partial indexes for the cron work queue, `app_settings` seed for the two import defaults)
   - `db/migrations/2026_05_25_profiles_last_credentials_sent_at.sql` (Phase B — adds `profiles.last_credentials_sent_at timestamptz NULL` so the "Email this user" modal can show "Last sent: X ago")
